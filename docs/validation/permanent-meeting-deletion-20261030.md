@@ -1,5 +1,7 @@
 # Explicit permanent meeting deletion — 2026-10-30
 
+The behavior and limits below describe the combined implementation. Candidate and reference sections retain historical results and the draft, integration and review gates that applied to their named revisions; those statements do not describe the latest PR status. Current status: [PR37](https://github.com/Puma7/meeting-for-handy/pull/37) and [PR38](https://github.com/Puma7/meeting-for-handy/pull/38).
+
 A newly recorded native meeting, including a zero/two-second or failed meeting, can be explicitly removed from History or its detail view without first archiving it. A preview names exactly one meeting and counts its attributed files. The user must type the displayed confirmation word. This is irreversible, has no trash copy, and is separate from automatic retention. Automatic age, VIP and complete-archive rules remain unchanged. Manual confirmation can remove a pinned meeting.
 
 ## Scope and safeguards
@@ -14,7 +16,7 @@ Native and React state drop the selected inactive meeting's cached view/results/
 
 ## Explicit limits
 
-Imported legacy originals are read in place outside app-owned storage; this action does not delete those originals and is not offered on legacy rows. External exports, hardlink copies, clipboard, external backups, cloud/provider histories and OS/device forensic traces are outside this operation. App-managed transcript backups are included in removal. No overwrite/free-space wiping or forensic secure-erasure guarantee is made. No real user meeting was deleted during development. No capture, ASR algorithm, model endpoint or prompt was changed. PR37 model-residency coordination is a separate draft change; integration must release its retained meeting reservations if both changes are combined. This PR makes no claim of clearing a model server's memory/history.
+Imported legacy originals are read in place outside app-owned storage; this action does not delete those originals and is not offered on legacy rows. External exports, hardlink copies, clipboard, external backups, cloud/provider histories and OS/device forensic traces are outside this operation. App-managed transcript backups are included in removal. No overwrite/free-space wiping or forensic secure-erasure guarantee is made. No real user meeting was deleted during development. No capture, ASR algorithm, model endpoint or prompt was changed. PR37 model-residency coordination is integrated: after maintenance admission and explicit confirmation, erasure releases only the named meeting's inactive Live and Analysis anchors outside the app and coordinator locks. Other meetings' owners and in-flight clients retain their reservations and delay provider cleanup. This does not clear provider history or guarantee erasure of model-server memory.
 
 ## Validation
 

@@ -1,5 +1,7 @@
 # Local text model residency — 2026-10-30
 
+The behavior and provider boundaries below describe the combined implementation. Candidate and reference sections retain historical results and the draft, integration and review gates that applied to their named revisions; those statements do not describe the latest PR status. Current status: [PR37](https://github.com/Puma7/meeting-for-handy/pull/37) and [PR38](https://github.com/Puma7/meeting-for-handy/pull/38).
+
 Scope: HandyMeeting 1.0.7 development sources, based on `f2ccb8a8a268323da5ea0ad8ed1eb69102694da6`. This change does not publish or install a new application version.
 
 The current runtime contract is in Behavior and Provider boundaries below, with
