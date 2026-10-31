@@ -371,6 +371,12 @@ main {
 .analysis-discovery-error {
   display: block;
 }
+.pending-erasures {
+  display: block;
+}
+.pending-erasures .session-row {
+  flex-wrap: wrap;
+}
 .notice strong {
   font-weight: 600;
 }

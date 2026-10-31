@@ -42,19 +42,25 @@ export default function PendingErasures({
   if (!rows.length && !error) return null;
   return (
     <section
-      className="notice warning"
+      className="notice warning pending-erasures"
       aria-label={de ? "Unterbrochene Löschungen" : "Interrupted deletions"}
     >
       <h3>
-        {de
-          ? "Löschung noch nicht vollständig abgeschlossen"
-          : "Deletion is not yet complete"}
+        {rows.length > 0
+          ? de
+            ? "Löschung noch nicht vollständig abgeschlossen"
+            : "Deletion is not yet complete"
+          : de
+            ? "Unterbrochene Löschungen konnten nicht gelesen werden"
+            : "Interrupted deletions could not be read"}
       </h3>
-      <p>
-        {de
-          ? "Verbleibende Daten können erneut geprüft und nach Bestätigung entfernt werden."
-          : "Inspect remaining data and confirm again to finish removing it."}
-      </p>
+      {rows.length > 0 && (
+        <p>
+          {de
+            ? "Verbleibende Daten können erneut geprüft und nach Bestätigung entfernt werden."
+            : "Inspect remaining data and confirm again to finish removing it."}
+        </p>
+      )}
       {error && <p role="alert">{error}</p>}
       {rows.map((row) => (
         <div className="session-row" key={row.meetingId}>

@@ -795,6 +795,102 @@ it("starts focus on the safe control, traps keyboard focus and Escape never conf
   expect(props.api.eraseMeetingNow).not.toHaveBeenCalled();
 });
 
+it.each(["de", "en"] as const)(
+  "does not claim unfinished deletion when pending erasure listing fails (%s)",
+  async (locale) => {
+    const resume = vi.fn();
+    const erase = vi.fn();
+    const api = {
+      listPendingErasures: vi
+        .fn()
+        .mockRejectedValueOnce(new Error("Synthetic pending-list read failure"))
+        .mockResolvedValueOnce([]),
+      eraseMeetingNow: erase,
+    } as unknown as DesktopApi;
+    const props = { api, locale, onResume: resume };
+    const view = render(<PendingErasures {...props} revision={0} />);
+    expect((await screen.findByRole("alert")).textContent).toBe(
+      "Synthetic pending-list read failure",
+    );
+    expect(
+      screen.getByRole("heading", {
+        name:
+          locale === "de"
+            ? "Unterbrochene Löschungen konnten nicht gelesen werden"
+            : "Interrupted deletions could not be read",
+      }),
+    ).toBeTruthy();
+    expect(
+      screen.queryByText(
+        locale === "de"
+          ? "Löschung noch nicht vollständig abgeschlossen"
+          : "Deletion is not yet complete",
+      ),
+    ).toBeNull();
+    expect(
+      screen.queryByText(
+        locale === "de"
+          ? "Verbleibende Daten können erneut geprüft und nach Bestätigung entfernt werden."
+          : "Inspect remaining data and confirm again to finish removing it.",
+      ),
+    ).toBeNull();
+    expect(screen.queryByRole("button")).toBeNull();
+    expect(resume).not.toHaveBeenCalled();
+    expect(erase).not.toHaveBeenCalled();
+
+    view.rerender(<PendingErasures {...props} revision={1} />);
+    await waitFor(() => {
+      expect(api.listPendingErasures).toHaveBeenCalledTimes(2);
+      expect(screen.queryByRole("region")).toBeNull();
+    });
+  },
+);
+
+it.each(["de", "en"] as const)(
+  "keeps known unfinished work when pending erasure listing refresh fails (%s)",
+  async (locale) => {
+    const resume = vi.fn();
+    const api = {
+      listPendingErasures: vi
+        .fn()
+        .mockResolvedValueOnce([
+          { meetingId: meeting.id, confirmedAt: meeting.startedAt },
+        ])
+        .mockRejectedValueOnce(
+          new Error("Synthetic pending-list refresh failure"),
+        ),
+    } as unknown as DesktopApi;
+    const props = { api, locale, onResume: resume };
+    const view = render(<PendingErasures {...props} revision={0} />);
+    const action =
+      locale === "de" ? "Prüfen und fortsetzen" : "Inspect and continue";
+    await screen.findByRole("button", { name: action });
+    view.rerender(<PendingErasures {...props} revision={1} />);
+    expect((await screen.findByRole("alert")).textContent).toBe(
+      "Synthetic pending-list refresh failure",
+    );
+    expect(
+      screen.getByRole("heading", {
+        name:
+          locale === "de"
+            ? "Löschung noch nicht vollständig abgeschlossen"
+            : "Deletion is not yet complete",
+      }),
+    ).toBeTruthy();
+    expect(
+      screen.queryByText(
+        locale === "de"
+          ? "Unterbrochene Löschungen konnten nicht gelesen werden"
+          : "Interrupted deletions could not be read",
+      ),
+    ).toBeNull();
+    await userEvent.click(screen.getByRole("button", { name: action }));
+    expect(resume).toHaveBeenCalledWith(
+      expect.objectContaining({ id: meeting.id, status: "erasure-pending" }),
+    );
+  },
+);
+
 it("can resume an interrupted erasure even when the original meeting title is already gone", async () => {
   const resume = vi.fn();
   render(

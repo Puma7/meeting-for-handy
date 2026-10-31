@@ -849,3 +849,44 @@ items, the separate explicit task, all original measurements and private evidenc
 remain unchanged. Reference 04 was already correct. All runtime/test/UI/dependency
 and full approved public TEST_REPORT bytes are exact to prepared 19; no additional
 model, frontend or Rust run is claimed for this documentation-only correction.
+
+## Integration candidate 26: distinguish a read failure from unfinished erasure
+
+When History cannot read the interrupted-erasure list and no pending entry is
+known, the notice now reports that read failure without claiming an unfinished
+deletion or offering an inspect/continue action. A later successful empty read
+removes the notice. If a previously read pending entry exists and a refresh
+fails, its warning and inspect action remain available; continuation still
+requires the existing fresh native preview and confirmation.
+
+Four targeted component cases exercise German and English error-only states,
+empty retry, and preservation of a known entry after a failed refresh. The two
+error-only cases failed against the former component, while both known-entry
+controls passed. All four pass after correction. An initial managed temporary
+file-rename failure ran no tests and is not counted as a reproduced product
+failure. The final full frontend run passes 276 tests, TypeScript and production
+build; the changed component, tests and styles pass the existing formatter.
+
+Actual browser rendering with the production component and stylesheet exposed
+a second issue: the shared horizontal notice layout squeezed the heading,
+details and pending row beside one another. A scoped block layout and wrapping
+pending rows now keep them readable without changing other notices. A browser
+geometry check failed before that style correction and passes afterward.
+
+Synthetic browser checks use existing Playwright 1.57.0 and installed Microsoft
+Edge 156.0.4314.50 at 1280 by 900 and 390 by 844 pixels. Both languages, empty
+retry, retained known-entry state after a failed refresh and its inspect callback
+pass. Page identity, nonblank content, absent framework overlay, zero relevant
+console errors/warnings, stacked notice geometry and no horizontal overflow are
+checked; screenshots were inspected. The callback receives only a synthetic
+identity. This is component validation without native IPC, actual erasure, user
+meetings, models, independent installed-app processes or screenreader speech.
+
+The npm tool matches the existing workflow's pinned 12.2.1 integrity; package
+and lockfile bytes are unchanged. Backend, model transport, reservation logic,
+native tests, dependency locks and full approved public TEST_REPORT bytes remain
+exact to the previous candidate. Native workspace checks and the actual selected
+LM Studio reference 04 are retained with their original source identities; this
+UI correction is not a new native or model-reference run. Fresh verify.ps1 is
+required before publication, followed by fresh final-head reviews and CI. No
+deadline, protection, privacy boundary or documentation threshold is reduced.
