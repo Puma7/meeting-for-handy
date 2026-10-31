@@ -91,3 +91,7 @@ Die Companion-Richtung entstand aus [Handy Discussion #1923](https://github.com/
 **Alter C#-Prototyp:** `src/`, `verify.ps1`, `build.ps1`, `setup-native.ps1`, `global.json`, `NuGet.config`, `System.Numerics.Tensors.*`, `licenses/nuget/`, `licenses/nuget-packages.json`, `licenses/Avalonia-MIT.txt` und `licenses/Inter-OFL.txt` gehören zu den früheren C#-Prototypen (0.4/0.5). Die CI prüft sie noch mit, sie werden aber nicht mehr ausgeliefert. **Mit Version 2.0 werden sie entfernt**; danach enthält das Repository nur noch das Rust-Projekt.
 
 MIT-Lizenz. Dank an Handy, transcribe.cpp, Tauri und die verwendeten Bibliotheken; ihre Hinweise stehen in [THIRD_PARTY_NOTICES.txt](THIRD_PARTY_NOTICES.txt) und `licenses/`.
+
+## Ein Meeting dauerhaft entfernen
+
+Wähle in der **Historie** die Papierkorb-Aktion eines nativen Meetings oder **Meeting löschen** in seiner Detailansicht. Beende zuerst laufende Arbeiten. Prüfe das benannte Meeting und tippe das angezeigte Bestätigungswort ein. Die App entfernt dann dessen appverwaltete Audiodateien, Transkripte einschließlich appverwalteter Sicherungskopien, Auswertungen und zugeordnete Kopien ohne Papierkorbkopie. Nach einer unterbrochenen Löschung sind eine neue Vorschau und Bestätigung in der Historie erforderlich. Externe Exporte, die Zwischenablage, externe Backups und importierte externe Originale bleiben außerhalb dieser Aktion; eine physische Löschung vom Datenträger wird nicht garantiert. Siehe [Umfang und Prüfnachweise](docs/validation/permanent-meeting-deletion-20261030.md).
