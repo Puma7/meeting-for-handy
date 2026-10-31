@@ -739,3 +739,47 @@ final release is separately proved by stateful protocol fixtures and the actual
 60-second renewal plus 65-second post-release silence, with virtual natural
 expiry at the unchanged 300-second bound. Current final-head CI and two clean
 rounds per reviewer are still required before merge.
+
+
+## Integration candidate15: real paired-port collision in test fixtures
+
+The remaining candidate14 review finding concerns fixture setup, not a proved
+production residency defect. A real independently held IPv6 port reproduced
+Windows AddrInUse 10048 in the old one-shot paired bind. The fixture now retries
+only AddrInUse with fresh ephemeral IPv4/IPv6 pairs, at most sixteen attempts.
+The new regression proves a different real connected pair is obtained while the
+original occupied listener remains held. All four native-origin/expiry
+regressions still execute and pass with the same refusal and positive controls.
+
+Actual IPv6 loopback remains a mandatory environmental precondition for these
+native authority regressions. Unsupported IPv6, permissions errors and exhausted
+retries still fail the check. No return-as-success skip is added, and no missing
+IPv6 coverage is called passed. The older optional generic transport discovery
+checks retain their existing convention; they are not substituted for the new
+native authority proof. No network setting, product source, dependency, deadline
+or protection configuration changes.
+
+Only this integration-test fixture and sanitized validation notes change from
+candidate14. Runtime, selector/coordinator/core, prompts, UI and dependency bytes
+remain exactly those of the genuine selected-provider reference04 above. Its
+actual fingerprint and measurements remain assigned to the original run; they
+are not relabeled as a new model run on candidate15. Fresh full local checks and
+current final-head review/CI results are recorded separately.
+
+
+Fresh candidate15 checks pass: 390 Rust workspace/all-target tests, including
+all 30 provider fixtures, with two existing special entry points regularly
+ignored. Strict locked/offline warnings-as-errors Clippy, Rust formatting and
+verify.ps1 pass (47 PCM, 35 notes, 28 template, 8 agent and monitor checks).
+The prepared deletion integration separately passes 433 native tests with the
+same two regular ignores, strict Clippy, format and verify. No new frontend or
+model execution is claimed: all runtime/UI/dependency/report bytes are exact to
+their previously executed proofs. Only the paired-port fixture and sanitized
+validation notes differ from the actual reference04 source inventories.
+
+Parallel-load statements in the model-reference sections describe test-owned
+activity: no capture, ASR or model download was started by these references.
+Existing external applications were preserved and not exhaustively profiled;
+these observations establish no exclusive or uncontended performance result.
+Separate unrelated Rust processes observed later were left untouched. Their
+activity is not attributed to the model-server process measurements.

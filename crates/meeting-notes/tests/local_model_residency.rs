@@ -341,8 +341,8 @@ fn a_new_ollama_alias_after_release_keeps_its_own_finite_reservation() {
 fn review_native_localhost_management_rejects_an_ipv6_only_listener() {
     let mut outcomes = Vec::new();
     for provider in [LocalProvider::Ollama, LocalProvider::LmStudio] {
-        let listener = TcpListener::bind("[::1]:0")
-            .expect("IPv6 loopback required by this binding regression");
+        let (ipv4, listener) = native_loopback_pair(TcpListener::bind("127.0.0.1:0").unwrap());
+        drop(ipv4); // The IPv4 side is deliberately absent before testing the IPv6-only peer.
         let server = Server::on(listener, move |p, b| match provider {
             LocalProvider::Ollama => ollama(p, b),
             LocalProvider::LmStudio => lm(p, b),
@@ -379,15 +379,12 @@ fn review_native_localhost_management_rejects_an_ipv6_only_listener() {
 fn review_native_localhost_inference_and_cleanup_keep_the_configured_origin() {
     let mut outcomes = Vec::new();
     for provider in [LocalProvider::Ollama, LocalProvider::LmStudio] {
-        let primary = TcpListener::bind("127.0.0.1:0").unwrap();
-        let port = primary.local_addr().unwrap().port();
-        let alternate = Server::on(
-            TcpListener::bind((std::net::Ipv6Addr::LOCALHOST, port)).unwrap(),
-            move |p, b| match provider {
-                LocalProvider::Ollama => ollama(p, b),
-                LocalProvider::LmStudio => lm(p, b),
-            },
-        );
+        let (primary, alternate_listener) =
+            native_loopback_pair(TcpListener::bind("127.0.0.1:0").unwrap());
+        let alternate = Server::on(alternate_listener, move |p, b| match provider {
+            LocalProvider::Ollama => ollama(p, b),
+            LocalProvider::LmStudio => lm(p, b),
+        });
         let primary = Server::on(primary, move |p, b| match provider {
             LocalProvider::Ollama => ollama(p, b),
             LocalProvider::LmStudio => lm(p, b),
@@ -423,16 +420,14 @@ fn review_native_localhost_inference_and_cleanup_keep_the_configured_origin() {
 fn review_native_localhost_load_does_not_switch_after_inventory() {
     let mut outcomes = Vec::new();
     for provider in [LocalProvider::Ollama, LocalProvider::LmStudio] {
-        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let (listener, alternate_listener) =
+            native_loopback_pair(TcpListener::bind("127.0.0.1:0").unwrap());
         let port = listener.local_addr().unwrap().port();
         listener.set_nonblocking(true).unwrap();
-        let alternate = Server::on(
-            TcpListener::bind((std::net::Ipv6Addr::LOCALHOST, port)).unwrap(),
-            move |p, b| match provider {
-                LocalProvider::Ollama => ollama(p, b),
-                LocalProvider::LmStudio => lm(p, b),
-            },
-        );
+        let alternate = Server::on(alternate_listener, move |p, b| match provider {
+            LocalProvider::Ollama => ollama(p, b),
+            LocalProvider::LmStudio => lm(p, b),
+        });
         let inventory = thread::spawn(move || {
             let deadline = std::time::Instant::now() + Duration::from_secs(3);
             loop {
@@ -1193,6 +1188,53 @@ fn ollama_final_release_preserves_later_external_model_policy() {
             .all(|&(_, external, after, requests)| external == after && requests == 0),
         "Final release changed independently updated shared-server policy: {outcomes:?}"
     );
+}
+
+/// Retries real same-port collisions while keeping IPv6 a mandatory precondition:
+/// unsupported loopback, permissions and exhausted retries still fail this check.
+fn native_loopback_pair(first: TcpListener) -> (TcpListener, TcpListener) {
+    let mut first = Some(first);
+    for attempt in 0..16 {
+        let ipv4 = first.take().unwrap_or_else(|| {
+            TcpListener::bind("127.0.0.1:0")
+                .expect("IPv4 loopback required by native-origin regression")
+        });
+        let port = ipv4.local_addr().unwrap().port();
+        match TcpListener::bind((std::net::Ipv6Addr::LOCALHOST, port)) {
+            Ok(ipv6) => return (ipv4, ipv6),
+            Err(error) if error.kind() == std::io::ErrorKind::AddrInUse && attempt < 15 => continue,
+            Err(error) => panic!("IPv6 loopback required; paired fixture bind failed: {error}"),
+        }
+    }
+    unreachable!("Every bounded bind attempt returns a real pair or fails")
+}
+
+/// An independently occupied IPv6 port must not make a fresh paired fixture fail.
+#[test]
+fn review_ipv4_ipv6_pair_recovers_from_a_real_occupied_port() {
+    let first = TcpListener::bind("127.0.0.1:0").unwrap();
+    let old_port = first.local_addr().unwrap().port();
+    let occupied = TcpListener::bind((std::net::Ipv6Addr::LOCALHOST, old_port))
+        .expect("IPv6 loopback required by the real occupied-port regression");
+    let (ipv4, ipv6) = native_loopback_pair(first);
+    let port = ipv4.local_addr().unwrap().port();
+    assert_ne!(
+        port, old_port,
+        "The occupied IPv6 listener must not be reused"
+    );
+    assert_eq!(ipv6.local_addr().unwrap().port(), port);
+    let four = std::net::TcpStream::connect(ipv4.local_addr().unwrap()).unwrap();
+    let six = std::net::TcpStream::connect(ipv6.local_addr().unwrap()).unwrap();
+    assert!(ipv4.accept().is_ok());
+    assert!(ipv6.accept().is_ok());
+    assert_eq!(occupied.local_addr().unwrap().port(), old_port);
+    assert_eq!(
+        TcpListener::bind((std::net::Ipv6Addr::LOCALHOST, old_port))
+            .unwrap_err()
+            .kind(),
+        std::io::ErrorKind::AddrInUse
+    );
+    drop((four, six));
 }
 
 /// Both alias orders retain bounded own TTLs and preserve initial finite/indefinite foreign policy.
