@@ -61,7 +61,7 @@ clean final-head review. The PR was returned to draft while these were corrected
 Function-level erasure capability, inventory and synthetic-fixture intent was
 also documented. The documentation coverage requirement remains 80%; only a
 fresh provider result can establish the new coverage and clean-review status.
-The preceding published candidate02 passed all 234 UI tests plus TypeScript/production build.
+The preceding published candidate 02 passed all 234 UI tests plus TypeScript/production build.
 Its targeted core suite passed 15 erasure cases; native annotation-fence and transition
 regressions passed. That source passed 367 full workspace/all-target Rust tests
 (two existing special entry points ignored), all 234 frontend tests,
@@ -106,7 +106,7 @@ bytes intact; both succeed after release. This removes the competing lock probe
 and scheduler-dependent two-second fixture deadline. It remains synthetic
 two-Service/OS-lock coverage, without a separate-process runtime claim.
 
-The preceding candidate03 passed 371 Rust workspace/all-target tests (the two
+The preceding candidate 03 passed 371 Rust workspace/all-target tests (the two
 existing explicit special entry points normally ignored), 236 frontend tests,
 TypeScript/production build, Rust/frontend formatting and Clippy with warnings
 as errors. Eighteen synthetic core erasure tests passed. A sequential verify.ps1
@@ -117,7 +117,7 @@ cancellation. Neither viewport overflowed. No real meeting or native application
 was erased; these are not hardware, separate-process or endurance results.
 
 
-## Candidate04 review corrections
+## Candidate 04 review corrections
 
 Retention preview construction and the atomic publication of its content-bearing
 plan now share erasure's process-shared archive lease. A delayed cooperating app
@@ -696,14 +696,14 @@ claim follows. All existing deletion scope and partial-failure boundaries remain
 Fresh current CI and two clean rounds per reviewer are required before merge.
 
 
-The later candidate11 model architecture review exposed a shared Ollama policy
+The later candidate 11 model architecture review exposed a shared Ollama policy
 overwrite on final release. The combined source now carries the conservative
 correction: confirmed erasure detaches only its own inactive model anchors;
 Ollama stops our renewal without native unload/cached-TTL rewrite and may remain
 warm until its existing finite server grace expires. LM Studio still releases
 only the exact acknowledged own instance after other clients release. This does
 not add provider-history, forensic-memory or physical erasure promises. Earlier
-reference runs and prepared candidate15 retain their actual historical bytes;
+reference runs and prepared candidate 15 retain their actual historical bytes;
 they are not final evidence for this later source. Fresh validation follows.
 
 The conservative-release combined source passes all 428 Rust workspace/all-target
@@ -712,10 +712,10 @@ fixtures and the real 60-second renewal plus 65-second no-renewal interval. Rust
 format, Clippy with warnings denied and required verification (47 PCM, 35 notes,
 28 templates, eight agents and monitor checks) pass. The UI remains byte-identical
 to the separate 272-test/TypeScript/build proof. A new actual selected-provider
-reference03 is required; references01/02 are retained as historical evidence.
+reference 03 is required; references 01/02 are retained as historical evidence.
 
 
-The fresh selected-provider reference03 after the conservative Ollama correction
+The fresh selected-provider reference 03 after the conservative Ollama correction
 passes all preregistered real checks through the actual production selector,
 coordinator and core modules. The existing google/gemma-4-e4b Q4_K_M model is
 used with LM Studio 0.4.26+4 / CLI dcefd5a, 8192 context and
@@ -762,7 +762,7 @@ expiry at the unchanged 300-second bound. Current final-head CI and two clean
 rounds per reviewer are still required before merge.
 
 
-## Combined integration candidate18: native origin and expiry refusal
+## Combined integration candidate 18: native origin and expiry refusal
 
 This prepared source inherits the concrete native-origin and unreadable Ollama
 expiry corrections described in the shared local-model validation note. All
@@ -772,11 +772,11 @@ before/after regressions. Locked/offline warnings-as-errors Clippy, Rust format
 and verify.ps1 pass. All frontend files are unchanged from the existing 272-test
 TypeScript/build/format integration proof; no new frontend run is claimed.
 The full approved public TEST_REPORT.md remains byte-identical. A fresh real
-selected-provider reference04 follows; current final-head CI and two clean
+selected-provider reference 04 follows; current final-head CI and two clean
 review rounds remain required before this combined source can merge.
 
 
-The fresh selected-provider reference04 after the concrete-origin and unreadable-expiry corrections
+The fresh selected-provider reference 04 after the concrete-origin and unreadable-expiry corrections
 passes all preregistered real checks through the actual production selector,
 coordinator and core modules. The existing google/gemma-4-e4b Q4_K_M model is
 used with LM Studio 0.4.26+4 / CLI dcefd5a, 8192 context and
@@ -824,26 +824,26 @@ expiry at the unchanged 300-second bound. Current final-head CI and two clean
 rounds per reviewer are still required before merge.
 
 
-Prepared integration candidate19 inherits the bounded paired-port test-fixture
+Prepared integration candidate 19 inherits the bounded paired-port test-fixture
 correction described in the shared model note. Actual IPv6 native-origin
 coverage remains mandatory; no skip, runtime, UI, dependency or protection change
-is introduced. The real selected-provider reference04 retains its original
+is introduced. The real selected-provider reference 04 retains its original
 source fingerprint; all runtime bytes are identical and only the fixture plus
 sanitized notes differ. Fresh final native checks are recorded separately.
 
 
-The fresh candidate19 local checks pass all 433 Rust workspace/all-target tests,
+The fresh candidate 19 local checks pass all 433 Rust workspace/all-target tests,
 including 30 provider fixtures, with two existing special entry points regularly
 ignored, plus strict locked/offline Clippy, Rust format and verify.ps1. The
 existing 272-test frontend/TypeScript/build proof retains identical UI bytes.
 No new model run is claimed: all runtime modules remain exact to actual
-reference04; only test-fixture and sanitized validation-note bytes differ.
+reference 04; only test-fixture and sanitized validation-note bytes differ.
 
 
-Integration candidate20 corrects only the two sanitized validation notes: original
-reference01-03 overview JSON results do persist ownerOrDueOutsideTasks: 1, while
+Integration candidate 20 corrects only the two sanitized validation notes: original
+overview JSON results from references 01–03 do persist ownerOrDueOutsideTasks: 1, while
 the separate diagnostic exposes only the rejected count. Five accepted overview
 items, the separate explicit task, all original measurements and private evidence
-remain unchanged. Reference04 was already correct. All runtime/test/UI/dependency
-and full approved public TEST_REPORT bytes are exact to prepared19; no additional
+remain unchanged. Reference 04 was already correct. All runtime/test/UI/dependency
+and full approved public TEST_REPORT bytes are exact to prepared 19; no additional
 model, frontend or Rust run is claimed for this documentation-only correction.
