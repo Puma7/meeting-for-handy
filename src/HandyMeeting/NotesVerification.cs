@@ -189,6 +189,7 @@ public static class NotesVerification
         catch (InvalidOperationException error) when (error.Message.Contains("HTTP 302")) { }
         await serving; Require(!target.Pending(), "Der lokale Client ist der Weiterleitung gefolgt.");
     }
+    /// <summary>Resume once after the owned crash child and its exclusive fixture lease have ended; retain confirmed bytes.</summary>
     private static async Task CheckProcessCrashAsync(string root)
     {
         Directory.CreateDirectory(root);
@@ -200,6 +201,10 @@ public static class NotesVerification
         while (!File.Exists(Path.Combine(root, "notes-crash-ready.json")))
         { Require(!child.HasExited && clock.Elapsed.TotalSeconds < 30, "Testprozess erzeugte keinen bestätigten Arbeitsstand."); await Task.Delay(50); }
         child.Kill(true); await child.WaitForExitAsync();
+        Require(child.HasExited, "Owned notes crash fixture must exit before testing lease release");
+        var leaseWait = Stopwatch.StartNew();
+        await TemplateVerification.WaitForReleasedTestLeaseAsync(Path.Combine(root, "notes", "processing.lock"), TimeSpan.FromSeconds(5));
+        JsonData.Save(Path.Combine(root, "lease-release.json"), new { OwnChildExited = child.HasExited, ChildId = child.Id, WaitMilliseconds = leaseWait.Elapsed.TotalMilliseconds, DeadlineMilliseconds = 5000, LockDeleted = false });
         var run = MeetingNotesService.Runs(root).Single(); var path = Path.Combine(root, "notes", run.Id, "map-00000.json"); var prefix = File.ReadAllBytes(path);
         var resumed = await MeetingNotesService.GenerateAsync(root, Fixture(6, true), Local, false, run.Id, null, CancellationToken.None, new ModelHandler());
         Require(resumed.Run.Status == "complete" && prefix.SequenceEqual(File.ReadAllBytes(path)), "Nach Prozessabbruch fehlt ein bereits bestätigter Auswertungsabschnitt.");

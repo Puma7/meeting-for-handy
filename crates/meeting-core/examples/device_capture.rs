@@ -223,7 +223,10 @@ fn record(root: &Path, seconds: u64) -> meeting_core::Result<()> {
     };
     let system_ms = samples("system") * 1000 / 16000;
     let microphone_ms = samples("microphone") * 1000 / 16000;
+    let portable_startup = capture.portable_startup_timing()?;
     let result = serde_json::json!({"version":env!("CARGO_PKG_VERSION"),"realHardware":true,"speechRecognition":false,"sessionId":data.id,"elapsedMs":elapsed_ms,"systemMs":system_ms,"microphoneMs":microphone_ms,"differenceMs":system_ms.abs_diff(microphone_ms),"trackDifferenceWithinLimit":system_ms.abs_diff(microphone_ms)<=allowed_track_difference_ms,"captureIncomplete":data.capture_incomplete,"warnings":data.warnings,"limits":"Audio-only live-device diagnostic of the actual requested duration; no ASR, full-disk or general reliability claim. Recovery is a separate explicit action."});
+    let mut result = result;
+    result["portableStartup"] = serde_json::to_value(portable_startup)?;
     create_json(&root.join("result.json"), &result)?;
     println!("{}", serde_json::to_string_pretty(&result)?);
     Ok(())

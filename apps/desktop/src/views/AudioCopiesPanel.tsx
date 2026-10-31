@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { errorMessage } from "../api";
 import type {
   AudioCopy,
@@ -16,11 +17,14 @@ export default function AudioCopiesPanel({
   locale,
   models,
   job,
+  statusContainer,
 }: {
   api: DesktopApi;
   locale: Locale;
   models: HandyModel[];
   job: LibraryProgress | null;
+  /** Uses the same external maintenance outlet as archive operations. */
+  statusContainer?: HTMLElement | null;
 }) {
   const de = locale === "de";
   const [copies, setCopies] = useState<AudioCopy[]>([]),
@@ -86,7 +90,12 @@ export default function AudioCopiesPanel({
           ? "Dafür wird ein neues Meeting mit eigener Modellfassung angelegt. Originaltexte und frühere Auswertungen bleiben erhalten. Bei archivierten ganzen Meetings zuerst die Sitzung wiederherstellen. Opus ist verlustbehaftet und kann Erkennungsfehler verursachen."
           : "This creates a new meeting with its own model snapshot. Original transcripts and earlier analyses are retained. Restore a whole archived meeting before using its copies. Opus is lossy and may affect recognition."}
       </p>
-      {error && <p role="alert">{error}</p>}
+      {error &&
+        (statusContainer ? (
+          createPortal(<p role="alert">{error}</p>, statusContainer)
+        ) : (
+          <p role="alert">{error}</p>
+        ))}
       <button
         className="text-button"
         disabled={busy || running}

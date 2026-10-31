@@ -2344,26 +2344,29 @@ export default function App({ api = desktopApi }: { api?: DesktopApi }) {
           <SettingsView
             textModelSettings={textModelSettings}
             speakerModelSettings={
-              api.checkSpeakerModel && (
-                <SpeakerExperiments
-                  setupOnly
-                  embedded
-                  api={api}
-                  locale={locale}
-                  models={app?.handy?.models ?? []}
-                  recording={
-                    recording || catchingUp || Boolean(app?.transitioning)
-                  }
-                  checkedModels={speakerChecks}
-                  selectedModelId={speakerModelId}
-                  onSelectedModelChange={setSpeakerModelId}
-                  onModelChecked={onSpeakerModelChecked}
-                  onCheckingChange={onSpeakerCheckingChange}
-                  checkingBlocked={
-                    speakerChecking || notesBusy || busy || refreshingHandy
-                  }
-                />
-              )
+              api.checkSpeakerModel
+                ? (statusContainer) => (
+                    <SpeakerExperiments
+                      setupOnly
+                      embedded
+                      statusContainer={statusContainer}
+                      api={api}
+                      locale={locale}
+                      models={app?.handy?.models ?? []}
+                      recording={
+                        recording || catchingUp || Boolean(app?.transitioning)
+                      }
+                      checkedModels={speakerChecks}
+                      selectedModelId={speakerModelId}
+                      onSelectedModelChange={setSpeakerModelId}
+                      onModelChecked={onSpeakerModelChecked}
+                      onCheckingChange={onSpeakerCheckingChange}
+                      checkingBlocked={
+                        speakerChecking || notesBusy || busy || refreshingHandy
+                      }
+                    />
+                  )
+                : undefined
             }
             api={api}
             app={app}
@@ -2476,6 +2479,7 @@ export default function App({ api = desktopApi }: { api?: DesktopApi }) {
             meetingLoading={notesMeetingLoading}
             selectMeeting={(id) => void selectNotesMeeting(id)}
             modelReady={notesModelReady}
+            modelDiscoveryError={localTextModels.error}
             libraryInvalid={!templateStore.ready}
             libraryPending={templateStore.pending}
             libraryError={templateStore.error ?? templateStore.migrationError}
@@ -2501,6 +2505,9 @@ export default function App({ api = desktopApi }: { api?: DesktopApi }) {
             recording={recording}
             busy={busy || notesMeetingLoading}
             beginNotes={beginNotes}
+            showStart={Boolean(
+              (notesJob.progress || notesJob.feedback) && !notesBusy,
+            )}
             result={result}
             resultSection={resultSection}
             selectedStep={selectedStep}

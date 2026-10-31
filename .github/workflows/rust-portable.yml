@@ -79,7 +79,7 @@ jobs:
         run: |
           set -euo pipefail
           sudo apt-get update
-          sudo apt-get install -y build-essential pkg-config libwebkit2gtk-4.1-dev libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev libvulkan1 pulseaudio-utils dbus gnome-keyring pulseaudio xvfb x11-utils
+          sudo apt-get install -y build-essential pkg-config libwebkit2gtk-4.1-dev libgtk-layer-shell0 libopenblas0 libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev libvulkan1 pulseaudio-utils dbus gnome-keyring pulseaudio xvfb x11-utils espeak-ng
       - name: Install pinned Rust tooling
         run: |
           set -euo pipefail
@@ -117,6 +117,7 @@ jobs:
           python3 -m unittest discover -s scripts -p test_rust_portable.py
           python3 -m unittest discover -s scripts -p test_native_download.py
           python3 -m unittest discover -s scripts -p test_worker_memory.py
+          python3 -m unittest discover -s scripts -p test_portable_asr.py
           bash -n scripts/package-rust-portable.sh
           bash -n scripts/check-native-credentials.sh
           bash -n scripts/check-linux-virtual-audio.sh
@@ -145,12 +146,41 @@ jobs:
           .build/rust-target/${{ matrix.target }}/release/HandyMeeting --release-checks .build/portable-release-checks
           node scripts/rust-artifacts.mjs source-fingerprint > .build/portable-source-after.json
           python3 -c 'import json; assert json.load(open(".build/portable-source-before.json"))==json.load(open(".build/portable-source-after.json")), "Source changed during portable checks"'
+      - name: Transcribe generated speakers with pinned real Handy, then restart and reopen
+        # Independent total CI budget. Per-operation deadlines are upper bounds,
+        # not additive time allowances; an overly slow sequence must fail closed.
+        timeout-minutes: 12
+        run: |
+          set -euo pipefail
+          app='.build/rust-target/${{ matrix.target }}/release/HandyMeeting'
+          if [[ "$RUNNER_OS" = Linux ]]; then
+            xvfb-run -a -s '-screen 0 1280x900x24' dbus-run-session -- python3 scripts/check-portable-asr.py '${{ matrix.rid }}' "$app" "$TRANSCRIBE_DIR/lib" .build/portable-asr
+          else
+            python3 scripts/check-portable-asr.py '${{ matrix.rid }}' "$app" "$TRANSCRIBE_DIR/lib" .build/portable-asr
+          fi
+          node scripts/rust-artifacts.mjs source-fingerprint > .build/portable-source-after-asr.json
+          python3 -c 'import json; assert json.load(open(".build/portable-source-before.json"))==json.load(open(".build/portable-source-after-asr.json")), "Source changed during ASR check"'
+      - name: Keep only the explicit sanitized ASR verdict
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: rust-portable-asr-${{ matrix.rid }}
+          retention-days: 14
+          path: .build/portable-asr/checks.json
+          if-no-files-found: error
       - name: Check real pactl listing and parec two-track capture with private virtual PulseAudio devices
         if: runner.os == 'Linux'
         run: |
           set -euo pipefail
           cargo +1.91.1 build --locked --target '${{ matrix.target }}' -p meeting-core --example device_capture
           bash scripts/check-linux-virtual-audio.sh '.build/rust-target/${{ matrix.target }}/debug/examples/device_capture' .build/linux-virtual-audio
+      - name: Keep the virtual-audio verdict including startup-gap limits
+        if: runner.os == 'Linux'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: rust-linux-virtual-audio-verdict
+          retention-days: 14
+          path: .build/linux-virtual-audio/checks.json
+          if-no-files-found: error
       - name: Launch the exact release GUI briefly and require a window and clean stop
         run: |
           set -euo pipefail
@@ -204,7 +234,8 @@ jobs:
           include-hidden-files: true
           retention-days: 14
           path: .build/rust-portable-proofs/${{ matrix.rid }}/*.json
-# No physical microphone/system capture, model download, cloud call, two-hour test,
+# No physical microphone/system capture, cloud call, two-hour test,
 # Developer ID, notarization, or public release is claimed by this workflow. The
 # Linux PulseAudio check uses a private server with virtual null-sink devices only;
-# the GUI smoke check proves launch and a window, not rendering or usability.
+# pinned public model downloads stay in the ASR test's private cache. Generated
+# speech tests real CPU recognition; the GUI check proves launch/window only.

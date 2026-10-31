@@ -132,6 +132,17 @@ fn start_confirmed_erasure(
             owned.notes_jobs.forget(&meeting_id)?;
             owned.speaker_jobs.forget(&meeting_id)?;
             owned.library_jobs.invalidate_finished();
+            // Admission has excluded cooperating writers. Detach only this meeting's
+            // anchors; drop them after all app/map locks end. Other owners and any
+            // in-flight clients keep their leases and delay provider cleanup normally.
+            let release_live = owned
+                .model_sessions
+                .detach_owner(&crate::model_sessions::Owner::Live(meeting_id.clone()));
+            let release_analysis = owned
+                .model_sessions
+                .detach_owner(&crate::model_sessions::Owner::Analysis(meeting_id.clone()));
+            release_live();
+            release_analysis();
             meeting_core::archive::erase_meeting(
                 &owned.root,
                 &meeting_id,
@@ -155,6 +166,134 @@ pub(crate) async fn list_pending_erasures(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Exercise retained coordinator anchors through the real confirmed worker.
+    /// The route is non-listening: no model is loaded and no native unload is claimed.
+    fn assert_erasure_releases_model_owners(change_after_preview: bool) {
+        use crate::model_sessions::Owner;
+        use meeting_notes::{residency::LocalProvider, Connection};
+        let root = std::env::temp_dir().join(format!(
+            "handymeeting-erasure-model-anchors-{}",
+            meeting_notes::new_job_id()
+        ));
+        let store = meeting_core::SessionStore::create(
+            &root.join("sessions"),
+            "Synthetic retained model owner",
+            "m",
+            "s",
+            None,
+        )
+        .unwrap();
+        let meeting = store.snapshot().unwrap().id;
+        store.set_status("complete").unwrap();
+        drop(store);
+        let other = meeting_core::SessionStore::create(
+            &root.join("sessions"),
+            "Synthetic other meeting",
+            "m",
+            "s",
+            None,
+        )
+        .unwrap();
+        let other_id = other.snapshot().unwrap().id;
+        other.set_status("complete").unwrap();
+        drop(other);
+        let service = Arc::new(Service::new(root.clone()).unwrap());
+        let connection = Connection {
+            endpoint: "http://127.0.0.1:9/v1/".into(),
+            model: "synthetic-shared-model".into(),
+            mode: "local".into(),
+            cloud_consent: false,
+            api_key: String::new(),
+        };
+        let reserve = |owner| {
+            service
+                .model_sessions
+                .reserve(owner, &connection, Some(LocalProvider::Ollama))
+                .unwrap()
+                .unwrap()
+        };
+        let live = reserve(Owner::Live(meeting.clone()));
+        let analysis = reserve(Owner::Analysis(meeting.clone()));
+        let other_live = reserve(Owner::Live(other_id.clone()));
+        let other_analysis = reserve(Owner::Analysis(other_id.clone()));
+        let in_flight = analysis.lease().unwrap();
+        assert!(in_flight.same_model(&other_live.lease().unwrap()));
+        // Refused admission is not a confirmed destructive request and releases nothing.
+        service.lock().unwrap().transitioning = true;
+        assert!(crate::retention_commands::reserve(&service).is_err());
+        assert!(live.lease().is_ok() && analysis.lease().is_ok());
+        service.lock().unwrap().transitioning = false;
+        let preview = meeting_core::archive::preview_erasure(
+            &root,
+            &meeting,
+            &std::sync::atomic::AtomicBool::new(false),
+        )
+        .unwrap();
+        if change_after_preview {
+            let reopened =
+                meeting_core::SessionStore::open(&root.join("sessions").join(&meeting)).unwrap();
+            reopened
+                .warn("Synthetic changed content must require a fresh preview")
+                .unwrap();
+        }
+        let guard = crate::retention_commands::reserve(&service).unwrap();
+        let job = start_confirmed_erasure(Arc::clone(&service), preview, guard).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(10);
+        loop {
+            let status = service.maintenance_jobs.snapshot().unwrap();
+            assert_eq!(status.job_id, job);
+            if status.status != "running" {
+                assert_eq!(
+                    status.status,
+                    if change_after_preview {
+                        "failed"
+                    } else {
+                        "complete"
+                    },
+                    "{:?}",
+                    status.error
+                );
+                break;
+            }
+            assert!(Instant::now() < deadline);
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        assert_eq!(
+            root.join("sessions").join(&meeting).exists(),
+            change_after_preview
+        );
+        assert!(root.join("sessions").join(&other_id).exists());
+        assert!(other_live.lease().is_ok() && other_analysis.lease().is_ok());
+        assert!(in_flight
+            .matches_connection(&connection, LocalProvider::Ollama)
+            .unwrap());
+        assert!(
+            live.lease().is_err(),
+            "Deleted meeting retained its live model anchor"
+        );
+        assert!(
+            analysis.lease().is_err(),
+            "Deleted meeting retained its analysis model anchor"
+        );
+        assert_eq!(
+            Arc::strong_count(&in_flight),
+            1,
+            "An in-flight client survives without a retained meeting anchor"
+        );
+    }
+
+    /// Completed erasure releases only the two selected meeting anchors.
+    #[test]
+    fn completed_erasure_releases_only_its_retained_models() {
+        assert_erasure_releases_model_owners(false);
+    }
+
+    /// A confirmed worker failure releases anchors while preserving changed source bytes.
+    #[test]
+    fn failed_erasure_releases_only_its_retained_models() {
+        assert_erasure_releases_model_owners(true);
+    }
 
     /// Exercise the real deletion worker and then the actual index-start admission.
     /// This guards the ordering of guard destruction and terminal status publication.

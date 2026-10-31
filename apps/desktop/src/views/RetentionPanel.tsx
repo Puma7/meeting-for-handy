@@ -7,6 +7,7 @@ import {
   useSyncExternalStore,
 } from "react";
 import { Archive } from "lucide-react";
+import { createPortal } from "react-dom";
 import { errorMessage } from "../api";
 import AudioCopiesPanel from "./AudioCopiesPanel";
 import ArchivePanel from "./ArchivePanel";
@@ -75,10 +76,13 @@ export default function RetentionPanel({
   api,
   locale,
   models = [],
+  statusContainer,
 }: {
   api: DesktopApi;
   locale: Locale;
   models?: HandyModel[];
+  /** Shows the same single job observer outside an ancestor's collapsed settings. */
+  statusContainer?: HTMLElement | null;
 }) {
   const de = locale === "de";
   const latestJob = useRef<string | null>(null);
@@ -434,7 +438,12 @@ export default function RetentionPanel({
           ? "Alle Regeln beginnen ausgeschaltet. Eine Vorschau ändert keine Dateien. VIP-, laufende, unvollständige oder nicht sicher lesbare Meetings bleiben geschützt. Das endgültige Löschen eines Archivs braucht eine zusätzliche ausdrückliche Bestätigung."
           : "Every rule starts disabled. A preview changes no files. VIP, active, incomplete and unreadable meetings are protected. Permanent archive deletion requires a separate explicit confirmation."}
       </p>
-      {error && <p role="alert">{error}</p>}
+      {error &&
+        (statusContainer ? (
+          createPortal(<p role="alert">{error}</p>, statusContainer)
+        ) : (
+          <p role="alert">{error}</p>
+        ))}
       {draft && (
         <>
           <label>
@@ -583,7 +592,14 @@ export default function RetentionPanel({
           )}
         </>
       )}
-      <MaintenanceStatus api={api} locale={locale} onProgress={progress} />
+      {statusContainer === null ? null : statusContainer ? (
+        createPortal(
+          <MaintenanceStatus api={api} locale={locale} onProgress={progress} />,
+          statusContainer,
+        )
+      ) : (
+        <MaintenanceStatus api={api} locale={locale} onProgress={progress} />
+      )}
       {plan && (
         <div className="retention-preview">
           <h3>
@@ -732,8 +748,19 @@ export default function RetentionPanel({
           </button>
         </section>
       )}
-      <ArchivePanel api={api} locale={locale} job={job} />
-      <AudioCopiesPanel api={api} locale={locale} models={models} job={job} />
+      <ArchivePanel
+        api={api}
+        locale={locale}
+        job={job}
+        statusContainer={statusContainer}
+      />
+      <AudioCopiesPanel
+        api={api}
+        locale={locale}
+        models={models}
+        job={job}
+        statusContainer={statusContainer}
+      />
     </section>
   );
 }

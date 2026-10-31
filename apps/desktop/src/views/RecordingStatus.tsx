@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Cpu } from "lucide-react";
 import { clock } from "../domain";
 import type { AudioPart, DesktopApi, Locale, SystemLoad } from "../types";
 
@@ -159,9 +160,12 @@ export default function RecordingStatus({
             <span
               data-high={(memoryPercent ?? 0) >= HIGH_LOAD_PERCENT || undefined}
             >
-              RAM{" "}
-              {used === null || !total ? "—" : `${gb(used)}/${gb(total)} GB`}
+              <span>
+                RAM{" "}
+                {memoryPercent === null ? "—" : `${number(memoryPercent, 0)} %`}
+              </span>
             </span>
+            <span>GPU —</span>
           </dd>
         </div>
         <div>
@@ -171,20 +175,57 @@ export default function RecordingStatus({
           </dd>
         </div>
         <div>
-          <dt>{de ? "Erkennung" : "Recognition"}</dt>
+          <dt>{de ? "Transkript" : "Transcript"}</dt>
           <dd data-high={behind || undefined}>
             {backlogMs === null
               ? "—"
-              : behind
+              : backlogMs > 0
                 ? de
-                  ? `${clock(backlogMs)} im Rückstand`
-                  : `${clock(backlogMs)} behind`
+                  ? `${clock(Math.ceil(backlogMs / 1000) * 1000)} noch offen`
+                  : `${clock(Math.ceil(backlogMs / 1000) * 1000)} pending`
                 : de
                   ? "Aktuell"
                   : "Up to date"}
           </dd>
         </div>
       </dl>
+      <details className="sidebar-resource-details">
+        <summary
+          aria-label={de ? "Rechnerdetails" : "Computer details"}
+          title={de ? "Rechnerdetails" : "Computer details"}
+        >
+          <Cpu size={17} aria-hidden="true" />
+          {de ? "Rechnerdetails" : "Computer details"}
+        </summary>
+        <div className="sidebar-resource-content">
+          <p>
+            {de
+              ? "Auslastung des ganzen Computers"
+              : "Load of the whole computer"}
+          </p>
+          <p data-high={(cpu ?? 0) >= HIGH_LOAD_PERCENT || undefined}>
+            CPU:{" "}
+            {cpu === null
+              ? de
+                ? "nicht gemessen"
+                : "not measured"
+              : `${number(cpu, 0)} %${cpu >= HIGH_LOAD_PERCENT ? (de ? " · hohe Auslastung" : " · high load") : ""}`}
+          </p>
+          <p>
+            {de ? "Arbeitsspeicher" : "Memory"}:{" "}
+            {used === null || !total
+              ? de
+                ? "nicht gemessen"
+                : "not measured"
+              : `${gb(used)}/${gb(total)} GiB`}
+          </p>
+          <p>
+            {de
+              ? "GPU-Auslastung wird derzeit nicht gemessen"
+              : "GPU usage is currently not measured"}
+          </p>
+        </div>
+      </details>
       <p className="sidebar-recording-text">
         {text
           ? de

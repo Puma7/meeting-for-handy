@@ -284,7 +284,7 @@ label {
   font-style: italic;
   overflow-wrap: anywhere;
   -webkit-box-orient: vertical;
-  -webkit-line-clamp: 3;
+  -webkit-line-clamp: 2;
 }
 /* Short windows keep every sidebar control reachable: a compact card, and scrolling. */
 @media (max-height: 720px) {
@@ -367,6 +367,9 @@ main {
 }
 .notice p {
   margin-top: 4px;
+}
+.analysis-discovery-error {
+  display: block;
 }
 .notice strong {
   font-weight: 600;
@@ -746,13 +749,13 @@ main {
   align-items: center;
   gap: 7px;
 }
-.microphone-field {
+.audio-source-controls {
   display: flex;
-  flex-direction: column;
-  gap: 7px;
+  min-height: 42px;
 }
-/* Matches the selects inside labels; this one sits beside its checkbox label. */
-.microphone-field select {
+.audio-source-controls select {
+  width: 100%;
+  min-width: 0;
   font-size: 13px;
   font-weight: 550;
 }
@@ -765,29 +768,35 @@ main {
   gap: 22px;
 }
 .audio-source {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
   min-width: 0;
+}
+.audio-source-heading {
+  margin: 0;
+  min-height: 23px;
 }
 .audio-source .label-icon,
 .audio-source .checkbox-label {
   min-height: 23px;
 }
 .audio-level {
-  margin-top: 9px;
+  margin-top: 0;
   font-size: 12px;
   font-weight: 400;
 }
-.microphone-field .audio-level {
-  margin-top: 2px;
-}
 .audio-level-reading {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) max-content;
   align-items: baseline;
-  justify-content: space-between;
-  flex-wrap: wrap;
   column-gap: 7px;
   min-height: 22px;
 }
 .audio-level-state {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   color: var(--color-ink-2);
 }
 .audio-level-value {
@@ -1048,12 +1057,12 @@ main {
 .settings-sections {
   max-width: 780px;
 }
-.settings-sections section {
+.settings-sections > section {
   padding: 0 0 25px;
   margin-bottom: 25px;
   border-bottom: 1px solid var(--color-line);
 }
-.settings-sections section > p {
+.settings-sections > section > p {
   color: var(--color-ink-2);
   font-size: 13px;
   margin: 9px 0 15px;
@@ -1668,7 +1677,6 @@ mark {
   font-size: 13px;
 }
 .notes-statusbar-summary p,
-.notes-statusbar-time span,
 .notes-statusbar-details,
 .notes-statusbar-help {
   font-size: 12px;
@@ -2204,6 +2212,114 @@ mark {
 /* Keep explanatory prose readable while controls continue to use the full window. */
 p {
   max-inline-size: 70ch;
+}
+
+/* Shared progressive disclosure: guidance and maintenance follow the main task. */
+.help-disclosure {
+  color: var(--color-ink-2);
+  font-size: 12px;
+  margin: 10px 0;
+}
+.help-disclosure > summary {
+  cursor: pointer;
+  width: fit-content;
+}
+.help-disclosure[open] > summary {
+  margin-bottom: 10px;
+}
+.help-disclosure p {
+  max-width: 76ch;
+  line-height: 1.6;
+}
+.archive-interruption {
+  display: block;
+}
+
+.settings-disclosure {
+  border-bottom: 1px solid var(--color-line);
+  padding: 18px 0;
+}
+.settings-sections > .settings-disclosure {
+  margin-bottom: 24px;
+}
+.settings-disclosure > summary {
+  cursor: pointer;
+  font-size: 15px;
+  font-weight: 600;
+}
+.settings-disclosure[open] > summary {
+  margin-bottom: 18px;
+}
+.settings-disclosure > section {
+  margin-top: 20px;
+}
+.sidebar-recording-facts dd {
+  flex-wrap: wrap;
+}
+.live-options .live-controls {
+  margin-top: 10px;
+}
+.template-editor .step-actions {
+  margin-top: 10px;
+}
+
+.sidebar-resource-details {
+  flex-basis: 100%;
+  margin-top: 4px;
+}
+.sidebar-resource-details > summary {
+  cursor: pointer;
+  color: var(--color-ink-2);
+}
+.sidebar-resource-details > summary > svg {
+  display: none;
+}
+.sidebar-resource-details p {
+  margin: 6px 0 0;
+  line-height: 1.5;
+}
+@media (max-width: 740px) {
+  .sidebar {
+    /* Above ordinary content, below the shared modal backdrop at layer10. */
+    z-index: 2;
+  }
+  .sidebar-recording {
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+  }
+  .sidebar-resource-details {
+    margin-top: 0;
+    width: 36px;
+  }
+  .sidebar-resource-details > summary {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 36px;
+    height: 32px;
+    font-size: 0;
+    list-style: none;
+  }
+  .sidebar-resource-details > summary::-webkit-details-marker {
+    display: none;
+  }
+  .sidebar-resource-details > summary > svg {
+    display: block;
+  }
+  .sidebar-resource-content {
+    position: fixed;
+    top: 16px;
+    left: 76px;
+    z-index: 30;
+    width: min(300px, calc(100vw - 96px));
+    padding: 14px;
+    background: var(--color-background);
+    border: 1px solid var(--color-line-strong);
+    border-radius: 10px;
+    box-shadow: 0 5px 22px #0002;
+    font-size: 13px;
+  }
 }
 
 /* A single explicit erasure action remains visible without crowding history rows. */

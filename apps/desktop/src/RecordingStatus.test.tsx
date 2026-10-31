@@ -10,6 +10,8 @@ import userEvent from "@testing-library/user-event";
 import App from "./App";
 import RecordingStatus, { recentText } from "./views/RecordingStatus";
 import { testServices } from "./test-services";
+import SessionWarnings from "./views/SessionWarnings";
+import { de } from "./i18n";
 import type { AppState, AudioPart, DesktopApi, Meeting } from "./types";
 vi.setConfig({ testTimeout: 15_000 });
 configure({ asyncUtilTimeout: 5000 });
@@ -64,7 +66,85 @@ const load = {
 
 beforeEach(() => localStorage.clear());
 
+it("reopens capture warnings only when a new warning arrives", async () => {
+  const warnings = [live.warnings[0]];
+  const view = render(
+    <SessionWarnings warnings={warnings} locale="de" t={de} />,
+  );
+  const detail = screen.getByText(de.audioQuality).closest("details")!;
+  await userEvent.click(detail.querySelector("summary")!);
+  expect(detail.open).toBe(false);
+  view.rerender(
+    <SessionWarnings warnings={[...warnings]} locale="de" t={de} />,
+  );
+  expect(detail.open).toBe(false);
+  const next = [...warnings, "Synthetic newly reported capture warning"];
+  view.rerender(<SessionWarnings warnings={next} locale="de" t={de} />);
+  expect(detail.open).toBe(true);
+  await userEvent.click(detail.querySelector("summary")!);
+  view.rerender(<SessionWarnings warnings={[...next]} locale="de" t={de} />);
+  expect(detail.open).toBe(false);
+});
+
+it("announces only new live capture warnings without reannouncing unchanged polls or history", () => {
+  const warnings = ["Synthetic initial warning"];
+  const view = render(
+    <SessionWarnings warnings={warnings} locale="de" t={de} announceNew />,
+  );
+  const region = screen.getByRole("status");
+  expect(region.textContent).toBe("");
+  const next = [...warnings, "Synthetic added warning <img src=x>"];
+  view.rerender(
+    <SessionWarnings warnings={next} locale="de" t={de} announceNew />,
+  );
+  expect(region.textContent).toBe("Synthetic added warning <img src=x>");
+  expect(region.querySelector("img")).toBeNull();
+  view.rerender(
+    <SessionWarnings warnings={[...next]} locale="de" t={de} announceNew />,
+  );
+  expect(screen.getByRole("status")).toBe(region);
+  expect(region.textContent).toBe("Synthetic added warning <img src=x>");
+  view.rerender(
+    <SessionWarnings warnings={[]} locale="de" t={de} announceNew />,
+  );
+  expect(screen.getByRole("status")).toBe(region);
+  expect(region.textContent).toBe("");
+  view.rerender(<SessionWarnings warnings={[...next]} locale="de" t={de} />);
+  expect(screen.queryByRole("status")).toBeNull();
+});
+
 describe("recording status in the sidebar (synthetic IPC)", () => {
+  it.each([
+    { value: 94.6, expected: "CPU: 95 % · hohe Auslastung", high: true },
+    { value: 20, expected: "CPU: 20 %", high: false },
+    { value: null, expected: "CPU: nicht gemessen", high: false },
+  ])(
+    "keeps CPU state available inside computer details ($expected)",
+    async ({ value, expected, high }) => {
+      render(
+        <RecordingStatus
+          locale="de"
+          paused={false}
+          durationMs={1000}
+          parts={[]}
+          warningCount={0}
+          microphoneSilent={false}
+          microphoneMuted={false}
+          backlogMs={0}
+          getSystemLoad={vi
+            .fn()
+            .mockResolvedValue({ ...load, cpuPercent: value })}
+          onOpen={() => undefined}
+        />,
+      );
+      const summary = screen.getByText("Rechnerdetails");
+      await userEvent.click(summary);
+      const details = summary.closest("details")!;
+      expect(details.closest(".sidebar-recording-facts")).toBeNull();
+      const reading = await within(details).findByText(expected);
+      expect(reading.hasAttribute("data-high")).toBe(high);
+    },
+  );
   it("names the newest recognized words and cuts long text at a word", () => {
     expect(recentText([part(30, "Später"), part(0, "Früher")])).toBe("Später");
     const long = "Wort ".repeat(40).trim() + " Ende";
@@ -97,10 +177,12 @@ describe("recording status in the sidebar (synthetic IPC)", () => {
     expect(within(region).getByText("08:06")).toBeTruthy();
     const cpu = await within(region).findByText("CPU 95 %");
     expect(cpu.hasAttribute("data-high")).toBe(true);
-    const ram = within(region).getByText("RAM 15,4/16,0 GB");
-    expect(ram.hasAttribute("data-high")).toBe(true);
+    const ram = within(region).getByText("RAM 96 %");
+    expect(ram.parentElement!.hasAttribute("data-high")).toBe(true);
+    expect(within(region).getByText("GPU —")).toBeTruthy();
+    expect(within(region).getByText("Rechnerdetails").tagName).toBe("SUMMARY");
     expect(within(region).getByText("1 Hinweis zur Aufnahme")).toBeTruthy();
-    expect(within(region).getByText("01:35 im Rückstand")).toBeTruthy();
+    expect(within(region).getByText("01:35 noch offen")).toBeTruthy();
     expect(within(region).getByText("„Zuletzt gesagter Satz“")).toBeTruthy();
     await userEvent.click(
       within(region).getByRole("button", { name: /Aufnahme läuft/ }),
@@ -136,6 +218,70 @@ describe("recording status in the sidebar (synthetic IPC)", () => {
     expect(screen.getByText("No text recognized yet.")).toBeTruthy();
   });
 
+  it("does not label a short positive transcription backlog as up to date", () => {
+    const view = render(
+      <RecordingStatus
+        locale="de"
+        paused={false}
+        durationMs={30_000}
+        parts={[]}
+        warningCount={0}
+        microphoneSilent={false}
+        microphoneMuted={false}
+        backlogMs={1500}
+        onOpen={() => undefined}
+      />,
+    );
+    expect(screen.getByText("00:02 noch offen")).toBeTruthy();
+    expect(screen.queryByText("Aktuell")).toBeNull();
+    expect(screen.getByText("GPU —")).toBeTruthy();
+    view.rerender(
+      <RecordingStatus
+        locale="de"
+        paused={false}
+        durationMs={30_000}
+        parts={[]}
+        warningCount={0}
+        microphoneSilent={false}
+        microphoneMuted={false}
+        backlogMs={0}
+        onOpen={() => undefined}
+      />,
+    );
+    expect(screen.getByText("Aktuell")).toBeTruthy();
+  });
+
+  it("offers RAM amounts and the GPU limitation in accessible computer details", async () => {
+    render(
+      <RecordingStatus
+        locale="de"
+        paused={false}
+        durationMs={30_000}
+        parts={[]}
+        warningCount={0}
+        microphoneSilent={false}
+        microphoneMuted={false}
+        backlogMs={0}
+        getSystemLoad={vi.fn().mockResolvedValue(load)}
+        onOpen={() => undefined}
+      />,
+    );
+    await screen.findByText("RAM 96 %");
+    const summary = screen.getByText("Rechnerdetails");
+    expect(summary.tagName).toBe("SUMMARY");
+    const details = summary.closest("details")!;
+    expect(details.closest(".sidebar-recording-facts")).toBeNull();
+    expect(details.open).toBe(false);
+    await userEvent.click(summary);
+    expect(details.open).toBe(true);
+    expect(
+      within(details).getByText("Arbeitsspeicher: 15,4/16,0 GiB"),
+    ).toBeTruthy();
+    expect(
+      within(details).getByText("GPU-Auslastung wird derzeit nicht gemessen"),
+    ).toBeTruthy();
+  });
+
   it("stays visible on other pages while recording and leads back to the recording", async () => {
     let recording = true;
     const api = {
@@ -155,6 +301,16 @@ describe("recording status in the sidebar (synthetic IPC)", () => {
       name: "Aufnahmestatus",
     });
     await within(region).findByText("„Zuletzt gesagter Satz“");
+    // The live MeetingView opts into announcements; historical MeetingDetail does not.
+    expect(
+      screen
+        .getAllByRole("status")
+        .some(
+          (node) =>
+            node.classList.contains("sr-only") &&
+            node.getAttribute("aria-live") === "polite",
+        ),
+    ).toBe(true);
     await userEvent.click(
       screen.getByRole("button", { name: "Einstellungen" }),
     );

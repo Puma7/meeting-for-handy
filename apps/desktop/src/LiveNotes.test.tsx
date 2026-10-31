@@ -1,4 +1,11 @@
-import { act, render, screen, waitFor, within } from "@testing-library/react";
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import { StrictMode } from "react";
 import App from "./App";
 import { testServices } from "./test-services";
@@ -159,6 +166,29 @@ function setup(
   return { setPreferences, onUseLocalModel };
 }
 
+it("keeps the local memory warning visible before starting with options closed", async () => {
+  setup({
+    getLiveNotes: vi.fn().mockResolvedValue(status()),
+    startLiveNotes: vi.fn().mockResolvedValue(status()),
+  });
+  const start = await screen.findByRole("button", {
+    name: "Live-Zusammenfassung starten",
+  });
+  const warning = screen
+    .getAllByText(
+      /Lokales Textmodell benötigt zusätzlichen Arbeitsspeicher|Das lokale Textmodell läuft neben der Aufnahme/,
+    )
+    .find((node) => node.closest("details") === null);
+  expect(warning).toBeDefined();
+  expect(
+    warning!.compareDocumentPosition(start) & Node.DOCUMENT_POSITION_FOLLOWING,
+  ).toBeTruthy();
+  expect(
+    screen.getByText("Optionen und Hinweise").closest("details")?.open,
+  ).toBe(false);
+  expect(start.hasAttribute("disabled")).toBe(false);
+});
+
 it("starts a local live summary with the chosen model, interval and language", async () => {
   const start = vi
     .fn()
@@ -230,6 +260,96 @@ it("never sends cloud text without the per-start release and never auto-starts c
     ).checked,
   ).toBe(false);
 });
+
+it("keeps the cloud-settings remedy visible while an invalid endpoint disables start", async () => {
+  const onOpenTextModelSettings = vi.fn();
+  const start = vi.fn();
+  setup(
+    {
+      getLiveNotes: vi.fn().mockResolvedValue(status()),
+      startLiveNotes: start,
+    },
+    {
+      connection: {
+        ...local,
+        mode: "cloud",
+        endpoint: "http://invalid.example/v1/",
+        model: "synthetic-cloud",
+      },
+      onOpenTextModelSettings,
+    },
+  );
+  const button = (await screen.findByRole("button", {
+    name: "Live-Zusammenfassung starten",
+  })) as HTMLButtonElement;
+  expect(button.disabled).toBe(true);
+  const remedy = screen.getByRole("button", {
+    name: "Alle Textmodell-Einstellungen",
+  });
+  expect(remedy.closest("details")).toBeNull();
+  expect(
+    screen.getByText("Optionen und Hinweise").closest("details")!.open,
+  ).toBe(false);
+  await userEvent.click(remedy);
+  expect(onOpenTextModelSettings).toHaveBeenCalledOnce();
+  expect(start).not.toHaveBeenCalled();
+});
+
+it.each([
+  [
+    "de",
+    "Alle Textmodell-Einstellungen",
+    "Optionen und Hinweise",
+    "Live-Zusammenfassung starten",
+  ],
+  [
+    "en",
+    "All text model settings",
+    "Options and guidance",
+    "Start live summary",
+  ],
+] as const)(
+  "offers visible cloud settings for an empty model in %s",
+  async (locale, action, options, startLabel) => {
+    const onOpenTextModelSettings = vi.fn();
+    const start = vi.fn();
+    setup(
+      {
+        getLiveNotes: vi.fn().mockResolvedValue(status()),
+        startLiveNotes: start,
+      },
+      {
+        locale,
+        connection: {
+          ...local,
+          mode: "cloud",
+          endpoint: "https://openrouter.ai/api/v1/",
+          model: "",
+        },
+        preferences: { auto: true, intervalMinutes: 3 },
+        onOpenTextModelSettings,
+      },
+    );
+    const startButton = await screen.findByRole("button", { name: startLabel });
+    expect((startButton as HTMLButtonElement).disabled).toBe(true);
+    const disclosure = screen.getByText(options).closest("details")!;
+    expect(disclosure.open).toBe(false);
+    const remedy = screen.getByRole("button", { name: action });
+    expect(remedy.closest("details")).toBeNull();
+    await userEvent.click(remedy);
+    expect(onOpenTextModelSettings).toHaveBeenCalledOnce();
+    await userEvent.click(screen.getByText(options));
+    expect(disclosure.open).toBe(true);
+    expect(screen.getAllByRole("button", { name: action })).toHaveLength(1);
+    await userEvent.click(startButton);
+    expect(start).not.toHaveBeenCalled();
+    expect(
+      screen.queryByRole("checkbox", {
+        name: /Send this meeting|Transkripttext dieses/,
+      }),
+    ).toBeNull();
+  },
+);
 
 it("auto-starts once for a local model while the meeting is recording", async () => {
   const start = vi
@@ -646,11 +766,10 @@ it("never sends a key typed for another route to a local model chosen from the p
   });
 });
 
-it("shows the detected local servers on the analysis page when the configured endpoint has no model", async () => {
+it("offers explicit local server setup when the configured endpoint has no model", async () => {
   // Earlier tests remember a local endpoint; this case starts from the default port.
   localStorage.clear();
-  // 1.0.5 feedback: LM Studio/Ollama were installed but the analysis page only showed an
-  // error at the default port; the detection was hidden behind a collapsed section.
+  // Keep setup available without expanding installation guidance automatically.
   const meeting: Meeting = {
     id: "d".repeat(32),
     title: "Synthetic analysis",
@@ -688,6 +807,11 @@ it("shows the detected local servers on the analysis page when the configured en
   render(<App api={api} />);
   await userEvent.click(
     await screen.findByRole("button", { name: "Nachbearbeitung" }),
+  );
+  fireEvent.click(screen.getByText("Auswertung einrichten"));
+  expect(api.localModelSetup).not.toHaveBeenCalled();
+  await userEvent.click(
+    screen.getByRole("button", { name: "Ollama / LM Studio erkennen" }),
   );
   await userEvent.click(
     await screen.findByRole("button", { name: "Verwenden: gemma4:e4b" }),
@@ -821,7 +945,12 @@ it("reloads the model list after Use even when the address stays the same", asyn
   await userEvent.click(
     await screen.findByRole("button", { name: "Nachbearbeitung" }),
   );
-  // No model yet: the detection opens; the user then loads one in LM Studio.
+  fireEvent.click(screen.getByText("Auswertung einrichten"));
+  expect(api.localModelSetup).not.toHaveBeenCalled();
+  await userEvent.click(
+    screen.getByRole("button", { name: "Ollama / LM Studio erkennen" }),
+  );
+  // The user requests setup, then loads a model in LM Studio.
   await screen.findByText("LM Studio");
   loaded = ["gemma-4-e4b"];
   await userEvent.click(screen.getByRole("button", { name: "Erneut prüfen" }));

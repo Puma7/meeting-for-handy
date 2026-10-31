@@ -341,7 +341,12 @@ export default function MeetingView({
         </div>
       )}
       {meeting && (
-        <SessionWarnings warnings={meeting.warnings} locale={locale} t={t} />
+        <SessionWarnings
+          warnings={meeting.warnings}
+          locale={locale}
+          t={t}
+          announceNew={recording}
+        />
       )}
       {meeting &&
         !recording &&

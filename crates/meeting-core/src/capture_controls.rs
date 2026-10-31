@@ -21,6 +21,18 @@ pub struct CaptureControlSnapshot {
     pub has_microphone: bool,
 }
 
+/// Passive first-packet counters for portable receipt-time alignment. No audio,
+/// device names, paths or session identities are retained in this diagnostic.
+#[derive(Clone, Debug, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct PortableStartupTiming {
+    pub source: &'static str,
+    pub written_before_padding: u64,
+    pub estimated_padding_samples: u64,
+    pub first_packet_samples: u64,
+    pub first_packet_leading_zero_samples: u64,
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct CaptureControlEvent {
@@ -124,6 +136,7 @@ pub(super) struct CaptureControls {
     journal_failed: AtomicBool,
     meters: [AudioMeter; 2],
     startup_progress: AtomicU64,
+    portable_startup: Mutex<[Option<PortableStartupTiming>; 2]>,
 }
 
 impl CaptureControls {
@@ -159,6 +172,7 @@ impl CaptureControls {
             journal_failed: AtomicBool::new(false),
             meters: [AudioMeter::default(), AudioMeter::default()],
             startup_progress: AtomicU64::new(0),
+            portable_startup: Mutex::new([None, None]),
         }
     }
 
@@ -170,6 +184,29 @@ impl CaptureControls {
     /// Counter of preparation steps reported by starting tracks.
     pub fn startup_progress(&self) -> u64 {
         self.startup_progress.load(Ordering::Acquire)
+    }
+    /// Returns at most one first-packet observation per portable source. Windows
+    /// and tracks with no received packet have no observation; absence is not zero.
+    pub fn portable_startup_timing(&self) -> Result<Vec<PortableStartupTiming>> {
+        Ok(self
+            .portable_startup
+            .lock()
+            .map_err(|_| "Portable startup diagnostics are unavailable")?
+            .iter()
+            .flatten()
+            .cloned()
+            .collect())
+    }
+    /// Captures only the first portable packet's alignment counters. Diagnostics
+    /// never gate PCM persistence, and restarts cannot overwrite the first observation.
+    #[cfg(any(target_os = "linux", target_os = "macos", test))]
+    pub fn note_portable_startup(&self, timing: PortableStartupTiming) {
+        if let Ok(mut observations) = self.portable_startup.lock() {
+            let slot = &mut observations[Self::index(timing.source)];
+            if slot.is_none() {
+                *slot = Some(timing);
+            }
+        }
     }
     /// Updates whether a microphone track was successfully made available.
     pub fn set_has_microphone(&self, value: bool) {

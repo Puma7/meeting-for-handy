@@ -72,11 +72,11 @@ it("explains known capture interruptions, retains literal technical/unknown warn
   expect(screen.getAllByText(/Computerton: Der Audiotreiber/)).toHaveLength(1);
   expect(screen.getByText(unknown)).toBeTruthy();
   expect(container.querySelector("img")).toBeNull();
-  // The notice is collapsed by default and its technical messages are nested inside.
+  // Capture caveats start visible; original technical messages remain optional.
   const notice = container.querySelector<HTMLDetailsElement>(
     "details.session-warnings",
   );
-  expect(notice?.open).toBe(false);
+  expect(notice?.open).toBe(true);
   const technical = container.querySelector<HTMLDetailsElement>(
     ".session-warnings details",
   );

@@ -22,6 +22,7 @@ const LOCALHOST_ADDRESSES: [SocketAddr; 2] = [
 /// overridden with fixed loopback addresses and every other name fails.
 struct NoDns;
 impl reqwest::dns::Resolve for NoDns {
+    /// Rejects every fallback DNS lookup; validated localhost uses fixed loopback overrides.
     fn resolve(&self, _: reqwest::dns::Name) -> reqwest::dns::Resolving {
         Box::pin(async {
             Err::<reqwest::dns::Addrs, _>(
@@ -36,18 +37,22 @@ pub struct TextClient {
     client: Client,
     /// Stable identity of the validated route, used for credential scopes and
     /// saved analyses. `localhost` stays canonicalized to `127.0.0.1` here so
-    /// existing stored keys and resumable analyses keep their identity.
+    /// existing stored keys and resumable analyses keep their identity. Native
+    /// management and leased inference bind to this same concrete origin.
     pub(crate) base: Url,
     /// The address actually requested. For `localhost` it keeps the name, which
-    /// connects to 127.0.0.1 or ::1 (whichever accepts) without DNS.
+    /// connects to 127.0.0.1 or ::1 without DNS for legacy unleased text/discovery.
+    /// Native management and leased inference instead use the concrete base origin.
     target: Url,
-    model: String,
+    pub(crate) model: String,
     key: Zeroizing<String>,
     local: bool,
     runtime: tokio::runtime::Runtime,
+    residency: Option<std::sync::Arc<crate::residency::ModelLease>>,
 }
 
 impl TextClient {
+    /// Validates explicit local/cloud consent and endpoint scope, disabling proxies and redirects.
     pub fn new(config: &Connection) -> Result<Self> {
         let mut base = Url::parse(config.endpoint.trim()).context("Ungültige KI-Adresse.")?;
         ensure!(
@@ -114,8 +119,64 @@ impl TextClient {
             runtime: tokio::runtime::Builder::new_current_thread()
                 .enable_all()
                 .build()?,
+            residency: None,
         })
     }
+    /// Associates this text-only client with an already validated local model reservation.
+    pub fn with_residency(
+        mut self,
+        lease: std::sync::Arc<crate::residency::ModelLease>,
+    ) -> Result<Self> {
+        ensure!(
+            lease.matches_client(&self),
+            "Modellreservierung passt nicht zur lokalen Verbindung."
+        );
+        self.residency = Some(lease);
+        Ok(self)
+    }
+    /// Derives a session-free reservation identity only after local route validation.
+    pub(crate) fn local_identity(&self) -> Result<String> {
+        ensure!(
+            self.local,
+            "Modellreservierungen sind ausschließlich lokal verfügbar."
+        );
+        ensure!(
+            self.target.path().ends_with("/v1/"),
+            "Lokale Modellverwaltung benötigt eine /v1/-Adresse."
+        );
+        Ok(format!("{}\0{}", self.target, self.model))
+    }
+    /// Compares credentials without logging or retaining another plaintext credential copy.
+    pub(crate) fn local_auth_digest(&self) -> [u8; 32] {
+        use sha2::Digest;
+        sha2::Sha256::digest(self.key.as_bytes()).into()
+    }
+    /// Fixed native model-management routes reuse every local transport restriction.
+    pub(crate) fn model_request(
+        &self,
+        path: &str,
+        body: Option<&serde_json::Value>,
+        control: &AnalysisControl,
+        timeout: Duration,
+    ) -> Result<serde_json::Value> {
+        self.local_identity()?;
+        ensure!(
+            matches!(
+                path,
+                "api/ps"
+                    | "api/generate"
+                    | "api/v1/models"
+                    | "api/v1/models/load"
+                    | "api/v1/models/unload"
+                    | "api/chat"
+            ),
+            "Unbekannter lokaler Modellvorgang."
+        );
+        let path = format!("../{path}");
+        self.request_at(self.base.join(&path)?, &path, body, control, timeout)
+            .map_err(|error| if crate::is_cancelled(&error) { error } else { anyhow::anyhow!("Lokale Modellverwaltung fehlgeschlagen. Dienst, Modell und native API-Unterstützung prüfen; Audio und gespeicherte Ergebnisse bleiben erhalten.") })
+    }
+    /// Sends a bounded JSON request on the validated route, with cancellation and redacted failures.
     fn request(
         &self,
         path: &str,
@@ -123,8 +184,24 @@ impl TextClient {
         control: &AnalysisControl,
         timeout: Duration,
     ) -> Result<serde_json::Value> {
+        let target = if self.residency.is_some() {
+            &self.base
+        } else {
+            &self.target
+        };
+        self.request_at(target.join(path)?, path, body, control, timeout)
+    }
+    /// Uses one validated concrete origin for the complete native lease lifecycle;
+    /// request bounds, credential redaction and cancellation remain shared with legacy text.
+    fn request_at(
+        &self,
+        url: Url,
+        path: &str,
+        body: Option<&serde_json::Value>,
+        control: &AnalysisControl,
+        timeout: Duration,
+    ) -> Result<serde_json::Value> {
         control.check()?;
-        let url = self.target.join(path)?;
         let mut request = if let Some(body) = body {
             self.client.post(url).json(body)
         } else {
@@ -135,7 +212,7 @@ impl TextClient {
         }
         self.runtime.block_on(async {
             let mut response = await_cancellable(request.timeout(timeout).send(), control).await?;
-            if path == "chat/completions" {
+            if matches!(path, "chat/completions" | "../api/chat") {
                 let mut diagnostic = self.diagnostic.borrow_mut();
                 diagnostic.http_status = Some(response.status().as_u16());
                 // A successful status stays a transport outcome until the whole body is
@@ -163,7 +240,7 @@ impl TextClient {
             }
             control.check()?;
             let value = serde_json::from_slice(&bytes);
-            if path == "chat/completions" {
+            if matches!(path, "chat/completions" | "../api/chat") {
                 self.diagnostic.borrow_mut().result = if value.is_ok() {
                     crate::diagnostics::RequestResult::Envelope
                 } else {
@@ -173,6 +250,7 @@ impl TextClient {
             value.context("KI-Dienst liefert kein gültiges JSON.")
         })
     }
+    /// Discovers only local model IDs, bounding and deduplicating the provider's untrusted list.
     pub fn models(&self) -> Result<Vec<String>> {
         ensure!(
             self.local,
@@ -201,9 +279,11 @@ impl TextClient {
         result.dedup();
         Ok(result)
     }
+    /// Uses the same source-linked JSON generation contract without an external cancellation owner.
     pub fn generate(&self, sources: &[Source], step: &Step) -> Result<String> {
         self.generate_controlled(sources, step, &AnalysisControl::default())
     }
+    /// Serializes only supplied transcript sources and prompt text; returned claims still need validation.
     pub fn generate_controlled(
         &self,
         sources: &[Source],
@@ -255,14 +335,17 @@ impl TextClient {
         result
     }
 
+    /// Returns scalar request diagnostics, never transcript content or bearer credentials.
     pub(crate) fn diagnostic(&self) -> crate::diagnostics::RequestDiagnostic {
         self.diagnostic.borrow().clone()
     }
 
+    /// Records the caller's validation outcome separately from successful HTTP transport.
     pub(crate) fn diagnostic_stage(&self, stage: crate::diagnostics::RequestResult) {
         self.diagnostic.borrow_mut().result = stage;
     }
 
+    /// Uses the same evidence schema and output limits across explicitly selected provider envelopes.
     fn chat_json_inner(
         &self,
         system: &str,
@@ -283,12 +366,47 @@ impl TextClient {
         if self.base.host_str() == Some("openrouter.ai") {
             body["provider"] = serde_json::json!({"data_collection":"deny","allow_fallbacks":false,"require_parameters":true});
         }
-        let response = self.request(
-            "chat/completions",
-            Some(&body),
-            control,
-            Duration::from_secs(300),
-        )?;
+        let response = if let Some(lease) = &self.residency {
+            lease.prepare(control)?;
+            let (provider, model, keep_alive) = lease.inference()?;
+            match provider {
+                crate::residency::LocalProvider::Ollama => {
+                    // Native chat supports keep_alive on older Ollama versions too.
+                    // The same fixed messages/schema/budget are used; only the envelope differs.
+                    let native = serde_json::json!({"model":model,"stream":false,
+                        "messages":body["messages"],"format":schema,"keep_alive":keep_alive,
+                        "options":{"num_predict":max_tokens,"temperature":0}});
+                    let result = self.model_request(
+                        "api/chat",
+                        Some(&native),
+                        control,
+                        Duration::from_secs(300),
+                    )?;
+                    ensure!(
+                        result["done"] == true,
+                        "KI-Antwort wurde nicht vollständig abgeschlossen."
+                    );
+                    serde_json::json!({"choices":[{"finish_reason":result["done_reason"],"message":result["message"]}],
+                        "usage":{"prompt_tokens":result["prompt_eval_count"],"completion_tokens":result["eval_count"]}})
+                }
+                crate::residency::LocalProvider::LmStudio => {
+                    body["model"] = model.into();
+                    self.request(
+                        "chat/completions",
+                        Some(&body),
+                        control,
+                        Duration::from_secs(300),
+                    )?
+                }
+            }
+        } else {
+            self.request(
+                "chat/completions",
+                Some(&body),
+                control,
+                Duration::from_secs(300),
+            )?
+        };
         let choice = &response["choices"][0];
         {
             use crate::diagnostics::{Finish, RequestResult};
@@ -323,6 +441,7 @@ pub(crate) fn item_list_schema() -> serde_json::Value {
     serde_json::json!({"type":"array","items":{"type":"object","additionalProperties":false,"required":["text","owner","due","evidence"],"properties":{"text":{"type":"string"},"owner":{"type":["string","null"]},"due":{"type":["string","null"]},"evidence":{"type":"array","items":{"type":"object","additionalProperties":false,"required":["sourceId","quote"],"properties":{"sourceId":{"type":"string"},"quote":{"type":"string"}}}}}}})
 }
 
+/// Polls the owned HTTP future cooperatively; transport errors never expose server body or secrets.
 async fn await_cancellable<T>(
     future: impl Future<Output = reqwest::Result<T>>,
     control: &AnalysisControl,

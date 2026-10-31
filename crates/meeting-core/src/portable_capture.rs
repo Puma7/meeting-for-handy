@@ -1,5 +1,5 @@
 //! Bounded stdout PCM transport. It owns only the exact helper it starts.
-use super::controls::CaptureControls;
+use super::controls::{CaptureControls, PortableStartupTiming};
 use crate::{PcmWriter, Result, SessionStore, SAMPLE_RATE};
 use std::{
     io::Read,
@@ -273,14 +273,15 @@ pub(super) fn record_controlled(
                                                 * f64::from(SAMPLE_RATE))
                                                 as u64;
                                         let target = lead.saturating_sub(pcm.len() as u64);
-                                        if target.saturating_sub(writer.written_samples()) > 8000 {
-                                            if epoch == 0 {
-                                                let _ = store.warn(&format!("{source}: the source started late; leading silence is estimated and can contain missing audio."));
-                                            } else {
-                                                let _ = store.notice(&format!("{source}: capture resumed with estimated startup silence. This silence is intentional control timing, not recovered speech."));
-                                            }
-                                        }
-                                        pad_estimated(&mut writer, target)?;
+                                        align_first_packet(
+                                            &mut writer,
+                                            target,
+                                            source,
+                                            &pcm,
+                                            &controls,
+                                            &store,
+                                            epoch,
+                                        )?;
                                         received = true;
                                     }
                                     controls.write(source, epoch, &mut writer, &pcm)?;
@@ -414,9 +415,187 @@ fn pad_estimated(writer: &mut PcmWriter, target: u64) -> Result<()> {
     Ok(())
 }
 
+/// Keeps existing alignment bytes unchanged while separating inserted padding
+/// from zeros already present in the first helper packet. Only fixed source labels
+/// and sample counts are exposed; the packet itself is never retained here.
+fn align_first_packet(
+    writer: &mut PcmWriter,
+    target: u64,
+    source: &str,
+    pcm: &[i16],
+    controls: &CaptureControls,
+    store: &SessionStore,
+    epoch: u64,
+) -> Result<()> {
+    let source = match source {
+        "system" => "system",
+        "microphone" => "microphone",
+        _ => return Err("Invalid audio track".into()),
+    };
+    let before = writer.written_samples();
+    let padding = target.saturating_sub(before);
+    // Even a short estimated initial prefix is not confirmed received audio.
+    // Intentional privacy-control resumes retain their existing notice policy.
+    if epoch == 0 && padding > 0 {
+        let _ = store.warn(&format!("{source}: the source started late; leading silence is estimated and can contain missing audio."));
+    } else if padding > 8000 {
+        let _ = store.notice(&format!("{source}: capture resumed with estimated startup silence. This silence is intentional control timing, not recovered speech."));
+    }
+    pad_estimated(writer, target)?;
+    controls.note_portable_startup(PortableStartupTiming {
+        source,
+        written_before_padding: before,
+        estimated_padding_samples: writer.written_samples().saturating_sub(before),
+        first_packet_samples: pcm.len() as u64,
+        first_packet_leading_zero_samples: pcm.iter().take_while(|sample| **sample == 0).count()
+            as u64,
+    });
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    /// Separates a small native estimated pad from incoming zero samples while
+    /// preserving the exact PCM, including an existing confirmed prefix.
+    fn startup_observation_distinguishes_padding_from_helper_zeros_without_changing_pcm() {
+        let root = tempfile::tempdir().unwrap();
+        let store =
+            SessionStore::create(root.path(), "Synthetic alignment", "m", "s", None).unwrap();
+        let controls = CaptureControls::uncontrolled();
+        let mut writer = PcmWriter::new(store.clone(), "system").unwrap();
+        writer.append(&[19, -19]).unwrap();
+        let packet = [0, 0, 0, 11, -12];
+        align_first_packet(&mut writer, 457, "system", &packet, &controls, &store, 0).unwrap();
+        writer.append(&packet).unwrap();
+        writer.finish().unwrap();
+        let observations = controls.portable_startup_timing().unwrap();
+        assert_eq!(observations.len(), 1);
+        assert_eq!(observations[0].written_before_padding, 2);
+        assert_eq!(observations[0].estimated_padding_samples, 455);
+        assert_eq!(observations[0].first_packet_samples, 5);
+        assert_eq!(observations[0].first_packet_leading_zero_samples, 3);
+        let data = store.snapshot().unwrap();
+        let mut actual = vec![];
+        for part in &data.parts {
+            actual.extend(
+                hound::WavReader::open(store.audio_path(part).unwrap())
+                    .unwrap()
+                    .samples::<i16>()
+                    .map(std::result::Result::unwrap),
+            );
+        }
+        let mut expected = vec![19, -19];
+        expected.extend(vec![0; 455]);
+        expected.extend(packet);
+        assert_eq!(actual, expected);
+        // A later restart must not replace the first observation with unrelated data.
+        align_first_packet(&mut writer, 0, "system", &[33], &controls, &store, 0).unwrap();
+        assert_eq!(controls.portable_startup_timing().unwrap(), observations);
+        assert!(
+            data.capture_incomplete,
+            "Estimated startup silence must be declared even below half a second"
+        );
+        assert!(data
+            .warnings
+            .iter()
+            .any(|warning| warning.starts_with("system: the source started late;")));
+    }
+
+    #[test]
+    /// Incoming silence is not native padding and cannot obtain an estimated
+    /// startup-gap declaration that would excuse a failing synthetic signal.
+    fn incoming_zero_samples_without_native_padding_get_no_startup_gap_declaration() {
+        let root = tempfile::tempdir().unwrap();
+        let store = SessionStore::create(root.path(), "Synthetic incoming silence", "m", "s", None)
+            .unwrap();
+        let controls = CaptureControls::uncontrolled();
+        let mut writer = PcmWriter::new(store.clone(), "system").unwrap();
+        let mut packet = vec![0; 523];
+        packet.extend([23, -24]);
+        align_first_packet(&mut writer, 0, "system", &packet, &controls, &store, 0).unwrap();
+        writer.append(&packet).unwrap();
+        writer.finish().unwrap();
+        let data = store.snapshot().unwrap();
+        assert!(!data.capture_incomplete);
+        assert!(data.warnings.is_empty());
+        let observed = controls.portable_startup_timing().unwrap();
+        assert_eq!(observed[0].estimated_padding_samples, 0);
+        assert_eq!(observed[0].first_packet_leading_zero_samples, 523);
+        let actual: Vec<i16> = hound::WavReader::open(store.audio_path(&data.parts[0]).unwrap())
+            .unwrap()
+            .samples::<i16>()
+            .map(std::result::Result::unwrap)
+            .collect();
+        assert_eq!(actual, packet);
+    }
+
+    #[test]
+    /// Exercises the real portable pump with an owned synthetic helper; its
+    /// observed padding plus helper zeros must match the durable track prefix.
+    fn synthetic_helper_reports_the_origin_of_its_first_zero_samples() {
+        let root = tempfile::tempdir().unwrap();
+        let store = SessionStore::create(root.path(), "Synthetic startup", "m", "s", None).unwrap();
+        let controls = Arc::new(CaptureControls::uncontrolled());
+        let stop = Arc::new(AtomicBool::new(false));
+        let _stop = StopOnExit(stop.clone());
+        let mut command = python();
+        command.args(["-c", "import sys,struct\nsys.stdout.buffer.write(bytes(18)+struct.pack('<hh',71,-72));sys.stdout.buffer.flush()\nsys.stdin.buffer.read()"]);
+        let (ready, started) = mpsc::sync_channel(1);
+        let thread_store = store.clone();
+        let thread_controls = controls.clone();
+        let thread_stop = stop.clone();
+        let worker = thread::spawn(move || {
+            record_controlled(
+                thread_store,
+                "system",
+                thread_stop,
+                ready,
+                HelperSpec {
+                    command,
+                    readiness_marker: false,
+                    graceful_stdin: false,
+                },
+                thread_controls,
+            )
+        });
+        let ready = started.recv_timeout(Duration::from_secs(30));
+        stop.store(true, Ordering::Release);
+        worker.join().unwrap().unwrap();
+        ready.unwrap().unwrap();
+        let observations = controls.portable_startup_timing().unwrap();
+        assert_eq!(observations.len(), 1);
+        let observed = &observations[0];
+        assert_eq!(observed.written_before_padding, 0);
+        assert_eq!(
+            observed.first_packet_leading_zero_samples,
+            observed.first_packet_samples.min(9)
+        );
+        let data = store.snapshot().unwrap();
+        let actual: Vec<i16> = data
+            .parts
+            .iter()
+            .flat_map(|part| {
+                hound::WavReader::open(store.audio_path(part).unwrap())
+                    .unwrap()
+                    .samples::<i16>()
+                    .map(std::result::Result::unwrap)
+                    .collect::<Vec<_>>()
+            })
+            .collect();
+        let prefix = observed.estimated_padding_samples as usize + 9;
+        assert!(actual[..prefix].iter().all(|sample| *sample == 0));
+        assert_eq!(&actual[prefix..], &[71, -72]);
+        let serialized = serde_json::to_value(observations).unwrap();
+        let object = serialized[0].as_object().unwrap();
+        assert_eq!(object.len(), 5);
+        assert_eq!(object["source"], "system");
+        assert!(object
+            .iter()
+            .all(|(key, value)| key == "source" || value.is_u64()));
+    }
 
     #[test]
     fn a_paused_reconnect_acknowledges_without_starting_a_helper() {

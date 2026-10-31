@@ -209,7 +209,7 @@ async function prepareLocal() {
     expect(
       (
         screen.getByRole("button", {
-          name: "Auswertung erstellen",
+          name: "Auswertung starten",
         }) as HTMLButtonElement
       ).disabled,
     ).toBe(false),
@@ -304,7 +304,7 @@ describe("beta.2 guided meeting analysis", () => {
     expect(
       (
         screen.getByRole("button", {
-          name: "Auswertung erstellen",
+          name: "Auswertung starten",
         }) as HTMLButtonElement
       ).disabled,
     ).toBe(true);
@@ -429,7 +429,7 @@ describe("beta.2 guided meeting analysis", () => {
     render(<App api={fixture.api} />);
     await prepareLocal();
     await userEvent.click(
-      screen.getByRole("button", { name: "Auswertung erstellen" }),
+      screen.getByRole("button", { name: "Auswertung starten" }),
     );
     await waitFor(() => expect(request.meetingId).toBe(first.id));
     await userEvent.selectOptions(
@@ -491,7 +491,7 @@ describe("beta.2 guided meeting analysis", () => {
     render(<App api={fixture.api} />);
     await prepareLocal();
     await userEvent.click(
-      screen.getByRole("button", { name: "Auswertung erstellen" }),
+      screen.getByRole("button", { name: "Auswertung starten" }),
     );
     await waitFor(() => expect(fixture.api.generateNotes).toHaveBeenCalled());
     await userEvent.selectOptions(
@@ -525,7 +525,7 @@ describe("beta.2 guided meeting analysis", () => {
     render(<App api={fixture.api} />);
     await prepareLocal();
     await userEvent.click(
-      screen.getByRole("button", { name: "Auswertung erstellen" }),
+      screen.getByRole("button", { name: "Auswertung starten" }),
     );
     const bar = (await screen.findByRole("progressbar", {
       name: "geprüfte und gespeicherte Teilaufgaben",
@@ -568,7 +568,7 @@ describe("beta.2 guided meeting analysis", () => {
     render(<App api={fixture.api} />);
     await prepareLocal();
     await userEvent.click(
-      screen.getByRole("button", { name: "Auswertung erstellen" }),
+      screen.getByRole("button", { name: "Auswertung starten" }),
     );
     await userEvent.click(
       screen.getByRole("button", { name: "Auswertung abbrechen" }),
@@ -609,7 +609,7 @@ describe("beta.2 guided meeting analysis", () => {
     render(<App api={fixture.api} />);
     await prepareLocal();
     await userEvent.click(
-      screen.getByRole("button", { name: "Auswertung erstellen" }),
+      screen.getByRole("button", { name: "Auswertung starten" }),
     );
     await waitFor(() => expect(requests).toHaveLength(1));
     const initial = requests[0];

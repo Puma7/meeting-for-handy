@@ -1,7 +1,7 @@
 # Rust portable packages
 
 The Rust/Tauri desktop now has target-specific capture adapters and package builders for
-Linux x86-64 and macOS Apple Silicon/Intel. Version 1.0.0 packaging is being prepared. A source
+Linux x86-64 and macOS Apple Silicon/Intel. Package versions follow the release tag. A source
 implementation, cross-target compilation, a successful CI package build, and an actual
 device recording are different evidence. See `TEST_REPORT.md` for completed checks.
 
@@ -9,9 +9,9 @@ device recording are different evidence. See `TEST_REPORT.md` for completed chec
 
 | Target | Build baseline | Intended runtime | Package |
 | --- | --- | --- | --- |
-| Linux x86-64 | Ubuntu22.04, Rust1.91.1, WebKitGTK4.1 | Ubuntu22.04/24.04; Debian12/13 | `HandyMeeting-1.0.0-linux-amd64.deb` |
-| Apple Silicon | macOS runner, Rust1.91.1, deployment target13.0 | macOS15 or newer, M-series | `HandyMeeting-1.0.0-osx-arm64.dmg` |
-| Intel Mac | macOS runner, Rust1.91.1, deployment target13.0 | macOS15 or newer, Intel x86-64 | `HandyMeeting-1.0.0-osx-x64.dmg` |
+| Linux x86-64 | Ubuntu22.04, Rust1.91.1, WebKitGTK4.1 | Ubuntu22.04/24.04; Debian12/13 | `HandyMeeting-<version>-linux-amd64.deb` |
+| Apple Silicon | macOS runner, Rust1.91.1, deployment target13.0 | macOS15 or newer, M-series | `HandyMeeting-<version>-osx-arm64.dmg` |
+| Intel Mac | macOS runner, Rust1.91.1, deployment target13.0 | macOS15 or newer, Intel x86-64 | `HandyMeeting-<version>-osx-x64.dmg` |
 
 These are intended targets, subject to each build and hardware test. Linux ARM, ALSA-only
 systems without a PulseAudio-compatible service, macOS12 and universal Mac binaries are
@@ -71,7 +71,8 @@ stop tails, drift and permission handling require target-specific tests.
 transcribe.cpp0.4.1 archives have fixed SHA-256 values. Only expected regular native
 libraries, the ABI contract and licenses are materialized. Existing different SDK files
 are rejected. The separate `.build/rust-native-beta2-0.4.1-<rid>` namespace preserves the
-Windows SDK and earlier distributions. No recognition model is downloaded or bundled.
+Windows SDK and earlier distributions. SDK preparation downloads no recognition model;
+the separate CI speech check downloads a pinned model into its private cache. No model is bundled.
 
 The prebuilt SDK uses the maintained `transcribe-cpp` safe Rust bindings. No local FFI or
 recognition algorithm is introduced. Native modules sit beside the executable in `native/`.
@@ -82,7 +83,8 @@ The SDK's actual Linux requirements are checked with `readelf --version-info` on
 build host. All18 official libraries were also inspected from their verified archive on
 Windows: the highest observed tags were GLIBC2.27, GLIBCXX3.4.22 and CXXABI1.3.9;
 all version-requirement records were confirmed with LLVM. All nine Mac dylibs declare
-minimum macOS11.0 in their actual build commands; capture raises the app's floor to13.0.
+minimum macOS11.0 in their actual build commands. The capture helper builds for13.0,
+while the distributed app declares macOS15.0 as its minimum supported runtime.
 Ubuntu22 builds
 must still pass real Debian12/13 package installation and headless release checks. The
 Mac SDK's minimum build versions are checked with `otool -l` against macOS13.0.
@@ -115,6 +117,9 @@ checksum sidecar cannot reuse a different package's manifest.
 `.github/workflows/rust-portable.yml` builds the actual Tauri GUI for all three targets,
 runs locked workspace tests and warning-rejecting Clippy, executes synthetic bounded-pipe
 stop/crash/reopen checks, verifies native runtime linkage, and creates candidate packages.
+It also requires real CPU transcription of two generated speech fixtures with pinned
+Handy/model assets, an owned ASR restart and source/content checks. Only a sanitized verdict
+is uploaded; [CI scope](CI.md) describes the downloads, thresholds and remaining limits.
 The Linux job also installs the DEB in Debian Bookworm and Trixie containers and runs its
 headless release check through `/usr/bin/handymeeting`. This tests installation and dynamic
 linkage, not desktop rendering or physical device access. On Ubuntu 22.04,

@@ -94,7 +94,7 @@ export default function AudioLevelMeter({
       data-clipped={clipping || undefined}
     >
       <div className="audio-level-reading">
-        <span id={description} className="audio-level-state">
+        <span id={description} className="audio-level-state" title={statusText}>
           {statusText}
         </span>
         <span className="audio-level-value">

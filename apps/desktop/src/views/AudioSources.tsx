@@ -55,6 +55,7 @@ export default function AudioSources({
   onReconnectMicrophone,
 }: Props) {
   const levelExplanation = useId();
+  const systemSelect = useId();
   const bound =
     recording &&
     activeMeetingId !== null &&
@@ -91,42 +92,46 @@ export default function AudioSources({
     <div className={`audio-sources${compact ? " compact" : ""}`}>
       <div className="audio-source-grid">
         <div className="audio-source">
-          <label>
+          <label
+            className="audio-source-heading"
+            htmlFor={compact ? undefined : systemSelect}
+          >
             <span className="label-icon">
               <Monitor size={15} />
               {t.system}
             </span>
-            {!compact && (
-              <div className="inline-control">
-                <select
-                  value={systemId}
-                  disabled={recording || busy || !hasSystemDevice}
-                  onChange={(event) => setSystemId(event.target.value)}
-                >
-                  {!hasSystemDevice && <option value="">{t.noDevices}</option>}
-                  {devices
-                    .filter((item) => item.source === "system")
-                    .map((item) => (
-                      <option key={item.id} value={item.id}>
-                        {item.name}
-                      </option>
-                    ))}
-                </select>
-                {onRefresh && (
-                  <button
-                    type="button"
-                    className="icon-button bordered"
-                    title={t.refreshDevices}
-                    aria-label={t.refreshDevices}
-                    disabled={busy || !connected}
-                    onClick={onRefresh}
-                  >
-                    <RefreshCw size={17} />
-                  </button>
-                )}
-              </div>
-            )}
           </label>
+          {!compact && (
+            <div className="inline-control audio-source-controls">
+              <select
+                id={systemSelect}
+                value={systemId}
+                disabled={recording || busy || !hasSystemDevice}
+                onChange={(event) => setSystemId(event.target.value)}
+              >
+                {!hasSystemDevice && <option value="">{t.noDevices}</option>}
+                {devices
+                  .filter((item) => item.source === "system")
+                  .map((item) => (
+                    <option key={item.id} value={item.id}>
+                      {item.name}
+                    </option>
+                  ))}
+              </select>
+              {onRefresh && (
+                <button
+                  type="button"
+                  className="icon-button bordered"
+                  title={t.refreshDevices}
+                  aria-label={t.refreshDevices}
+                  disabled={busy || !connected}
+                  onClick={onRefresh}
+                >
+                  <RefreshCw size={17} />
+                </button>
+              )}
+            </div>
+          )}
           <AudioLevelMeter
             label={t.system}
             level={levels.system}
@@ -135,37 +140,40 @@ export default function AudioSources({
             descriptionId={levelExplanation}
           />
         </div>
-        <div className="audio-source microphone-field">
-          <label className="checkbox-label">
+        <div className="audio-source">
+          <label className="checkbox-label audio-source-heading">
             {!compact && (
               <input
                 type="checkbox"
+                aria-label={t.microphone}
                 checked={microphoneIncluded}
                 disabled={recording || busy}
                 onChange={(event) => setMicEnabled(event.target.checked)}
               />
             )}
             <Mic size={15} />
-            {t.microphone}
+            {t.sourceMicrophone}
           </label>
           {!compact && (
-            <select
-              aria-label={t.sourceMicrophone}
-              value={micId}
-              disabled={!micEnabled || recording || busy}
-              onChange={(event) => setMicId(event.target.value)}
-            >
-              {!devices.some((item) => item.source === "microphone") && (
-                <option value="">{t.noDevices}</option>
-              )}
-              {devices
-                .filter((item) => item.source === "microphone")
-                .map((item) => (
-                  <option key={item.id} value={item.id}>
-                    {item.name}
-                  </option>
-                ))}
-            </select>
+            <div className="audio-source-controls">
+              <select
+                aria-label={t.sourceMicrophone}
+                value={micId}
+                disabled={!micEnabled || recording || busy}
+                onChange={(event) => setMicId(event.target.value)}
+              >
+                {!devices.some((item) => item.source === "microphone") && (
+                  <option value="">{t.noDevices}</option>
+                )}
+                {devices
+                  .filter((item) => item.source === "microphone")
+                  .map((item) => (
+                    <option key={item.id} value={item.id}>
+                      {item.name}
+                    </option>
+                  ))}
+              </select>
+            </div>
           )}
           <AudioLevelMeter
             label={t.sourceMicrophone}
@@ -194,11 +202,16 @@ export default function AudioSources({
           )}
         </div>
       </div>
-      <p className={compact ? "sr-only" : "audio-level-help"}>
-        {locale === "de"
-          ? "Die Balken zeigen den digitalen Spitzenpegel; 0 dBFS ist das Maximum. Sprache liegt meist im grünen bis gelben Bereich, Pausen 20–40 dB darunter, das ist normal. Rot heißt knapp unter dem Maximum. „Übersteuert“ heißt, der Ton kam schon abgeschnitten an; das lässt sich nachträglich nicht reparieren. Beim Computerton dann die Lautstärke in der Meeting-App oder dem abspielenden Programm senken, beim Mikrofon den Eingangspegel in den Systemeinstellungen senken oder mehr Abstand halten."
-          : "The bars show the digital peak level; 0 dBFS is the maximum. Speech is usually in the green to yellow range and pauses 20–40 dB lower, which is normal. Red means just below the maximum. “Clipping” means the audio already arrived cut off, which cannot be repaired afterwards. For system audio, lower the volume in the meeting app or the program that plays the sound; for the microphone, lower its input level in the system settings or keep more distance."}
-      </p>
+      <details className="help-disclosure audio-level-help">
+        <summary>
+          {locale === "de" ? "Pegel verstehen" : "About audio levels"}
+        </summary>
+        <p>
+          {locale === "de"
+            ? "Die Balken zeigen den digitalen Spitzenpegel; 0 dBFS ist das Maximum. Sprache liegt meist im grünen bis gelben Bereich, Pausen 20–40 dB darunter, das ist normal. Rot heißt knapp unter dem Maximum. „Übersteuert“ heißt, der Ton kam schon abgeschnitten an; das lässt sich nachträglich nicht reparieren. Beim Computerton dann die Lautstärke in der Meeting-App oder dem abspielenden Programm senken, beim Mikrofon den Eingangspegel in den Systemeinstellungen senken oder mehr Abstand halten."
+            : "The bars show the digital peak level; 0 dBFS is the maximum. Speech is usually in the green to yellow range and pauses 20–40 dB lower, which is normal. Red means just below the maximum. “Clipping” means the audio already arrived cut off, which cannot be repaired afterwards. For system audio, lower the volume in the meeting app or the program that plays the sound; for the microphone, lower its input level in the system settings or keep more distance."}
+        </p>
+      </details>
       <p id={levelExplanation} className="sr-only">
         {locale === "de"
           ? "Digitaler Spitzenpegel in dBFS. Keine kalibrierte Lautstärkemessung und kein Nachweis, dass Audio bereits gespeichert ist."

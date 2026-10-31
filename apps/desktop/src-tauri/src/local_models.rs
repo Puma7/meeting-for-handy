@@ -197,6 +197,56 @@ fn ollama_root() -> String {
     ollama_root_from(std::env::var("OLLAMA_HOST").ok().as_deref())
 }
 
+/// Only the configured loopback provider addresses opt into native model management.
+/// Other OpenAI-compatible local servers retain their existing transport behavior.
+pub(crate) fn provider_for_endpoint(
+    endpoint: &str,
+) -> Option<meeting_notes::residency::LocalProvider> {
+    let ollama = format!("{}v1/", ollama_root());
+    let lm = dirs::home_dir()
+        .map(|home| lm_studio_endpoint(&home))
+        .unwrap_or_else(|| LM_STUDIO_ENDPOINT.into());
+    provider_for_addresses(endpoint, &ollama, &lm)
+}
+
+/// Matches configured provider addresses without changing process environment or probing a server.
+fn provider_for_addresses(
+    endpoint: &str,
+    ollama: &str,
+    lm: &str,
+) -> Option<meeting_notes::residency::LocalProvider> {
+    /// Extracts only credential-free loopback origins and paths for configured-provider matching.
+    fn address(value: &str) -> Option<(String, String, u16, String)> {
+        let url = url::Url::parse(value).ok()?;
+        if url.scheme() != "http"
+            || !url.username().is_empty()
+            || url.password().is_some()
+            || url.query().is_some()
+            || url.fragment().is_some()
+        {
+            return None;
+        }
+        let host = match url.host()? {
+            url::Host::Domain("localhost") => "127.0.0.1".to_owned(),
+            url::Host::Ipv4(ip) if ip.is_loopback() => ip.to_string(),
+            url::Host::Ipv6(ip) if ip.is_loopback() => ip.to_string(),
+            _ => return None,
+        };
+        Some((
+            url.scheme().into(),
+            host,
+            url.port_or_known_default()?,
+            url.path().trim_end_matches('/').into(),
+        ))
+    }
+    let selected = address(endpoint)?;
+    if address(ollama).as_ref() == Some(&selected) {
+        return Some(meeting_notes::residency::LocalProvider::Ollama);
+    }
+    (address(lm).as_ref() == Some(&selected))
+        .then_some(meeting_notes::residency::LocalProvider::LmStudio)
+}
+
 /// Reads just LM Studio's bounded server configuration, never conversations or credentials.
 /// A custom bind address does not grant remote access: only its port is used on loopback.
 fn lm_studio_endpoint(home: &Path) -> String {
@@ -455,6 +505,82 @@ mod tests {
     use super::*;
     use std::io::{Read, Write};
     use std::net::TcpListener;
+
+    #[test]
+    /// A native management route belongs to its configured bind, even when another local
+    /// server uses the same port and path on a different loopback address.
+    fn provider_matching_keeps_distinct_loopback_binds_separate() {
+        for (selected, configured) in [
+            ("http://127.0.0.1:2345/v1/", "http://127.0.0.2:2345/v1/"),
+            ("http://127.23.45.67:2345/v1/", "http://127.0.0.1:2345/v1/"),
+            ("http://[::1]:2345/v1/", "http://127.0.0.1:2345/v1/"),
+        ] {
+            assert_eq!(
+                provider_for_addresses(selected, configured, configured),
+                None,
+                "selected {selected}, configured {configured}"
+            );
+        }
+    }
+
+    #[test]
+    /// Provider precedence cannot turn an LM Studio bind into Ollama merely because
+    /// both configured services use the same numeric port on different local addresses.
+    fn provider_matching_routes_same_port_to_its_own_configured_provider() {
+        use meeting_notes::residency::LocalProvider;
+        let ollama = "http://127.0.0.2:2345/v1/";
+        let lm = "http://127.0.0.1:2345/v1/";
+        assert_eq!(
+            provider_for_addresses(lm, ollama, lm),
+            Some(LocalProvider::LmStudio)
+        );
+        assert_eq!(
+            provider_for_addresses(ollama, ollama, lm),
+            Some(LocalProvider::Ollama)
+        );
+        assert_eq!(
+            provider_for_addresses("http://[::1]:2345/v1/", ollama, lm),
+            None
+        );
+    }
+
+    #[test]
+    /// Normalization retains localhost's existing IPv4 alias and the same IPv6 bind,
+    /// while unsafe URL forms and different paths or ports never acquire a native route.
+    fn provider_matching_normalizes_only_the_same_safe_origin_and_path() {
+        use meeting_notes::residency::LocalProvider;
+        for (selected, configured) in [
+            ("http://localhost:2345/v1", "http://127.0.0.1:2345/v1/"),
+            ("http://127.0.0.1:2345/v1/", "http://localhost:2345/v1"),
+            ("http://[0:0:0:0:0:0:0:1]:2345/v1/", "http://[::1]:2345/v1/"),
+            ("http://127.0.0.2:2345/v1/", "http://127.0.0.2:2345/v1"),
+        ] {
+            assert_eq!(
+                provider_for_addresses(selected, configured, "http://127.0.0.1:1234/v1/"),
+                Some(LocalProvider::Ollama),
+                "{selected}"
+            );
+        }
+        for selected in [
+            "http://127.0.0.1:2346/v1/",
+            "http://127.0.0.1:2345/other/",
+            "https://127.0.0.1:2345/v1/",
+            "http://user:secret@127.0.0.1:2345/v1/",
+            "http://127.0.0.1:2345/v1/?key=secret",
+            "http://127.0.0.1:2345/v1/#fragment",
+            "http://example.com:2345/v1/",
+        ] {
+            assert_eq!(
+                provider_for_addresses(
+                    selected,
+                    "http://127.0.0.1:2345/v1/",
+                    "http://127.0.0.1:1234/v1/"
+                ),
+                None,
+                "{selected}"
+            );
+        }
+    }
 
     #[test]
     /// Reads only a valid bounded port setting and rejects oversized or invalid

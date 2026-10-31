@@ -5,6 +5,7 @@ import App from "./App";
 import { de } from "./i18n";
 import { testServices } from "./test-services";
 import { useNotesJob } from "./useNotesJob";
+import { defaultTemplate } from "./domain";
 import type { DesktopApi, Meeting, NotesProgress } from "./types";
 
 // Synthetic IPC: no real recordings, providers or stored credentials are accessed.
@@ -46,6 +47,102 @@ function fixture() {
   } as unknown as DesktopApi;
 }
 beforeEach(() => localStorage.clear());
+
+it("keeps discovery failures visible beside a retained analysis result", async () => {
+  const api = fixture();
+  const template = defaultTemplate("de");
+  vi.mocked(api.listAnalyses).mockResolvedValue({
+    analyses: [
+      {
+        id: "retained-analysis",
+        meetingId: meeting.id,
+        sourceHash: "synthetic",
+        template,
+        createdAt: "2026-10-30T09:00:00Z",
+        sources: [],
+        sections: [
+          {
+            ...template.steps[0],
+            items: [
+              {
+                text: "Retained synthetic result",
+                owner: null,
+                due: null,
+                evidence: [],
+              },
+            ],
+          },
+        ],
+      },
+    ],
+    skipped: [],
+  });
+  vi.mocked(api.listTextModels).mockRejectedValue(
+    new Error("Synthetic retained-result discovery failed"),
+  );
+  render(<App api={api} />);
+  await userEvent.click(
+    await screen.findByRole("button", { name: de.analyzeMeeting }),
+  );
+  await screen.findByText("Retained synthetic result");
+  const messages = await screen.findAllByText(
+    /Synthetic retained-result discovery failed/,
+  );
+  expect(messages.some((message) => !message.closest("details"))).toBe(true);
+  expect(screen.getByText(de.analysisSetup).closest("details")!.open).toBe(
+    false,
+  );
+  expect(api.generateNotes).not.toHaveBeenCalled();
+});
+
+it("keeps idle model discovery failures outside collapsed analysis setup", async () => {
+  const api = fixture();
+  vi.mocked(api.listTextModels).mockRejectedValue(
+    new Error("Synthetic model discovery failed"),
+  );
+  render(<App api={api} />);
+  await userEvent.click(
+    await screen.findByRole("button", { name: de.analyzeMeeting }),
+  );
+  await waitFor(() => expect(api.listTextModels).toHaveBeenCalled());
+  const messages = await screen.findAllByText(
+    /Synthetic model discovery failed/,
+  );
+  expect(messages.some((message) => !message.closest("details"))).toBe(true);
+  expect(screen.getByText(de.analysisSetup).closest("details")!.open).toBe(
+    false,
+  );
+  expect(api.generateNotes).not.toHaveBeenCalled();
+});
+
+it("opens analysis setup only from the visible discovery-error remedy", async () => {
+  const api = fixture();
+  vi.mocked(api.listTextModels).mockRejectedValue(
+    new Error("Synthetic discovery unavailable"),
+  );
+  render(<App api={api} />);
+  await userEvent.click(
+    await screen.findByRole("button", { name: de.analyzeMeeting }),
+  );
+  const message = (
+    await screen.findAllByText("Synthetic discovery unavailable")
+  ).find((element) => !element.closest("details"))!;
+  expect(message).toBeDefined();
+  const details = screen.getByText(de.analysisSetup).closest("details")!;
+  expect(details.open).toBe(false);
+  const remedy = screen.getByRole("button", { name: "Einrichtung öffnen" });
+  expect(remedy.closest("details")).toBeNull();
+  expect(
+    screen
+      .getByText(
+        "Starte deinen lokalen Modelldienst und aktualisiere die Liste.",
+      )
+      .closest("details"),
+  ).toBeNull();
+  await userEvent.click(remedy);
+  expect(details.open).toBe(true);
+  expect(api.generateNotes).not.toHaveBeenCalled();
+});
 
 it("does not claim a backend job is unstarted when its progress cannot be read", async () => {
   const api = fixture();
@@ -171,7 +268,7 @@ it("starts from the bottom bar and retains a failed job's message, partial progr
     within(status).queryByRole("button", { name: de.cancelAnalysis }),
   ).toBeNull();
   expect(within(status).getByLabelText(de.elapsed).textContent).toMatch(
-    /\d+:\d+/,
+    /^\d+(?::\d{2}){1,2}$/,
   );
 });
 

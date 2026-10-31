@@ -158,12 +158,6 @@ export default function NotesProgressPanel({
           aria-live="off"
         >
           <strong>{clock(elapsedMs)}</strong>
-          <span>
-            {Math.floor(Math.max(0, elapsedMs) / 1000)}{" "}
-            {Math.floor(Math.max(0, elapsedMs) / 1000) === 1
-              ? t.elapsedSecond
-              : t.elapsedSeconds}
-          </span>
         </div>
         {running ? (
           <button

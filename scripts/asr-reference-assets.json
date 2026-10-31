@@ -1,0 +1,25 @@
+{
+  "handyVersion": "0.9.8",
+  "handy": {
+    "linux-x64": {"file": "Handy_0.9.8_amd64.deb", "bytes": 41941410, "sha256": "4efe1fdcc2b68e95612e866810ccb23e06bbdf004a4e857de0862b0c6927caa8"},
+    "osx-arm64": {"file": "Handy_aarch64.app.tar.gz", "bytes": 19950735, "sha256": "e6931a14805eac47878e5e80ba7de9395cebaf355d4b7e231fbdac532169e9a4"},
+    "osx-x64": {"file": "Handy_x64.app.tar.gz", "bytes": 22403409, "sha256": "07623a104a59932ce1bff3a08ebc0ab81e5dbf404089a8da6141cefa6ee687bc"}
+  },
+  "model": {
+    "repository": "handy-computer/nemotron-3.5-asr-streaming-0.6b-gguf",
+    "revision": "6d44e540bc31b0de1dbe174a3cea87f53a7f22fb",
+    "file": "nemotron-3.5-asr-streaming-0.6b-Q8_0.gguf",
+    "bytes": 751094240,
+    "sha256": "b94545b313b3223fda7b2857a52681da813935c2127643d1e9ff0c23d988089c",
+    "noticeRevision": "53ce288f69326b415aeef030cfcb02a08a8096dd",
+    "notices": {
+      "LICENSE": {"bytes": 2619, "sha256": "2ab44b68365473c112f5092211a38f231cb23e50de68b75a13369adbd76a74df"},
+      "NOTICE": {"bytes": 411, "sha256": "e6ffd58bf2373a13db1f59ed9d96399e49b6c97a3e88aca340c054ed55fa4bac"}
+    }
+  },
+  "maximumWordErrorRate": 0.15,
+  "speech": {
+    "system": {"text": "This is a synthetic meeting test. We decide to meet on Friday. The project will use the blue folder. The next meeting starts at nine. This is only a test recording.", "anchors": ["friday", "blue", "nine"]},
+    "microphone": {"text": "This is the second synthetic speaker. I will write the report tomorrow. The number for this test is forty two. The meeting is now finished. This is only a test recording.", "anchors": ["report", "tomorrow", "forty", "two"]}
+  }
+}

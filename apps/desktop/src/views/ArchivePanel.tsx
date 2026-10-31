@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { errorMessage } from "../api";
 import type {
   ArchiveEntry,
@@ -12,10 +13,13 @@ export default function ArchivePanel({
   api,
   locale,
   job,
+  statusContainer,
 }: {
   api: DesktopApi;
   locale: Locale;
   job: LibraryProgress | null;
+  /** Keeps asynchronous command and catalog failures visible outside collapsed settings. */
+  statusContainer?: HTMLElement | null;
 }) {
   const de = locale === "de";
   const [page, setPage] = useState<ArchivePage | null>(null),
@@ -88,6 +92,66 @@ export default function ArchivePanel({
       setBusy(false);
     }
   }
+  const unfinishedNotice =
+    unfinished.length > 0 && api.resumePermanentDeletion ? (
+      <div className="notice warning archive-interruption">
+        <strong>
+          {de
+            ? "Unterbrochene endgültige Löschung"
+            : "Stopped permanent deletion"}
+        </strong>
+        <p>
+          {de
+            ? "Diese bereits bestätigten Löschungen wurden nicht abgeschlossen. Fortsetzen löscht nur noch die protokollierten, unveränderten Dateien; geänderte Dateien stoppen den Vorgang und bleiben erhalten."
+            : "These confirmed deletions did not finish. Continuing deletes only the logged, unchanged files; a changed file stops the run and is kept."}
+        </p>
+        <ul>
+          {unfinished.map((item) => (
+            <li key={item.logId}>
+              <code>{item.meetingId}</code> · {item.deletedFiles}/
+              {item.totalFiles} · {item.confirmedAt}{" "}
+              <button
+                className="secondary"
+                disabled={busy || running}
+                onClick={() => {
+                  setResuming(item);
+                  setTyped("");
+                }}
+              >
+                {de ? "Fortsetzen prüfen" : "Review continuation"}
+              </button>
+            </li>
+          ))}
+        </ul>
+        {resuming && (
+          <div>
+            <label>
+              {de
+                ? `Zur Bestätigung „DELETE ${resuming.meetingId}“ eingeben`
+                : `Type "DELETE ${resuming.meetingId}" to confirm`}
+              <input value={typed} onChange={(e) => setTyped(e.target.value)} />
+            </label>
+            <button
+              className="danger"
+              disabled={
+                busy || running || typed !== `DELETE ${resuming.meetingId}`
+              }
+              onClick={() => {
+                const target = resuming;
+                setBusy(true);
+                setError(null);
+                void api.resumePermanentDeletion!(target.logId, typed)
+                  .then(() => setResuming(null))
+                  .catch((e) => setError(errorMessage(e)))
+                  .finally(() => setBusy(false));
+              }}
+            >
+              {de ? "Löschung fortsetzen" : "Continue deletion"}
+            </button>
+          </div>
+        )}
+      </div>
+    ) : null;
   return (
     <section className="retention-preview">
       <h3>{de ? "Lokale Archive" : "Local archives"}</h3>
@@ -96,70 +160,22 @@ export default function ArchivePanel({
           ? "Wiederherstellung prüft alle Dateien erneut und überschreibt keine vorhandene Sitzung. Die Archivkopie bleibt erhalten. Endgültiges Löschen ist ausschließlich über eine neue Aufräumvorschau möglich."
           : "Restoration verifies every file again and never overwrites an existing meeting. The archive copy is retained. Permanent deletion is available only through a fresh retention preview."}
       </p>
-      {error && <p role="alert">{error}</p>}
-      {logError && <p role="alert">{logError}</p>}
-      {unfinished.length > 0 && api.resumePermanentDeletion && (
-        <div className="notice warning">
-          <strong>
-            {de
-              ? "Unterbrochene endgültige Löschung"
-              : "Stopped permanent deletion"}
-          </strong>
-          <p>
-            {de
-              ? "Diese bereits bestätigten Löschungen wurden nicht abgeschlossen. Fortsetzen löscht nur noch die protokollierten, unveränderten Dateien; geänderte Dateien stoppen den Vorgang und bleiben erhalten."
-              : "These confirmed deletions did not finish. Continuing deletes only the logged, unchanged files; a changed file stops the run and is kept."}
-          </p>
-          <ul>
-            {unfinished.map((item) => (
-              <li key={item.logId}>
-                <code>{item.meetingId}</code> · {item.deletedFiles}/
-                {item.totalFiles} · {item.confirmedAt}{" "}
-                <button
-                  className="secondary"
-                  disabled={busy || running}
-                  onClick={() => {
-                    setResuming(item);
-                    setTyped("");
-                  }}
-                >
-                  {de ? "Fortsetzen prüfen" : "Review continuation"}
-                </button>
-              </li>
-            ))}
-          </ul>
-          {resuming && (
-            <div>
-              <label>
-                {de
-                  ? `Zur Bestätigung „DELETE ${resuming.meetingId}“ eingeben`
-                  : `Type "DELETE ${resuming.meetingId}" to confirm`}
-                <input
-                  value={typed}
-                  onChange={(e) => setTyped(e.target.value)}
-                />
-              </label>
-              <button
-                className="danger"
-                disabled={
-                  busy || running || typed !== `DELETE ${resuming.meetingId}`
-                }
-                onClick={() => {
-                  const target = resuming;
-                  setBusy(true);
-                  setError(null);
-                  void api.resumePermanentDeletion!(target.logId, typed)
-                    .then(() => setResuming(null))
-                    .catch((e) => setError(errorMessage(e)))
-                    .finally(() => setBusy(false));
-                }}
-              >
-                {de ? "Löschung fortsetzen" : "Continue deletion"}
-              </button>
-            </div>
-          )}
-        </div>
-      )}
+      {error &&
+        (statusContainer ? (
+          createPortal(<p role="alert">{error}</p>, statusContainer)
+        ) : (
+          <p role="alert">{error}</p>
+        ))}
+      {logError &&
+        (statusContainer ? (
+          createPortal(<p role="alert">{logError}</p>, statusContainer)
+        ) : (
+          <p role="alert">{logError}</p>
+        ))}
+      {unfinishedNotice &&
+        (statusContainer
+          ? createPortal(unfinishedNotice, statusContainer)
+          : unfinishedNotice)}
       <button
         className="text-button"
         disabled={busy || running}

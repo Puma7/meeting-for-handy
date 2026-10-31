@@ -850,9 +850,9 @@ fn persist(
 /// Accelerated native test using explicitly supplied synthetic speech fixtures.
 /// This opens no audio device and is not a real-time or long-session test.
 pub fn synthetic_smoke(args: &[String]) -> Result<(), String> {
-    if args.len() != 5 {
+    if !(5..=6).contains(&args.len()) {
         return Err(
-            "Usage: --synthetic-smoke MODEL BACKEND_DIR SYSTEM_WAV MICROPHONE_WAV OUTPUT_ROOT"
+            "Usage: --synthetic-smoke MODEL BACKEND_DIR SYSTEM_WAV MICROPHONE_WAV OUTPUT_ROOT [HANDY_EXECUTABLE]"
                 .into(),
         );
     }
@@ -867,7 +867,10 @@ pub fn synthetic_smoke(args: &[String]) -> Result<(), String> {
     let requested_model = Path::new(&args[0])
         .canonicalize()
         .map_err(|_| "Synthetic model path was not found")?;
-    let bridge = handy_bridge::HandyBridge::discover(None).map_err(|error| error.to_string())?;
+    // CI may select its private, pinned real Handy bundle explicitly. Refresh,
+    // installed-model matching and native identity checks remain mandatory.
+    let bridge = handy_bridge::HandyBridge::discover(args.get(5).map(Path::new))
+        .map_err(|error| error.to_string())?;
     let catalog = bridge.refresh().map_err(|error| error.to_string())?;
     let mut selected = None;
     for model in catalog.installed_streaming_models() {

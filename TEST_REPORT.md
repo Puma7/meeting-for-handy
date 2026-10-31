@@ -849,3 +849,168 @@ Lokal bestanden: `makensis -WX` ohne Warnung und 72 Release-Skripttests.
 - **Frühere Ordnerverknüpfung (Minor):** Die Verknüpfung `Meeting for Handy\Meeting for Handy.lnk` aus dem Versionsordner-Layout wird nur noch gelöscht, wenn der Eigentumseintrag des 1.0.5-Helfers (`HKCU\Software\HandyMeeting\BrandedStartMenuLink`, Werte `Link` und `Target`) sie nennt und ihr Ziel noch dem vermerkten Programm entspricht. Der Eintrag wird mit ihr entfernt. Eine Endung auf `HandyMeeting.exe` allein genügt nicht mehr. `-RunChecks` legt die synthetische frühere Verknüpfung jetzt mit diesem Eintrag an und prüft, dass beide verschwinden. Mit Wine 9 ist zusätzlich nachgestellt: eine nicht vermerkte und eine fremde Verknüpfung bleiben erhalten.
 
 Lokal bestanden: 168 Vitest-Fälle, `tsc`, `prettier`, 72 Release-Skripttests, `makensis -WX`.
+
+## Ergänzung: portable Transkriptionsprüfung, 30. Oktober 2026
+
+Ausgangsstand ist der Quellbaum von `f2ccb8a8a268323da5ea0ad8ed1eb69102694da6`
+(1.0.7). Die bestehenden Linux-/Mac-Paketprüfungen luden kein Sprachmodell;
+ein grüner Build belegte deshalb keine tatsächlich erkannte Sprache. Der neue
+Pflichtschritt für Linux x64 sowie Mac ARM/Intel verwendet die echte Modellliste
+von Handy0.9.8 und festgelegte Nemotron3.5-Q8-Gewichte mit Runtime0.4.1 auf CPU.
+Zwei unterschiedliche künstliche Sprecher müssen vollständig transkribiert
+werden. Ein gezielter eigener ASR-Prozessabbruch, Neustart, unveränderte
+Audio-Hashes, erhaltener Textjournalanfang und Wiederöffnung gehören zum Test.
+Zusätzlich gelten vorab höchstens15% Wortfehler und alle festgelegten
+spurbezogenen Schlüsselwörter. Falscher nichtleerer Text genügt nicht mehr.
+
+Lokal auf Windows x64 mit Intel Core i7-13700 (16 Kerne,24 Threads), vorhandenem
+Modell und Microsoft-Zira-Sprachdateien
+tatsächlich ausgeführt: beide Spuren mit je31 Referenzwörtern ohne Wortfehler,
+202720 bzw.201440 Samples bei16kHz; ein eigener System-ASR-Neustart, Audio und
+Textjournal erhalten, Wiederöffnung erfolgreich. Gesamtdauer33,4442571s;
+beschleunigte Dateiverarbeitung, keine Aufnahmegeräte geöffnet. Während dieses
+Modelllaufs liefen keine anderen von diesem Auftrag gestarteten Tests;
+anschließend liefen Projekt- und Oberflächenprüfungen parallel. Andere
+Hintergrundlasten des Nutzers wurden nicht erfasst. RAM, Grafikspeicher und Echtzeitlatenz wurden
+dabei nicht gemessen. Dieser Windows-Lauf beweist nicht die neue Bereitstellung
+der Linux-/Mac-Testmodelle oder deren Zielausführung.
+
+Lokal bestanden außerdem348 Rust-All-Targettests (zwei gesonderte Prüfeinstiege
+regulär ignoriert), Clippy mit `-D warnings`, Formatprüfung,225 Frontendtests,
+TypeScript und Produktionsbuild sowie `verify.ps1` mit47 PCM-,35 Notiz-,28
+Vorlagen- und8 Agentenprüfungen plus Monitorprüfung. Die neuen Python-Fälle
+prüfen auch echte Fehlerurteile für geänderte Audio-Hashes, Teiltranskripte,
+falsche Sprecher und Schlüsselwörter sowie kleine künstliche Download-/Cache-
+und Archivfälle; sie sind keine echten Modellläufe auf Mac oder Linux.
+
+Der Linux-Tontest verlangt jetzt die vollständigen acht Sekunden beider Spuren,
+geschlossene und hashgleiche PCM-Dateien, getrennte Signale und weiterhin
+höchstens500ms Spurdifferenz. Unerwartete Warnungen oder unerklärte
+`captureIncomplete`-Zustände scheitern. Bekannte geschätzte Startlücken bleiben
+explizit `passed-with-startup-gaps` und `completeCapture=false`; sie werden nicht
+als lückenloser Erfolg ausgegeben. Die Mac-Prüfanleitung nennt passend zum
+aktuellen Paket macOS15+.
+
+Die tatsächlichen neuen Linux-/Mac-CI-Ergebnisse sind bei Erstellung dieser
+Ergänzung noch offen und werden am PR mit Laufverweisen dokumentiert. Physische
+Geräte, Mac-Aufnahmefreigaben, PipeWire, kombinierte Zweistundenläufe, GPU,
+Signatur/Notarisierung und der frühere lokale Textmodell-Referenztest bleiben
+getrennte offene Nachweise. Keine neue Programmversion wird hier freigegeben.
+
+
+## Plattformübergreifende Transkriptionsprüfung vom 30.10.2026 (PR35)
+
+Frühere Plattformangaben und Prüflücken oben beschreiben ihren historischen
+Stand. Auf PR35-Head 9658735c8831202a913d6d86cb522b2ef372705e sind die realen
+CPU-Transkriptionsprüfungen mit erzeugter Sprache und dem festgelegten Handy-
+Modell auf Linux, Mac Intel und Mac ARM erfolgreich ausgeführt worden. Sie
+prüfen vollständige unterschiedliche Audiodateien, Modellidentität,
+Quellenanker, höchstens 15 Prozent Wortfehler, gezielten Workerabbruch mit
+Neustart sowie den Erhalt von Audio, Journal und wieder geöffnetem Transkript.
+Zeit-, Inhalts- und Erhaltungsgrenzen wurden nicht abgeschwächt.
+
+Aktuelle Zieljobs auf genau diesem Head:
+- [Linux](https://github.com/Puma7/meeting-for-handy/actions/runs/41065615358/job/124096150255)
+- [Mac Intel](https://github.com/Puma7/meeting-for-handy/actions/runs/41065615358/job/124096150169)
+- [Mac ARM](https://github.com/Puma7/meeting-for-handy/actions/runs/41065615358/job/124096150151)
+- [Windows Rust und Paketprüfung](https://github.com/Puma7/meeting-for-handy/actions/runs/41065615423/job/124096140911)
+
+Linux prüft zusätzlich zwei virtuelle PulseAudio-Spuren und Paketinstallation
+in isolierten Debian-12/13-Prüfumgebungen. Mac prüft App-Start, Paketierung,
+Relokation und den nativen Schlüsselprovider. Diese CI-Nachweise ersetzen keine
+physische Aufnahme- und Berechtigungsprüfung auf einem Nutzergerät. Die aktuelle
+verteilte Mac-App verlangt macOS 15.0; die historische Beta2-Angabe macOS 13 gilt
+nicht für diese aktuellen Pakete. Die Mindestversion wurde am tatsächlichen
+Intel-DMG und dessen Info.plist gelesen, ohne Installation oder Ausführung.
+
+Auf 9658735 waren alle 21 Check-Runs erfolgreich, neutral oder regulär
+übersprungen. Codex-Codeprüfung und vollständiger CodeRabbit-Review dieses Heads
+waren ohne neue Befunde; die [öffentliche Abschlussnotiz](https://github.com/Puma7/meeting-for-handy/pull/35#issuecomment-6524952535)
+ordnet die tatsächlichen Links zu. Diese Ergebnisse gelten für 9658735; eine
+nachfolgende reine Berichtsergänzung benötigt erneut aktuelle CI und Reviews.
+Für Kandidat12 waren zuletzt 110 von 111 Pythonprüfungen erfolgreich, der reine Unix-Fall unter
+Windows regulär übersprungen. Der frische erforderliche ./verify.ps1-Check
+besteht auch mit dieser Berichtsergänzung. Produktcode und Prüfgrenzen bleiben
+gegenüber 9658735 unverändert.
+
+Offen bleiben physische Aufnahme/Berechtigungen, GPU, ein kombinierter
+Zweistundenlauf, der echte lokale Textmodell-Referenzlauf sowie Signatur und
+Notarisierung für eine Auslieferung. Es wurde weder zusammengeführt noch eine
+Version veröffentlicht oder ein Programm installiert. Weitere Einzelheiten:
+[docs/validation/portable-asr-20261030.md](docs/validation/portable-asr-20261030.md).
+
+
+### Vollständige Prüfung virtueller Tonsignale (Kandidat13)
+
+Der Linux-Prüfer prüft das Tonsignal jetzt in überlappenden 250ms-Fenstern über
+die gesamte Spur bis zum letzten Sample. Ein gemeldeter Nullpräfix beim
+Spurstart wird getrennt ausgewiesen; danach müssen acht Sekunden Tonsignal
+vorliegen. Eine Startwarnung erlaubt keine spätere Stille oder fehlenden Ton
+in der anderen Spur. Die bisherigen RMS-, Frequenz-, Hash-, PCM- und
+500ms-Spurdifferenzgrenzen bleiben bestehen. Drei reproduzierte Vorherfehler
+werden erkannt; die vollständigen 115 Pythonprüfungen enden mit 114 Erfolgen
+und einem regulär übersprungenen Unix-Fall unter Windows. Dies sind
+synthetische Prüferfixtures. Der echte Linux-CI-Lauf muss den neuen Head prüfen.
+
+
+### Portable CI candidate14 follow-up, 2026-10-30
+
+The stricter full-track verifier correctly failed the candidate13 Linux virtual
+capture: declared startup silence left less than eight seconds of actual tone.
+The separate generated-speech ASR check passed0/31 and1/31 word errors with owned
+worker restart and preserved audio/journals. Overall Linux CI was not green.
+Candidate14 warms only its private synthetic players for three seconds with
+requested50ms playback latency and records for nine seconds. Existing8–10second
+receipt, eight-second actual-tone,250ms-window, RMS/frequency and500ms difference
+limits are unchanged. The nine-second positive/negative boundary regression and
+full Python guards passed locally; fresh actual Linux/macOS CI remains required.
+No private meeting, physical device, local text model, GPU or endurance proof is
+added. The approved historical report prefix remains byte-identical.
+
+
+## Oberflächen-Nacharbeit vom 30.10.2026 (PR36)
+
+Dieser Abschnitt beschreibt die gesonderte Oberflächen-Nacharbeit; frühere
+Prüfstände oben bleiben historische Nachweise. Pegelanzeigen stehen auf gleicher
+Höhe. Hinweise, Einrichtung und Optionen öffnen sich schrittweise; die
+Nachbearbeitung zeigt jeweils einen Startknopf und die Laufzeit einmal. Neue
+Aufnahmewarnungen werden sichtbar, identische Statusabfragen öffnen bewusst
+geschlossene Hinweise nicht erneut. Fehler der lokalen Modellerkennung und
+Wartungsfehler bleiben auch bei geschlossener Einrichtung sichtbar. Rechnerdetails
+sind bei schmalem Fenster erreichbar; RAM-Mengen und die nicht gemessene
+GPU-Auslastung werden erklärt.
+
+Der lokale Kandidat08 bestand 233 Frontendtests, TypeScript,
+Produktionsbuild, Formatierung und ./verify.ps1. Aussagekräftige synthetische
+Vorher-/Nachher-Prüfungen sichern die behobenen Reviewbefunde ab. Sichtbare
+Browserprüfungen verwenden ausschließlich künstliche IPC-Beispieldaten. Sie
+belegen keine echte Aufnahme, Textmodellqualität, GPU-Messung oder Langzeitlast.
+Native Aufnahme, Transportschicht, Prompts und Abhängigkeiten sind unverändert.
+
+Die einzelnen Prüfstände und Grenzen sind in
+[docs/validation/interface-clarity-20261030.md](docs/validation/interface-clarity-20261030.md)
+zugeordnet. Neue CI-Ergebnisse und saubere Reviews müssen sich auf den tatsächlich
+veröffentlichten neuen Head beziehen; frühere Ergebnisse ersetzen sie nicht.
+
+
+### Weitere Reviewkorrekturen (Kandidat09)
+
+Auch bei einer vorhandenen Auswertung bleibt ein Fehler der lokalen
+Modellerkennung sichtbar. Fehler aus Wiederherstellung, Archivkompaktierung und
+Audiokopien werden außerhalb geschlossener Wartungseinstellungen angezeigt.
+Die schmale Seitenleiste liegt über dem normalen Inhalt, aber unter Dialogen.
+Vier neue synthetische Regressionen scheiterten vorher und bestehen nachher.
+Alle 237 Frontendtests sowie TypeScript und Produktionsbuild bestehen lokal.
+Eine sichtbare 600px-Prüfung belegt die korrigierte Ebenenfolge ohne seitlichen
+Überlauf. Native Quellen und Abhängigkeiten bleiben unverändert; dies ist kein
+Hardware-, Modellserver-, GPU- oder Langzeitnachweis.
+
+
+### Oberflaechen-Nachweis Kandidat10 vom 30.10.2026
+
+Der CPU-Messwert bleibt in schmalen Fenstern ueber Rechnerdetails erreichbar,
+einschliesslich hoher Last und fehlender Messdaten. Drei synthetische Vorherfaelle
+schlugen fehl; alle 240 Frontendtests sowie TypeScript/Produktionsbuild bestehen.
+Die sichtbare 600px-Pruefung verwendet nur kuenstliche CPU-28%-/RAM-Werte und zeigt
+den weiterhin ausdruecklich ungemessenen GPU-Zustand. Native Quellen bleiben
+byteunveraendert. Hardware-, Modellserver-, GPU- und Langzeitgrenzen bleiben offen.

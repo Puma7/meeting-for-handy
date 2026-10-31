@@ -31,6 +31,8 @@ type Props = {
   meetingLoading: boolean;
   selectMeeting: (id: string) => void;
   modelReady: boolean;
+  /** Local discovery failure remains visible while optional setup is collapsed. */
+  modelDiscoveryError?: string | null;
   libraryInvalid: boolean;
   libraryPending: boolean;
   libraryError: string | null;
@@ -55,6 +57,8 @@ type Props = {
   recording: boolean;
   busy: boolean;
   beginNotes: () => void;
+  /** Only render the page action when the persistent status bar has no start action. */
+  showStart: boolean;
   result: AnalysisResult | undefined;
   resultSection: AnalysisResult["sections"][number] | undefined;
   selectedStep: AnalysisStep;
@@ -81,6 +85,7 @@ export default function NotesView({
   meetingLoading,
   selectMeeting,
   modelReady,
+  modelDiscoveryError,
   libraryInvalid,
   libraryPending,
   libraryError,
@@ -102,6 +107,7 @@ export default function NotesView({
   recording,
   busy,
   beginNotes,
+  showStart,
   result,
   resultSection,
   selectedStep,
@@ -115,7 +121,7 @@ export default function NotesView({
   showEvidence,
   locale,
 }: Props) {
-  const [setupOpen, setSetupOpen] = useState(!result);
+  const [setupOpen, setSetupOpen] = useState(false);
   useEffect(() => {
     if (notesBusy || result) setSetupOpen(false);
   }, [notesBusy, result?.id]);
@@ -181,6 +187,19 @@ export default function NotesView({
         </div>
       )}
       <section className="notes-config">
+        {!setupOpen && !notesBusy && modelDiscoveryError && (
+          <div role="alert" className="notice warning analysis-discovery-error">
+            <p>{modelDiscoveryError}</p>
+            <p>
+              {locale === "de"
+                ? "Starte deinen lokalen Modelldienst und aktualisiere die Liste."
+                : "Start your local model server and refresh the list."}
+            </p>
+            <button className="secondary" onClick={() => setSetupOpen(true)}>
+              {locale === "de" ? "Einrichtung öffnen" : "Open setup"}
+            </button>
+          </div>
+        )}
         <details
           className="analysis-setup"
           open={setupOpen}
@@ -189,7 +208,11 @@ export default function NotesView({
           <summary>
             <strong>{t.analysisSetup}</strong>
             <span>
-              {[textModel, template.name].filter(Boolean).join(" · ")}
+              {[
+                textModel ||
+                  (locale === "de" ? "Textmodell wählen" : "Choose text model"),
+                template.name,
+              ].join(" · ")}
             </span>
           </summary>
           <div className="analysis-setup-fields">
@@ -309,34 +332,36 @@ export default function NotesView({
             </section>
           </div>
         </details>
-        <div className="notes-run">
-          <span>{meeting ? meetingLabel(meeting, locale) : t.noMeeting}</span>
-          <button
-            className="primary"
-            disabled={
-              !connected ||
-              !meeting ||
-              meetingLoading ||
-              meeting.status !== "complete" ||
-              recording ||
-              notesBusy ||
-              busy ||
-              !textModel.trim() ||
-              !modelReady ||
-              !endpoint.trim() ||
-              libraryInvalid ||
-              libraryPending
-            }
-            onClick={beginNotes}
-          >
-            {notesBusy ? (
-              <RefreshCw size={17} className="spinning" />
-            ) : (
-              <Sparkles size={17} />
-            )}
-            {notesBusy ? t.generating : t.generate}
-          </button>
-        </div>
+        {showStart && (
+          <div className="notes-run">
+            <span>{meeting ? meetingLabel(meeting, locale) : t.noMeeting}</span>
+            <button
+              className="primary"
+              disabled={
+                !connected ||
+                !meeting ||
+                meetingLoading ||
+                meeting.status !== "complete" ||
+                recording ||
+                notesBusy ||
+                busy ||
+                !textModel.trim() ||
+                !modelReady ||
+                !endpoint.trim() ||
+                libraryInvalid ||
+                libraryPending
+              }
+              onClick={beginNotes}
+            >
+              {notesBusy ? (
+                <RefreshCw size={17} className="spinning" />
+              ) : (
+                <Sparkles size={17} />
+              )}
+              {notesBusy ? t.generating : t.startAnalysis}
+            </button>
+          </div>
+        )}
       </section>
       <section className="analysis-panel">
         {analyses.length > 0 && (
@@ -472,7 +497,7 @@ export default function NotesView({
             </button>
           )}
         </div>
-        <p className="tab-help muted">{t.tabKeyboardHelp}</p>
+
         {result && (
           <div className="step-actions">
             <button
@@ -490,58 +515,67 @@ export default function NotesView({
           </div>
         )}
         {!result && (
-          <div className="step-actions">
-            <button
-              className="text-button"
-              disabled={stepsLocked}
-              onClick={() => {
-                setEditing({ ...selectedStep });
-                setEditingNew(false);
-              }}
-            >
-              <Pencil size={14} />
-              {t.editTab}
-            </button>
-            <div>
+          <details className="help-disclosure template-editor">
+            <summary>
+              {locale === "de"
+                ? "Arbeitsschritte bearbeiten"
+                : "Edit analysis steps"}
+            </summary>
+            <p className="muted">{t.tabKeyboardHelp}</p>
+            <p className="muted">{t.instructionHelp}</p>
+            <div className="step-actions">
               <button
-                className="icon-button"
-                title={t.moveLeft}
-                aria-label={t.moveLeft}
-                disabled={
-                  stepsLocked || template.steps[0].id === selectedStep.id
-                }
-                onClick={() => moveStep(-1)}
-              >
-                <ChevronLeft size={16} />
-              </button>
-              <button
-                className="icon-button"
-                title={t.moveRight}
-                aria-label={t.moveRight}
-                disabled={
-                  stepsLocked || template.steps.at(-1)?.id === selectedStep.id
-                }
-                onClick={() => moveStep(1)}
-              >
-                <ChevronRight size={16} />
-              </button>
-              <button
-                className="icon-button"
-                title={t.removeTab}
-                aria-label={t.removeTab}
-                disabled={stepsLocked || template.steps.length < 2}
-                onClick={async () => {
-                  const steps = template.steps.filter(
-                    (item) => item.id !== selectedStep.id,
-                  );
-                  if (await updateTemplate({ ...template, steps }))
-                    setStepId(steps[0].id);
+                className="text-button"
+                disabled={stepsLocked}
+                onClick={() => {
+                  setEditing({ ...selectedStep });
+                  setEditingNew(false);
                 }}
               >
-                <Trash2 size={15} />
+                <Pencil size={14} />
+                {t.editTab}
               </button>
+              <div>
+                <button
+                  className="icon-button"
+                  title={t.moveLeft}
+                  aria-label={t.moveLeft}
+                  disabled={
+                    stepsLocked || template.steps[0].id === selectedStep.id
+                  }
+                  onClick={() => moveStep(-1)}
+                >
+                  <ChevronLeft size={16} />
+                </button>
+                <button
+                  className="icon-button"
+                  title={t.moveRight}
+                  aria-label={t.moveRight}
+                  disabled={
+                    stepsLocked || template.steps.at(-1)?.id === selectedStep.id
+                  }
+                  onClick={() => moveStep(1)}
+                >
+                  <ChevronRight size={16} />
+                </button>
+                <button
+                  className="icon-button"
+                  title={t.removeTab}
+                  aria-label={t.removeTab}
+                  disabled={stepsLocked || template.steps.length < 2}
+                  onClick={async () => {
+                    const steps = template.steps.filter(
+                      (item) => item.id !== selectedStep.id,
+                    );
+                    if (await updateTemplate({ ...template, steps }))
+                      setStepId(steps[0].id);
+                  }}
+                >
+                  <Trash2 size={15} />
+                </button>
+              </div>
             </div>
-          </div>
+          </details>
         )}
         <div
           className="analysis-body"
@@ -593,7 +627,7 @@ export default function NotesView({
           )}
         </div>
         <div className="analysis-footer">
-          <span>{result ? t.draft : t.instructionHelp}</span>
+          <span>{result ? t.draft : ""}</span>
           <button
             className="secondary"
             disabled={!result || busy}

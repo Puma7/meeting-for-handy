@@ -46,8 +46,6 @@ export const de = {
     "Wähle ein Textmodell und prüfe den lokalen Modelldienst. Danach kannst du die Auswertung starten.",
   analysisFailureHelp:
     "Prüfe die Verbindung und das gewählte Textmodell. Öffne das zugehörige Meeting, um die Auswertung erneut zu starten oder gesicherte Schritte fortzusetzen.",
-  elapsedSeconds: "Sekunden",
-  elapsedSecond: "Sekunde",
   cancelAnalysis: "Auswertung abbrechen",
   cancelRequested: "Abbruch angefordert …",
   cancelHelp:
@@ -371,8 +369,6 @@ export const en: Record<MessageKey, string> = {
     "Choose a text model and check the local model service. You can then start the analysis.",
   analysisFailureHelp:
     "Check the connection and selected text model. Open the associated meeting to retry or resume saved steps.",
-  elapsedSeconds: "seconds",
-  elapsedSecond: "second",
   cancelAnalysis: "Cancel analysis",
   cancelRequested: "Cancellation requested …",
   cancelHelp:

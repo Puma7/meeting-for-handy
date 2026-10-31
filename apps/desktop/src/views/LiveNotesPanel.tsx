@@ -573,9 +573,11 @@ export default function LiveNotesPanel({
           <Settings2 size={13} />
           {de ? "Lokales Modell einrichten" : "Set up local model"}
         </button>
-        <button className="link-button" onClick={onOpenTextModelSettings}>
-          {de ? "Alle Textmodell-Einstellungen" : "All text model settings"}
-        </button>
+        {connection.mode === "cloud" && !modelReady && (
+          <button className="link-button" onClick={onOpenTextModelSettings}>
+            {de ? "Alle Textmodell-Einstellungen" : "All text model settings"}
+          </button>
+        )}
       </div>
 
       {setupOpen && (
@@ -605,6 +607,13 @@ export default function LiveNotesPanel({
         </label>
       )}
 
+      {connection.mode === "local" && (
+        <p className="muted live-memory-note">
+          {de
+            ? "Lokales Textmodell benötigt zusätzlichen Arbeitsspeicher. Bei knappem Speicher kann der Ton stocken – dann erst nach der Aufnahme auswerten."
+            : "A local text model needs additional memory. Low memory can make audio stutter; run analysis after recording if memory is tight."}
+        </p>
+      )}
       <div className="live-controls">
         {running ? (
           <>
@@ -641,40 +650,52 @@ export default function LiveNotesPanel({
                 : "Start live summary"}
           </button>
         )}
-        <label className="live-interval">
-          {de ? "Alle" : "Every"}
-          <select
-            value={preferences.intervalMinutes}
-            onChange={(e) => void changeInterval(Number(e.target.value))}
-          >
-            {INTERVAL_CHOICES.map((minutes) => (
-              <option key={minutes} value={minutes}>
-                {minutes} {de ? "Min." : "min"}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="live-auto">
-          <input
-            type="checkbox"
-            checked={preferences.auto}
-            onChange={(e) =>
-              setPreferences({ ...preferences, auto: e.target.checked })
-            }
-          />
-          {de
-            ? "Bei jeder Aufnahme automatisch starten (nur lokal)"
-            : "Start with every recording (local only)"}
-        </label>
       </div>
+      <details className="help-disclosure live-options">
+        <summary>
+          {de ? "Optionen und Hinweise" : "Options and guidance"}
+        </summary>
+        <div className="live-controls">
+          <label className="live-interval">
+            {de ? "Alle" : "Every"}
+            <select
+              value={preferences.intervalMinutes}
+              onChange={(e) => void changeInterval(Number(e.target.value))}
+            >
+              {INTERVAL_CHOICES.map((minutes) => (
+                <option key={minutes} value={minutes}>
+                  {minutes} {de ? "Min." : "min"}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="live-auto">
+            <input
+              type="checkbox"
+              checked={preferences.auto}
+              onChange={(e) =>
+                setPreferences({ ...preferences, auto: e.target.checked })
+              }
+            />
+            {de
+              ? "Bei jeder Aufnahme automatisch starten (nur lokal)"
+              : "Start with every recording (local only)"}
+          </label>
+        </div>
 
-      {connection.mode === "local" && (
-        <p className="muted live-memory-note">
-          {de
-            ? "Das lokale Textmodell läuft neben der Aufnahme und belegt auch in kleinen Größen (etwa 4B) mehrere GB Arbeitsspeicher. Wird der Speicher knapp, werden Zusammenfassung und Erkennung langsam und der Ton kann stocken; die Auslastung zeigt die Seitenleiste. Bei wenig Arbeitsspeicher die Auswertung besser nach der Aufnahme starten."
-            : "The local text model runs next to the recording and takes several GB of memory even in small sizes (around 4B). When memory runs short, the summary and recognition slow down and the audio can stutter; the sidebar shows the load. With little memory, run the analysis after the recording instead."}
-        </p>
-      )}
+        {connection.mode === "local" && (
+          <p className="muted live-memory-detail">
+            {de
+              ? "Das lokale Textmodell läuft neben der Aufnahme und belegt auch in kleinen Größen (etwa 4B) mehrere GB Arbeitsspeicher. Wird der Speicher knapp, werden Zusammenfassung und Erkennung langsam und der Ton kann stocken; die Auslastung zeigt die Seitenleiste. Bei wenig Arbeitsspeicher die Auswertung besser nach der Aufnahme starten."
+              : "The local text model runs next to the recording and takes several GB of memory even in small sizes (around 4B). When memory runs short, the summary and recognition slow down and the audio can stutter; the sidebar shows the load. With little memory, run the analysis after the recording instead."}
+          </p>
+        )}
+        {(connection.mode !== "cloud" || modelReady) && (
+          <button className="link-button" onClick={onOpenTextModelSettings}>
+            {de ? "Alle Textmodell-Einstellungen" : "All text model settings"}
+          </button>
+        )}
+      </details>
       {(error || status?.error) && (
         <p className="notice warning" role="alert">
           {error ?? status?.error}
@@ -726,8 +747,8 @@ export default function LiveNotesPanel({
               ? `Sobald bestätigter Text vorliegt, entsteht hier die Zusammenfassung – spätestens alle ${preferences.intervalMinutes} Minuten, früher nach längeren Redebeiträgen.`
               : `As soon as confirmed text exists the summary appears here – at least every ${preferences.intervalMinutes} minutes, sooner after long contributions.`
             : de
-              ? "Fasst das laufende Meeting fortlaufend zusammen: bisheriger Verlauf, Entscheidungen, Aufgaben und aufgeworfene Fragen, jeweils mit Originalbeleg."
-              : "Summarizes the running meeting continuously: summary so far, decisions, tasks and questions raised, each with original evidence."}
+              ? "Verlauf, Entscheidungen und Aufgaben mit Originalbelegen. Wähle ein Textmodell und starte die Zusammenfassung."
+              : "Summary, decisions and tasks with original evidence. Choose a text model and start the summary."}
         </p>
       ) : (
         view && (

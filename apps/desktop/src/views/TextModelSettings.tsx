@@ -57,14 +57,6 @@ export default function TextModelSettings({
   const [discoveryOpen, setDiscoveryOpen] = useState(false);
   const [usedServer, setUsedServer] = useState(0);
   useEffect(() => {
-    if (
-      mode === "local" &&
-      !manualModel &&
-      (modelsError || (modelsLoaded && !localModels.length))
-    )
-      setDiscoveryOpen(true);
-  }, [mode, manualModel, modelsError, modelsLoaded, localModels.length]);
-  useEffect(() => {
     if (!usedServer) return;
     const timer = setTimeout(refreshModels, 0);
     return () => clearTimeout(timer);
@@ -78,8 +70,8 @@ export default function TextModelSettings({
       <h3>{de ? "Verbindung und Textmodell" : "Connection and text model"}</h3>
       <p className="muted">
         {de
-          ? "Gemeinsam für Live-Zusammenfassung und Nachbearbeitung. Eine Auswertung startest du jeweils ausdrücklich."
-          : "Shared by live summaries and post-meeting analysis. Each analysis starts only with your explicit action."}
+          ? "Für Live-Zusammenfassung und Nachbearbeitung."
+          : "For live summaries and post-meeting analysis."}
       </p>
       <div className="settings-grid">
         <label>
@@ -181,7 +173,10 @@ export default function TextModelSettings({
           </div>
           {modelsError && (
             <p className="notice warning" role="status">
-              {modelsError}
+              {modelsError}{" "}
+              {de
+                ? "Starte deinen lokalen Modelldienst und aktualisiere die Liste. Einrichtungshilfe: „Ollama / LM Studio erkennen“."
+                : "Start your local model server and refresh the list. For setup, choose “Detect Ollama / LM Studio”."}
             </p>
           )}
           {modelsLoaded && !localModels.length && (

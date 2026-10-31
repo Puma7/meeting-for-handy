@@ -17,7 +17,7 @@ mod storage;
 pub use audio_levels::{AudioLevel, AudioLevelStatus, CaptureAudioLevels};
 pub use capture::{
     list_devices, read_capture_control_events, CaptureControlEvent, CaptureControlLog,
-    CaptureControlSnapshot, CaptureController, CaptureOptions,
+    CaptureControlSnapshot, CaptureController, CaptureOptions, PortableStartupTiming,
 };
 pub use model::{
     AudioDevice, AudioPart, CaptureSnapshot, SessionData, SessionProgress, TranscriptCheckpoint,

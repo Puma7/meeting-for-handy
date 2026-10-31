@@ -600,3 +600,250 @@ Dependencies, primary session format, version and whole historical TEST_REPORT.m
 remain unchanged. No new browser, installed E2E, independent-process, hardware,
 provider or physical-memory proof is claimed. Fresh candidate 14 target CI and
 final-head review rounds are still required.
+
+
+## Integration after the separately reviewed model-residency work
+
+The combined source retains PR35's passive startup-gap diagnostics, the final
+PR36 UI remedies and deterministic readiness fixture, and PR37's actual native
+provider model ownership. Shared stylesheet and capture merge conflicts were
+resolved against the reviewed components; startup/privacy/PCM thresholds,
+manual erasure admission, identity/hash checks and all protection rules remain.
+The existing approved public TEST_REPORT is inherited byte-for-byte from main;
+no private full report or raw synthetic conversation evidence is published.
+
+Confirmed erasure now detaches only its meeting's inactive Live and Analysis
+model-owner anchors after successful maintenance admission and cache-forget,
+outside application and owner-map mutexes and before filesystem removal. Other
+meetings' anchors and in-flight client references retain their leases. Native
+cleanup still follows the established exact-owned-instance acknowledgement and
+fail-closed rules; no guessed foreign unload or destructive auto-resume is added.
+
+Two worker-level synthetic regressions reproduce the missing-anchor release
+before the fix and pass afterward for completed erasure and stale-preview
+failure. They also check refused admission preserves anchors, unrelated meeting
+files/owners survive, and an outstanding client lease stays usable. The initial
+pre-test compilation error was separately caused by an existing Worker test
+initializer missing the newly inherited real source-publication lease; it is
+not counted as a reproduced runtime failure. The actual before run contains
+two failed assertions; the after run contains two passes. These loopback-port-9
+fixtures do not contact a real provider, and do not prove installed GUI or
+independent application-process erasure.
+
+The combined source also inherits the separately validated bounded C# crash-test
+lease probe and the configured-provider host-identity correction. Different
+loopback binds with the same port/path do not inherit native model management;
+localhost retains its pinned IPv4 alias. No provider consent, URL exclusion,
+production deadline, dependency pin or 80-percent review documentation threshold
+is weakened. Fresh real provider and final combined-source verification results
+are recorded separately below when completed.
+
+Fresh combined-source verification after the host correction passes 426 Rust
+workspace/all-target tests, with two existing special entries regularly ignored,
+plus Rust format, Clippy with warnings denied, and required verification
+(47 PCM, 35 notes, 28 templates, eight agents and monitor checks). The earlier
+272 frontend tests, TypeScript and production build still cover byte-identical
+UI sources; those UI tests were not relabelled as a new run. One attempted Rust
+rerun failed during compilation because the shared own target cache still held
+the other source's compiled core API. The scoped own package artifacts were
+rebuilt after all own compiler processes ended; no source correction or test
+assertion relaxation was required. The failed compilation log is retained.
+
+
+The fresh real reference on this combined source imports its actual production
+local_models.rs selector, model_sessions.rs coordinator and meeting-notes core.
+The selector recognizes the configured LM Studio endpoint and rejects a different
+loopback bind on the same port before native model mutation. Existing selected
+google/gemma-4-e4b Q4_K_M is used, without downloads or user meetings. Versions
+are HandyMeeting 1.0.7, Windows 11 Pro 26200, i7-13700, RTX 4070, LM Studio
+0.4.26+4 / CLI dcefd5a, 8192 context and 6,326,936,720 installed model bytes.
+Same-instance actual idle residency lasts 330.190348 seconds with eleven
+samples; the harness lasts 459.551586 seconds and its sampling
+wrapper 461.547000 seconds. Actual selected-model foreign admission
+preserves an independently loaded fixture-owned instance; only that exact test
+instance is then unloaded. No unrelated foreign model is loaded just for testing.
+
+Positive live and post analysis each retain one explicit decision and one task
+with literal Anna/Freitag; nonbinding cases retain zero decisions/tasks. Quotes
+and existing source IDs were manually read. Durable cancellation checkpoints,
+byte-preserved originals, resume without repeating confirmed steps, final live
+disk readback, other-owner and in-flight client deferral, and exact final owned
+instance release all pass; the native catalog and loaded state equal baseline.
+The positive final overview accepts five items and rejects one. Its rejection
+reason is persisted separately in the overview as ownerOrDueOutsideTasks: 1;
+it is read from this run rather than borrowed from old runs. The task remains
+separately present. The nonbinding post summary is empty. These are disclosed
+limits, not semantic completeness or zero-rejection proof. Validators stay exact.
+
+There are 93 memory samples at a nominal five-second interval. Maximum
+individual llama-server Working Set is 6,803,685,376 bytes; maximum individual
+Private Bytes is 6,852,263,936 bytes. GPU usage for the entire device is
+3987 MiB before inference, 8741 MiB peak and
+3964 MiB after release. Other desktop load is included; per-process peaks
+are not simultaneous sums, exclusive attribution or complete reclamation proof.
+Own builds/local checks ended before this run; light source/GitHub inspection
+overlapped, existing desktop apps remained, and no capture/ASR/download ran.
+All 2,996 tracked source files stayed unchanged during the reference; only this
+final sanitized results paragraph is subsequently added. Production code and
+dependency bytes remain exact for publication.
+
+The real reference exercises native model lifetime through core/coordinator
+components. The erasure-to-model-owner bridge is separately covered by the two
+synthetic worker regressions above, not by installed GUI erasure against a real
+provider. No installed application, independent app-process recovery, actual
+Ollama, physical capture, GPU endurance, combined two-hour or forensic-memory
+claim follows. All existing deletion scope and partial-failure boundaries remain.
+Fresh current CI and two clean rounds per reviewer are required before merge.
+
+
+The later candidate11 model architecture review exposed a shared Ollama policy
+overwrite on final release. The combined source now carries the conservative
+correction: confirmed erasure detaches only its own inactive model anchors;
+Ollama stops our renewal without native unload/cached-TTL rewrite and may remain
+warm until its existing finite server grace expires. LM Studio still releases
+only the exact acknowledged own instance after other clients release. This does
+not add provider-history, forensic-memory or physical erasure promises. Earlier
+reference runs and prepared candidate15 retain their actual historical bytes;
+they are not final evidence for this later source. Fresh validation follows.
+
+The conservative-release combined source passes all 428 Rust workspace/all-target
+tests (two existing special entries regularly ignored), including all 25 provider
+fixtures and the real 60-second renewal plus 65-second no-renewal interval. Rust
+format, Clippy with warnings denied and required verification (47 PCM, 35 notes,
+28 templates, eight agents and monitor checks) pass. The UI remains byte-identical
+to the separate 272-test/TypeScript/build proof. A new actual selected-provider
+reference03 is required; references01/02 are retained as historical evidence.
+
+
+The fresh selected-provider reference03 after the conservative Ollama correction
+passes all preregistered real checks through the actual production selector,
+coordinator and core modules. The existing google/gemma-4-e4b Q4_K_M model is
+used with LM Studio 0.4.26+4 / CLI dcefd5a, 8192 context and
+6,326,936,720 installed model bytes, HandyMeeting 1.0.7, Windows 11 Pro 26200,
+i7-13700 and RTX 4070. No downloads or user meetings are used. The configured
+provider is recognized and a different same-port loopback bind is rejected.
+Actual same-instance idle residency lasts 330.161955 seconds at eleven
+samples. Harness duration is 468.295515 seconds, with sampling
+wrapper 474.187000 seconds. Positive live/post decisions and tasks,
+nonbinding rejection of commitments, original literal sources, durable checkpoint
+resume, final readback, other-owner/client deferral and exact own LM Studio
+instance release all pass. Baseline native catalog/loaded state is preserved.
+
+All accepted output items and original quotes/source IDs were manually read.
+The positive final overview accepts 5 items and rejects
+1; its persisted overview records ownerOrDueOutsideTasks: 1.
+The reason is read from this run rather than assigned from old runs. The positive task remains separately present, unknown
+owner/due stay unknown, and the nonbinding post summary has
+0 items. No semantic completeness, zero-rejection
+or validator-relaxation claim follows.
+
+Memory has 94 samples at nominal five-second intervals. Maximum
+individual model-server Working Set is 6,802,632,704 bytes and maximum individual
+Private Bytes is 6,854,340,608 bytes. Whole-device GPU usage is
+3754 MiB before inference / 8374 MiB peak /
+3747 MiB after release. These are model-server process peaks; the
+renamed private harness is excluded by the sampler's process-name filter, so
+no harness or installed-application memory peak is claimed. GPU readings include
+other desktop load; no simultaneous process-peak sum, exclusive attribution or
+complete reclamation is established. Own builds/local checks ended before the
+reference; existing desktop apps and light source/GitHub inspection remained.
+No capture, ASR or model download overlapped.
+
+All 2,996 tracked source files stayed unchanged during this
+actual run. Only the final sanitized result note is subsequently appended;
+production code and dependencies remain exact. Historical references retain
+their original source fingerprints and are not reassigned. This real selected
+LM Studio reference is not a real Ollama-server, full automatic worker, installed
+GUI, independent app-process, erasure-against-real-provider, physical capture,
+GPU endurance, combined two-hour or forensic-memory proof. Conservative Ollama
+final release is separately proved by stateful protocol fixtures and the actual
+60-second renewal plus 65-second post-release silence, with virtual natural
+expiry at the unchanged 300-second bound. Current final-head CI and two clean
+rounds per reviewer are still required before merge.
+
+
+## Combined integration candidate18: native origin and expiry refusal
+
+This prepared source inherits the concrete native-origin and unreadable Ollama
+expiry corrections described in the shared local-model validation note. All
+432 Rust workspace/all-target tests pass, with two existing special entry
+points regularly ignored; the 29 provider fixtures include all four genuine
+before/after regressions. Locked/offline warnings-as-errors Clippy, Rust format
+and verify.ps1 pass. All frontend files are unchanged from the existing 272-test
+TypeScript/build/format integration proof; no new frontend run is claimed.
+The full approved public TEST_REPORT.md remains byte-identical. A fresh real
+selected-provider reference04 follows; current final-head CI and two clean
+review rounds remain required before this combined source can merge.
+
+
+The fresh selected-provider reference04 after the concrete-origin and unreadable-expiry corrections
+passes all preregistered real checks through the actual production selector,
+coordinator and core modules. The existing google/gemma-4-e4b Q4_K_M model is
+used with LM Studio 0.4.26+4 / CLI dcefd5a, 8192 context and
+6,326,936,720 installed model bytes, HandyMeeting 1.0.7, Windows 11 Pro 26200,
+i7-13700 and RTX 4070. No downloads or user meetings are used. The configured
+provider is recognized through localhost pinned to 127.0.0.1, while a different
+same-port loopback bind is rejected.
+Actual same-instance idle residency lasts 331.072850 seconds at eleven
+samples. Harness duration is 468.476504 seconds, with sampling
+wrapper 471.593000 seconds. Positive live/post decisions and tasks,
+nonbinding rejection of commitments, original literal sources, durable checkpoint
+resume, final readback, other-owner/client deferral and exact own LM Studio
+instance release all pass. Baseline native catalog/loaded state is preserved.
+
+All accepted output items and original quotes/source IDs were manually read.
+The positive final overview accepts 5 items and rejects
+1; recorded rejection counts are
+{"ownerOrDueOutsideTasks": 1}. No rejected item is counted as accepted or assigned from old runs. The positive task remains separately present, unknown
+owner/due stay unknown, and the nonbinding post summary has
+0 items. No semantic completeness, zero-rejection
+or validator-relaxation claim follows.
+
+Memory has 95 samples at nominal five-second intervals. Maximum
+individual model-server Working Set is 6,802,550,784 bytes and maximum individual
+Private Bytes is 6,852,988,928 bytes. Whole-device GPU usage is
+3930 MiB before inference / 8745 MiB peak /
+3835 MiB after release. These are model-server process peaks; the
+renamed private harness is excluded by the sampler's process-name filter, so
+no harness or installed-application memory peak is claimed. GPU readings include
+other desktop load; no simultaneous process-peak sum, exclusive attribution or
+complete reclamation is established. Own builds/local checks ended before the
+reference; existing desktop apps and light source/GitHub inspection remained.
+No capture, ASR or model download overlapped.
+
+All 2,996 tracked source files stayed unchanged during this
+actual run. Only the final sanitized result note is subsequently appended;
+production code and dependencies remain exact. Historical references retain
+their original source fingerprints and are not reassigned. This real selected
+LM Studio reference is not a real Ollama-server, full automatic worker, installed
+GUI, independent app-process, erasure-against-real-provider, physical capture,
+GPU endurance, combined two-hour or forensic-memory proof. Conservative Ollama
+final release is separately proved by stateful protocol fixtures and the actual
+60-second renewal plus 65-second post-release silence, with virtual natural
+expiry at the unchanged 300-second bound. Current final-head CI and two clean
+rounds per reviewer are still required before merge.
+
+
+Prepared integration candidate19 inherits the bounded paired-port test-fixture
+correction described in the shared model note. Actual IPv6 native-origin
+coverage remains mandatory; no skip, runtime, UI, dependency or protection change
+is introduced. The real selected-provider reference04 retains its original
+source fingerprint; all runtime bytes are identical and only the fixture plus
+sanitized notes differ. Fresh final native checks are recorded separately.
+
+
+The fresh candidate19 local checks pass all 433 Rust workspace/all-target tests,
+including 30 provider fixtures, with two existing special entry points regularly
+ignored, plus strict locked/offline Clippy, Rust format and verify.ps1. The
+existing 272-test frontend/TypeScript/build proof retains identical UI bytes.
+No new model run is claimed: all runtime modules remain exact to actual
+reference04; only test-fixture and sanitized validation-note bytes differ.
+
+
+Integration candidate20 corrects only the two sanitized validation notes: original
+reference01-03 overview JSON results do persist ownerOrDueOutsideTasks: 1, while
+the separate diagnostic exposes only the rejected count. Five accepted overview
+items, the separate explicit task, all original measurements and private evidence
+remain unchanged. Reference04 was already correct. All runtime/test/UI/dependency
+and full approved public TEST_REPORT bytes are exact to prepared19; no additional
+model, frontend or Rust run is claimed for this documentation-only correction.
