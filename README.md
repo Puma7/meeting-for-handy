@@ -58,6 +58,12 @@ Every statement in a summary links to an existing transcript section and a verba
 
 For summaries you need a local text model as well: **Ollama** or **LM Studio**. The app finds both on this computer, suggests Gemma 4 E2B/E4B according to your memory and can download the suggestion through Ollama. Speech models and text models are different things; a speech model alone writes no notes.
 
+Live summaries keep the selected local model reserved until the final summary is saved; failed finalization keeps it available for retry. LM Studio requires native REST v1 support and a confirmed app-owned instance.
+For the first app-owned load when preparing analysis or live summaries, the selected LM Studio model key must have no loaded instance. An already loaded foreign instance is neither adopted nor unloaded, and the app does not load a second copy. An existing confirmed app-owned reservation is reused.
+Ollama uses a shared server TTL rather than per-client instance ownership. Finishing the last local owner stops our renewal without sending an unload or restoring a cached TTL. An app-owned model may therefore remain warm for its existing finite server grace (normally up to 300 seconds after the last request); another client may extend it. LM Studio still releases only its exact acknowledged owned instance.
+Native model reservations use one concrete loopback address throughout inventory, loading, inference and cleanup. For this lifecycle, localhost means 127.0.0.1; configure an explicit [::1] endpoint for an IPv6-only provider. An unreadable expiry on an already loaded Ollama model stops preparation before any model mutation; its retention policy is not guessed.
+See the [provider requirements, reference evidence and limits](docs/validation/local-model-residency-20261030.md).
+
 ## Privacy and limits
 
 - **Audio stays local.** Speech recognition runs in the app's own local worker processes and reuses Handy's model files.
