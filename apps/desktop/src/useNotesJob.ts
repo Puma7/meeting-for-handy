@@ -33,6 +33,7 @@ export function useNotesJob(
     dismissed = useRef<string | null>(null),
     localBusyRef = useRef(false),
     progressRef = useRef<NotesProgress | null>(null);
+  const forgotten = useRef(new Set<string>());
   resultCallback.current = onResult;
   progressRef.current = progress;
   useEffect(() => {
@@ -42,7 +43,8 @@ export function useNotesJob(
     };
   }, []);
   const applyProgress = useCallback((next: NotesProgress | null) => {
-    if (!mounted.current || !next) return;
+    if (!mounted.current || !next || forgotten.current.has(next.meetingId))
+      return;
     if (
       localBusyRef.current &&
       expected.current &&
@@ -133,6 +135,7 @@ export function useNotesJob(
       if (localBusyRef.current || progressRef.current?.status === "running")
         return;
       const fresh = { ...structuredClone(request), jobId: crypto.randomUUID() };
+      forgotten.current.delete(fresh.meetingId);
       expected.current = fresh.jobId;
       observed.current = fresh.jobId;
       dismissed.current = null;
@@ -163,7 +166,7 @@ export function useNotesJob(
       });
       try {
         const result = await api.generateNotes(fresh);
-        if (!mounted.current) return;
+        if (!mounted.current || forgotten.current.has(fresh.meetingId)) return;
         if (result.meetingId !== fresh.meetingId)
           throw new Error(
             "Die Auswertung gehört zu einer anderen Sitzung. / Analysis belongs to another meeting.",
@@ -183,7 +186,7 @@ export function useNotesJob(
         const latest = await api.getNotesProgress().catch(() => null);
         if (latest?.jobId === fresh.jobId) applyProgress(latest);
       } catch (failure) {
-        if (!mounted.current) return;
+        if (!mounted.current || forgotten.current.has(fresh.meetingId)) return;
         const latest = await api.getNotesProgress().catch(() => null);
         if (latest?.jobId === fresh.jobId) {
           applyProgress(latest);
@@ -259,6 +262,34 @@ export function useNotesJob(
     setPollError(null);
     started.current = null;
   };
+  /** Discard a confirmed inactive meeting's retry/progress references and stale polls. */
+  const forget = (meetingId: string, erasureConfirmed = false) => {
+    if (
+      !erasureConfirmed &&
+      progressRef.current?.meetingId === meetingId &&
+      progressRef.current.status === "running"
+    )
+      return;
+    forgotten.current.add(meetingId);
+    if (lastRequest.current?.meetingId === meetingId)
+      lastRequest.current = null;
+    if (progressRef.current?.meetingId === meetingId) {
+      progressRef.current = null;
+      expected.current = null;
+      observed.current = null;
+      started.current = null;
+      setProgress(null);
+      setFeedback(null);
+      setPollError(null);
+      setElapsedMs(0);
+      setCancelPending(false);
+      setLocalBusy(false);
+      localBusyRef.current = false;
+    }
+    setFeedback((current) =>
+      current?.meetingId === meetingId ? null : current,
+    );
+  };
   return {
     busy,
     progress,
@@ -269,6 +300,7 @@ export function useNotesJob(
     run,
     cancel,
     dismiss,
+    forget,
     lastRequest: lastRequest.current,
   };
 }

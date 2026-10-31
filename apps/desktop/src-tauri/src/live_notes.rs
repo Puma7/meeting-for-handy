@@ -292,6 +292,32 @@ impl Service {
 }
 
 impl LiveNotes {
+    /// Forget a finished live view and join only its already admitted, ended own worker.
+    pub(crate) fn forget(&self, meeting: &str) -> AppResult<()> {
+        let mut state = self
+            .0
+            .lock()
+            .map_err(|_| "Live-Zusammenfassung ist gesperrt.")?;
+        if state
+            .as_ref()
+            .is_some_and(|job| job.meeting_id == meeting && job.running())
+        {
+            return Err("Live-Zusammenfassung läuft noch. / Live summary is still running.".into());
+        }
+        let old = if state.as_ref().is_some_and(|job| job.meeting_id == meeting) {
+            state.take()
+        } else {
+            None
+        };
+        drop(state);
+        if let Some(mut job) = old {
+            if let Some(handle) = job.worker.take() {
+                let _ = handle.join();
+            }
+        }
+        Ok(())
+    }
+
     fn lock(&self) -> AppResult<std::sync::MutexGuard<'_, Option<Job>>> {
         self.0
             .lock()
@@ -402,11 +428,13 @@ impl LiveNotes {
         if let Some(handle) = guard.as_mut().and_then(|job| job.worker.take()) {
             let _ = handle.join();
         }
-        // The meeting must exist and be readable before any model client is created.
-        let data = service.live_snapshot(&request.meeting_id, None)?.data;
         // Held by the worker until it ends, so archive moves or installation never run while
         // live notes write into the session folder.
         let lease = service.reserve_operation(crate::operations::Kind::LiveNotes)?;
+        let source_lease = meeting_core::archive::source_publication_lease(&service.root)
+            .map_err(|_| "Meetingdaten werden gerade gelöscht. Bitte den Abschluss abwarten. / Meeting erasure is in progress; wait for it to finish.")?;
+        // Admission precedes source selection, including an archived transcript.
+        let data = service.live_snapshot(&request.meeting_id, None)?.data;
         if request.use_saved_key {
             if !key.is_empty() {
                 return Err("Bitte entweder den gespeicherten Schlüssel oder einen Schlüssel nur für diese Sitzung wählen.".into());
@@ -469,6 +497,7 @@ impl LiveNotes {
             model_work,
             model_lease,
             _lease: lease,
+            _source_lease: source_lease,
             service: Arc::clone(service),
             meeting_id: request.meeting_id,
             control: job.control.clone(),
@@ -526,6 +555,7 @@ struct Worker {
     model_work: Option<crate::model_sessions::ModelWork>,
     model_lease: Option<Arc<meeting_notes::residency::ModelLease>>,
     _lease: crate::operations::Lease,
+    _source_lease: std::fs::File,
     service: Arc<Service>,
     meeting_id: String,
     control: AnalysisControl,
@@ -833,6 +863,7 @@ mod tests {
         let worker = Worker {
             model_work: Some(work.clone()),
             model_lease: Some(lease),
+            _source_lease: meeting_core::archive::source_publication_lease(&root).unwrap(),
             _lease: service
                 .reserve_operation(crate::operations::Kind::LiveNotes)
                 .unwrap(),

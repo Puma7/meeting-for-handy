@@ -1,4 +1,4 @@
-import { FolderClock, RefreshCw } from "lucide-react";
+import { FolderClock, RefreshCw, Trash2 } from "lucide-react";
 import { clock } from "../domain";
 import type { Locale, MeetingSummary } from "../types";
 import type { MessageKey } from "../i18n";
@@ -7,6 +7,7 @@ import type { MessageKey } from "../i18n";
  * Shows fallback history for a core without full-text search. Opening a row passes its
  * original meeting ID, including read-only imports, rather than looking up a title.
  */
+/** Renders explicit native meeting actions while imported originals remain read-only. */
 export default function HistoryList({
   history,
   locale,
@@ -15,6 +16,7 @@ export default function HistoryList({
   connected,
   onRefresh,
   onOpen,
+  onErase,
   statusName,
 }: {
   history: MeetingSummary[];
@@ -24,6 +26,7 @@ export default function HistoryList({
   connected: boolean;
   onRefresh: () => void;
   onOpen: (id: string) => void;
+  onErase?: (meeting: MeetingSummary) => void;
   statusName: (status: string) => string;
 }) {
   return (
@@ -52,13 +55,31 @@ export default function HistoryList({
                   · {clock(item.durationMs)} · {statusName(item.status)}
                 </p>
               </div>
-              <button
-                className="secondary"
-                disabled={busy}
-                onClick={() => onOpen(item.id)}
-              >
-                {t.open}
-              </button>
+              <div className="session-row-actions">
+                {onErase && !item.id.startsWith("legacy-") && (
+                  <button
+                    type="button"
+                    className="icon-button erasure-button"
+                    disabled={busy}
+                    aria-label={`${locale === "de" ? "Meeting dauerhaft löschen" : "Permanently delete meeting"}: ${item.title}`}
+                    title={
+                      locale === "de"
+                        ? "Meeting dauerhaft löschen"
+                        : "Permanently delete meeting"
+                    }
+                    onClick={() => onErase(item)}
+                  >
+                    <Trash2 size={16} />
+                  </button>
+                )}
+                <button
+                  className="secondary"
+                  disabled={busy}
+                  onClick={() => onOpen(item.id)}
+                >
+                  {t.open}
+                </button>
+              </div>
             </div>
           ))}
         </div>

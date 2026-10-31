@@ -1,5 +1,7 @@
 # Local text model residency — 2026-10-30
 
+The behavior and provider boundaries below describe the combined implementation. Candidate and reference sections retain historical results and the draft, integration and review gates that applied to their named revisions; those statements do not describe the latest PR status. Current status: [PR37](https://github.com/Puma7/meeting-for-handy/pull/37) and [PR38](https://github.com/Puma7/meeting-for-handy/pull/38).
+
 Scope: HandyMeeting 1.0.7 development sources, based on `f2ccb8a8a268323da5ea0ad8ed1eb69102694da6`. This change does not publish or install a new application version.
 
 The current runtime contract is in Behavior and Provider boundaries below, with
@@ -8,7 +10,7 @@ Evidence sections retain the actual historical candidate states and measurements
 Their earlier draft/unavailable-provider or eager-cleanup statements describe
 those snapshots, not the current runtime policy or current GitHub merge status.
 The latest completed selected-provider reference and final-head CI/reviews govern
-validation status; references01–03 predate the concrete-origin correction below
+validation status; references 01–03 predate the concrete-origin correction below
 and are not reassigned to that changed runtime.
 
 ## Behavior
@@ -431,7 +433,8 @@ post outputs each contain zero decisions and zero tasks. Accepted source IDs and
 literal quotations were checked against the synthetic originals; the unanswered
 licensing question retains unknown owner and date. The final positive overview
 accepts five items and rejects one; its persisted diagnostic retains the count,
-not the rejection reason. The explicit task remains available separately. The
+not the rejection reason; the separate overview JSON records
+ownerOrDueOutsideTasks: 1. The explicit task remains available separately. The
 nonbinding post summary is empty. These observations are disclosed, with no
 claim of complete semantics or zero rejection and no validator relaxation.
 
@@ -522,8 +525,8 @@ with the same instance at all eleven samples; the harness lasts
 the sampling wrapper). All preregistered ownership, positive/nonbinding, durable
 checkpoint/resume, final readback and exact owned-unload checks pass. Accepted
 quotes/source IDs were manually read. The positive final overview retains five
-items and rejects one; the reason is not persisted and is not inferred from old
-runs. The task remains separately present, unknown owner/due remain unknown,
+items and rejects one; the stored overview records ownerOrDueOutsideTasks: 1.
+This reason is read from this run, not inferred from an earlier run. The task remains separately present, unknown owner/due remain unknown,
 and the nonbinding post summary is empty. This is no semantic completeness or
 zero-rejection claim, and no validation rule was relaxed.
 
@@ -596,7 +599,7 @@ The actual 60-second renewal plus 65-second no-renewal interval passes. Rust
 format, Clippy with warnings denied and required verification (47 PCM, 35 notes,
 28 templates, eight agents and monitor checks) pass. Shared UI/dependency bytes
 are unchanged; no UI results are represented as a new run. The fresh selected
-real-provider reference03 remains to be completed before publication.
+real-provider reference 03 remains to be completed before publication.
 
 The [documented Ollama generate request](https://docs.ollama.com/api/generate)
 identifies a model and a retention duration. The [Ollama lifetime FAQ](https://docs.ollama.com/faq#how-do-i-keep-a-model-loaded-in-memory-or-make-it-unload-immediately)
@@ -607,7 +610,7 @@ avoids that final global mutation. This is an integration design inference,
 not a claim that documentation proves arbitrary external-client coordination.
 
 
-The fresh selected-provider reference03 after the conservative Ollama correction
+The fresh selected-provider reference 03 after the conservative Ollama correction
 passes all preregistered real checks through the actual production selector,
 coordinator and core modules. The existing google/gemma-4-e4b Q4_K_M model is
 used with LM Studio 0.4.26+4 / CLI dcefd5a, 8192 context and
@@ -623,8 +626,8 @@ instance release all pass. Baseline native catalog/loaded state is preserved.
 
 All accepted output items and original quotes/source IDs were manually read.
 The positive final overview accepts 5 items and rejects
-1; its rejection reason is not persisted and is not
-assigned from old runs. The positive task remains separately present, unknown
+1; the stored overview records ownerOrDueOutsideTasks: 1.
+This reason is read from this run, not assigned from an earlier run. The positive task remains separately present, unknown
 owner/due stay unknown, and the nonbinding post summary has
 0 items. No semantic completeness, zero-rejection
 or validator-relaxation claim follows.
@@ -654,9 +657,9 @@ expiry at the unchanged 300-second bound. Current final-head CI and two clean
 rounds per reviewer are still required before merge.
 
 
-## Concrete native origin and unreadable Ollama expiry — integration candidate14
+## Concrete native origin and unreadable Ollama expiry — integration candidate 14
 
-The full candidate13 review had no inline finding and minimal merge risk, but
+The full candidate 13 review had no inline finding and minimal merge risk, but
 retained a Medium architecture concern: a localhost route could gain native
 authority from the configured IPv4 provider and contact a different IPv6
 listener on the same port. Legacy unleased text fallback was preexisting;
@@ -676,11 +679,11 @@ is inferred from these protocol fixtures. Existing limits for external changes
 at the same concrete origin and shared active Ollama TTLs remain explicit.
 No proxy, redirect, local/cloud, credential, cancellation, response-size,
 deadline or reviewer threshold was relaxed. TEST_REPORT.md remains byte-identical
-to the approved public main report. The fresh full checks and selected-provider reference04 below apply to this
-changed runtime; neither is inherited from candidate13.
+to the approved public main report. The fresh full checks and selected-provider reference 04 below apply to this
+changed runtime; neither is inherited from candidate 13.
 
 
-The corrected candidate14 passes 389 Rust workspace/all-target tests, with two
+The corrected candidate 14 passes 389 Rust workspace/all-target tests, with two
 existing special child/credential entry points regularly ignored, including
 all 29 provider protocol tests and the real 60-second renewal / 65-second
 post-release silence. Strict locked/offline Clippy with -D warnings, Rust format
@@ -692,7 +695,7 @@ tests with the same two regular ignores, strict Clippy, format and verify.
 No deadline or threshold was weakened. Actual model references follow below.
 
 
-The fresh selected-provider reference04 after the concrete-origin and unreadable-expiry corrections
+The fresh selected-provider reference 04 after the concrete-origin and unreadable-expiry corrections
 passes all preregistered real checks through the actual production selector,
 coordinator and core modules. The existing google/gemma-4-e4b Q4_K_M model is
 used with LM Studio 0.4.26+4 / CLI dcefd5a, 8192 context and
@@ -741,9 +744,9 @@ expiry at the unchanged 300-second bound. Current final-head CI and two clean
 rounds per reviewer are still required before merge.
 
 
-## Integration candidate15: real paired-port collision in test fixtures
+## Integration candidate 15: real paired-port collision in test fixtures
 
-The remaining candidate14 review finding concerns fixture setup, not a proved
+The remaining candidate 14 review finding concerns fixture setup, not a proved
 production residency defect. A real independently held IPv6 port reproduced
 Windows AddrInUse 10048 in the old one-shot paired bind. The fixture now retries
 only AddrInUse with fresh ephemeral IPv4/IPv6 pairs, at most sixteen attempts.
@@ -760,14 +763,14 @@ native authority proof. No network setting, product source, dependency, deadline
 or protection configuration changes.
 
 Only this integration-test fixture and sanitized validation notes change from
-candidate14. Runtime, selector/coordinator/core, prompts, UI and dependency bytes
-remain exactly those of the genuine selected-provider reference04 above. Its
+candidate 14. Runtime, selector/coordinator/core, prompts, UI and dependency bytes
+remain exactly those of the genuine selected-provider reference 04 above. Its
 actual fingerprint and measurements remain assigned to the original run; they
-are not relabeled as a new model run on candidate15. Fresh full local checks and
+are not relabeled as a new model run on candidate 15. Fresh full local checks and
 current final-head review/CI results are recorded separately.
 
 
-Fresh candidate15 checks pass: 390 Rust workspace/all-target tests, including
+Fresh candidate 15 checks pass: 390 Rust workspace/all-target tests, including
 all 30 provider fixtures, with two existing special entry points regularly
 ignored. Strict locked/offline warnings-as-errors Clippy, Rust formatting and
 verify.ps1 pass (47 PCM, 35 notes, 28 template, 8 agent and monitor checks).
@@ -775,7 +778,7 @@ The prepared deletion integration separately passes 433 native tests with the
 same two regular ignores, strict Clippy, format and verify. No new frontend or
 model execution is claimed: all runtime/UI/dependency/report bytes are exact to
 their previously executed proofs. Only the paired-port fixture and sanitized
-validation notes differ from the actual reference04 source inventories.
+validation notes differ from the actual reference 04 source inventories.
 
 Parallel-load statements in the model-reference sections describe test-owned
 activity: no capture, ASR or model download was started by these references.
@@ -783,3 +786,20 @@ Existing external applications were preserved and not exhaustively profiled;
 these observations establish no exclusive or uncontended performance result.
 Separate unrelated Rust processes observed later were left untouched. Their
 activity is not attributed to the model-server process measurements.
+
+
+## Historical reference-result erratum — 2026-10-31, integration candidate 20
+
+Earlier sanitized notes for references 01–03 confused the diagnostic rejected-item
+count with the separate persisted overview result. All six original positive
+final overview JSON files, for both separate integration sources and all three
+references, contain five accepted items and rejected ownerOrDueOutsideTasks: 1.
+The broad earlier statement that no rejection reason was persisted was wrong;
+the rolling note now distinguishes the diagnostic counter from the overview.
+Original private evidence, model outputs, fingerprints and measurements remain
+unchanged. Reference 04 was already reported with its actual persisted reason.
+No rejected item is promoted to accepted, no semantic-completeness claim is
+added and no validator changes. This is a documentation-only erratum; candidate 19
+runtime, tests, UI, dependency locks and approved public TEST_REPORT bytes remain
+exact. The executed 433-test / 30-provider and 272-frontend results retain their
+original runtime provenance; no new model, frontend or Rust execution is claimed.

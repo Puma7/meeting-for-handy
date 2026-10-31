@@ -15,11 +15,15 @@ use std::{
 };
 mod audio;
 mod deletion;
+mod immediate;
 mod restore;
 pub use audio::{archive_audio, read_archived_transcript, restore_audio};
 pub use deletion::{
     delete_archived_meeting, deletion_fingerprint, resume_deletion, unfinished_deletions,
     UnfinishedDeletion,
+};
+pub use immediate::{
+    erase_meeting, pending_erasures, preview_erasure, ErasurePreview, ErasureResult, PendingErasure,
 };
 use restore::placement_attempt;
 pub use restore::{move_source_into_archive, restore_new};
@@ -32,6 +36,41 @@ fn operation_lock(root: &Path) -> Result<File> {
     metadata::checked_directory(root)?;
     let file = metadata::open_lock_file(&root.join("archive-maintenance.lock"))?;
     metadata::lock_soon(&file)?;
+    Ok(file)
+}
+/// Holds process-shared erasure exclusion across a source snapshot, annotation commit
+/// and derived-index refresh. Callers must keep this lease until their entire write ends.
+pub fn source_mutation_lease(root: &Path) -> Result<File> {
+    operation_lock(root)
+}
+/// Content publishers share this process-shared lease from their first source read
+/// through their final write. Parallel analysis/live/speaker work can coexist; no
+/// capture transition or existing archive/annotation lock is reacquired by a writer.
+pub fn source_publication_lease(root: &Path) -> Result<File> {
+    publication_lease(root, false)
+}
+/// Erasure alone takes exclusive publication admission before inspecting any source.
+/// The stable lock is outside erased namespaces, so another process cannot recreate
+/// a second lock inode while a publisher still owns the original one.
+fn publication_lease(root: &Path, exclusive: bool) -> Result<File> {
+    metadata::checked_directory(root)?;
+    let file = metadata::open_lock_file(&root.join("content-publication.lock"))?;
+    if exclusive {
+        if let Err(error) = metadata::lock_soon(&file) {
+            let contended = error.kind() == std::io::ErrorKind::WouldBlock
+                || matches!(
+                    (error.raw_os_error(), fs2::lock_contended_error().raw_os_error()),
+                    (Some(actual), Some(expected)) if actual == expected
+                );
+            if contended {
+                return Err("Meeting content is being analysed, exported or published; wait for it to finish and try again. / Meetinginhalte werden gerade verarbeitet; bitte den Abschluss abwarten und erneut versuchen.".into());
+            }
+            // An unrelated I/O failure is not evidence of a competing publisher.
+            return Err(error.into());
+        }
+    } else {
+        fs2::FileExt::try_lock_shared(&file)?;
+    }
     Ok(file)
 }
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]

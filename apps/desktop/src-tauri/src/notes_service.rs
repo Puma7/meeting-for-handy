@@ -37,6 +37,27 @@ struct JobsState {
 #[derive(Default)]
 pub(crate) struct NotesJobs(Mutex<JobsState>);
 impl NotesJobs {
+    /// Discards only a finished job's in-memory copy after explicit meeting erasure.
+    pub(crate) fn forget(&self, meeting: &str) -> AppResult<()> {
+        let mut state = self
+            .0
+            .lock()
+            .map_err(|_| "Auswertungssteuerung ist gesperrt.")?;
+        if state.last.as_ref().is_some_and(|job| {
+            job.progress.meeting_id == meeting && job.progress.status == "running"
+        }) {
+            return Err("Auswertung läuft noch. / Analysis is still running.".into());
+        }
+        if state
+            .last
+            .as_ref()
+            .is_some_and(|job| job.progress.meeting_id == meeting)
+        {
+            state.last = None;
+        }
+        Ok(())
+    }
+
     fn begin(&self, request: &NotesRequest) -> AppResult<(String, AnalysisControl)> {
         let id = request
             .job_id
@@ -203,6 +224,10 @@ fn canonical_job_id(id: &str) -> AppResult<String> {
 pub(crate) fn analyze(service: &Service, mut request: NotesRequest) -> AppResult<Analysis> {
     let mut key = Zeroizing::new(std::mem::take(&mut request.api_key));
     let _operation = service.reserve_operation(crate::operations::Kind::Analysis)?;
+    // Archived transcripts do not own a SessionStore lease. Protect both fresh
+    // source selection and resume snapshots until all run/checkpoint writes end.
+    let _source = meeting_core::archive::source_publication_lease(&service.root)
+        .map_err(|_| "Meetingdaten werden gerade gelöscht. Bitte den Abschluss abwarten. / Meeting erasure is in progress; wait for it to finish.")?;
     let (id, control) = service.notes_jobs.begin(&request)?;
     struct Guard<'a> {
         jobs: &'a NotesJobs,
@@ -384,6 +409,150 @@ pub(crate) fn pending_analyses(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A loopback stub pauses a real archived-source analysis after its snapshot was written.
+    /// Both a new run and a resumed run must exclude erasure until the request/writes end.
+    #[test]
+    fn archived_analysis_and_resume_exclude_erasure_through_final_publication() {
+        use std::{
+            io::{Read, Write},
+            net::TcpListener,
+            sync::{mpsc, Arc},
+            time::Duration,
+        };
+        for resume in [false, true] {
+            let root = std::env::temp_dir().join(format!(
+                "handymeeting-analysis-erasure-{}",
+                meeting_notes::new_job_id()
+            ));
+            let store = meeting_core::SessionStore::create(
+                &root.join("sessions"),
+                "Synthetic archived analysis",
+                "m",
+                "s",
+                None,
+            )
+            .unwrap();
+            let id = store.snapshot().unwrap().id;
+            let mut writer = meeting_core::PcmWriter::new(store.clone(), "system").unwrap();
+            writer.append(&[42; 1600]).unwrap();
+            writer.finish().unwrap();
+            drop(writer);
+            let part = store.snapshot().unwrap().parts[0].clone();
+            store
+                .append_transcript(meeting_core::TranscriptCheckpoint {
+                    sequence: 0,
+                    at: String::new(),
+                    file: part.file,
+                    model_id: "m".into(),
+                    full: "Synthetic source publication canary".into(),
+                    committed: "Synthetic source publication canary".into(),
+                    tentative: String::new(),
+                    processed_samples: part.confirmed_sample_count,
+                    final_text: true,
+                    revision_after_restart: false,
+                })
+                .unwrap();
+            store.set_status("complete").unwrap();
+            drop(store);
+            meeting_core::archive::archive_audio(
+                &root,
+                &id,
+                0,
+                &std::sync::atomic::AtomicBool::new(false),
+                |_, _| {},
+            )
+            .unwrap();
+            let service = Arc::new(Service::new(root.clone()).unwrap());
+            let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+            listener.set_nonblocking(true).unwrap();
+            let mut req = request(&meeting_notes::new_job_id());
+            req.meeting_id = id.clone();
+            req.endpoint = format!("http://{}/v1/", listener.local_addr().unwrap());
+            req.template.steps.push(meeting_notes::Step {
+                id: "summary".into(),
+                name: "Summary".into(),
+                kind: meeting_notes::Kind::Summary,
+                prompt: "Summarise with original evidence.".into(),
+            });
+            if resume {
+                let run = meeting_notes::new_job_id();
+                let folder = root.join("sessions").join(&id).join("analyses").join(&run);
+                std::fs::create_dir_all(&folder).unwrap();
+                let sources = crate::note_sources(&service.data(&id).unwrap()).unwrap();
+                let snapshot = Analysis {
+                    id: run.clone(),
+                    meeting_id: id.clone(),
+                    created_at: "2026-10-30T00:00:00Z".into(),
+                    source_hash: meeting_notes::source_hash(&sources).unwrap(),
+                    sources,
+                    template: req.template.clone(),
+                    sections: vec![],
+                    model: req.model.clone(),
+                    mode: req.mode.clone(),
+                    endpoint: req.endpoint.clone(),
+                    prompt_version: meeting_notes::PROMPT_VERSION.into(),
+                    result_schema: meeting_notes::RESULT_SCHEMA,
+                };
+                std::fs::write(
+                    folder.join("snapshot.json"),
+                    serde_json::to_vec(&snapshot).unwrap(),
+                )
+                .unwrap();
+                req.resume_run_id = Some(run);
+            }
+            let (ready_tx, ready_rx) = mpsc::channel();
+            let (release_tx, release_rx) = mpsc::channel();
+            let server = std::thread::spawn(move || {
+                let deadline = std::time::Instant::now() + Duration::from_secs(10);
+                let mut socket = loop {
+                    match listener.accept() {
+                        Ok((socket, _)) => break socket,
+                        Err(e)
+                            if e.kind() == std::io::ErrorKind::WouldBlock
+                                && std::time::Instant::now() < deadline =>
+                        {
+                            std::thread::sleep(Duration::from_millis(5))
+                        }
+                        Err(e) => panic!("Synthetic loopback accept: {e}"),
+                    }
+                };
+                // Accepted sockets inherit the nonblocking listener mode on Windows.
+                // The request-body gate needs a bounded blocking read, not a race
+                // between accept and the client's first HTTP bytes.
+                socket.set_nonblocking(false).unwrap();
+                socket
+                    .set_read_timeout(Some(Duration::from_secs(5)))
+                    .unwrap();
+                let mut bytes = [0; 8192];
+                assert!(socket.read(&mut bytes).unwrap() > 0);
+                ready_tx.send(()).unwrap();
+                release_rx.recv_timeout(Duration::from_secs(10)).unwrap();
+                socket.write_all(b"HTTP/1.1 500 Synthetic failure\r\nContent-Length: 0\r\nConnection: close\r\n\r\n").unwrap();
+            });
+            let owned = Arc::clone(&service);
+            let worker = std::thread::spawn(move || analyze(&owned, req));
+            ready_rx.recv_timeout(Duration::from_secs(10)).unwrap();
+            let cancel = std::sync::atomic::AtomicBool::new(false);
+            let excluded = meeting_core::archive::preview_erasure(&root, &id, &cancel).is_err();
+            release_tx.send(()).unwrap();
+            assert!(worker.join().unwrap().is_err());
+            server.join().unwrap();
+            assert!(excluded, "An archived source analysis allowed erasure while its persisted run could still write: resume={resume}");
+            drop(service);
+            let preview = meeting_core::archive::preview_erasure(&root, &id, &cancel).unwrap();
+            meeting_core::archive::erase_meeting(
+                &root,
+                &id,
+                &preview.fingerprint,
+                &format!("DELETE {id}"),
+                &cancel,
+                |_, _| {},
+            )
+            .unwrap();
+            assert!(!root.join("sessions").join(&id).exists());
+        }
+    }
 
     #[test]
     fn unfinished_snapshot_survives_service_restart_and_never_restores_cloud_consent() {

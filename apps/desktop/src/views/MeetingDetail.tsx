@@ -1,4 +1,4 @@
-import { ArrowLeft, Check, Copy, Sparkles } from "lucide-react";
+import { ArrowLeft, Check, Copy, Sparkles, Trash2 } from "lucide-react";
 import { meetingLabel } from "../domain";
 import type { Meeting, Locale, TranscriptFormat } from "../types";
 import type { MessageKey } from "../i18n";
@@ -16,6 +16,7 @@ export default function MeetingDetail({
   busy,
   copied,
   onBack,
+  onErase,
   onCopy,
   onAnalyse,
   onOpenFolder,
@@ -30,6 +31,7 @@ export default function MeetingDetail({
   busy: boolean;
   copied: boolean;
   onBack: () => void;
+  onErase?: () => void;
   onCopy: () => void;
   onAnalyse: () => void;
   onOpenFolder: () => void;
@@ -56,6 +58,17 @@ export default function MeetingDetail({
           <p>{meetingLabel(meeting, locale)}</p>
         </div>
         <div className="detail-actions">
+          {onErase && !meeting.id.startsWith("legacy-") && (
+            <button
+              type="button"
+              className="danger"
+              disabled={busy}
+              onClick={onErase}
+            >
+              <Trash2 size={16} />
+              {locale === "de" ? "Meeting löschen" : "Delete meeting"}
+            </button>
+          )}
           <button
             className="secondary"
             disabled={busy || !parts.length}

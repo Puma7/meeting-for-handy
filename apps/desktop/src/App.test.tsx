@@ -1452,6 +1452,11 @@ describe("workspace navigation (synthetic IPC)", () => {
       render(<App api={api} />);
       await ready();
       await userEvent.click(screen.getByRole("button", { name: "Historie" }));
+      // Explicit source highlighting belongs to transcript search. Unfiltered
+      // history now uses complete native summaries with no selected source.
+      await userEvent.type(screen.getByRole("searchbox"), "Quelle");
+      await screen.findByText(meeting.parts[0].text!);
+      expect(api.searchMeetings).toHaveBeenCalledWith("Quelle", 0, 25);
       const main = screen.getByRole("main");
       main.scrollTop = 747;
       await userEvent.click(

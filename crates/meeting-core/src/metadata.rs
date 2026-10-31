@@ -11,6 +11,29 @@ use std::{
     path::{Path, PathBuf},
 };
 
+#[cfg(test)]
+thread_local! {
+    static LOCK_RETRY_OBSERVER: std::cell::RefCell<Option<Box<dyn FnOnce()>>> =
+        std::cell::RefCell::new(None);
+}
+
+#[cfg(test)]
+/// Observes the first actual OS-lock retry on this test thread. The scoped
+/// restoration also runs on panic; unrelated concurrent tests cannot consume it.
+pub(crate) fn observe_lock_retry<T>(
+    observer: impl FnOnce() + 'static,
+    work: impl FnOnce() -> T,
+) -> T {
+    struct Restore(Option<Box<dyn FnOnce()>>);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            LOCK_RETRY_OBSERVER.with(|slot| slot.replace(self.0.take()));
+        }
+    }
+    let _restore = Restore(LOCK_RETRY_OBSERVER.with(|slot| slot.replace(Some(Box::new(observer)))));
+    work()
+}
+
 /// Annotation and maintenance locks are short-lived. A child process started elsewhere in
 /// this app can briefly inherit an open lock handle between fork and exec, so retry for a
 /// moment before reporting a real concurrent edit.
@@ -21,6 +44,13 @@ pub(crate) fn lock_soon(file: &fs::File) -> std::io::Result<()> {
             Ok(()) => return Ok(()),
             Err(error) if attempts >= 25 => return Err(error),
             Err(_) => {
+                #[cfg(test)]
+                LOCK_RETRY_OBSERVER.with(|slot| {
+                    let observer = slot.borrow_mut().take();
+                    if let Some(observer) = observer {
+                        observer();
+                    }
+                });
                 attempts += 1;
                 std::thread::sleep(std::time::Duration::from_millis(10));
             }

@@ -2,7 +2,7 @@
 use super::restore::{absent, MAX_PLACEMENT_ATTEMPTS};
 use super::*;
 
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub(super) struct DeleteFile {
     pub(super) name: String,
@@ -281,6 +281,52 @@ pub(super) fn deletion_inventory(
         legacy_age_evidence,
     })
 }
+/// Missing optional catalogs are empty; linked, unreadable and non-directory catalogs fail closed.
+pub(super) fn optional_entries(path: &Path) -> Result<Vec<std::io::Result<fs::DirEntry>>> {
+    metadata::reject_link_if_present(path)?;
+    if !path.exists() {
+        return Ok(Vec::new());
+    }
+    metadata::checked_directory(path)?;
+    let rows: Vec<_> = fs::read_dir(path)?.take(500001).collect();
+    if rows.len() > 500000 {
+        return Err("Catalog exceeds deletion inventory bound".into());
+    }
+    Ok(rows)
+}
+/// Includes every ordinary file and directory of a specifically attributed owned tree.
+pub(super) fn add_tree(
+    root: &Path,
+    folder: &Path,
+    cancel: &AtomicBool,
+    files: &mut Vec<DeleteFile>,
+    directories: &mut Vec<PathBuf>,
+) -> Result<()> {
+    metadata::checked_directory(folder)?;
+    if folder.strip_prefix(root)?.components().count() > 64 {
+        return Err("Deletion tree nesting exceeds bound".into());
+    }
+    if cancel.load(Ordering::Acquire) {
+        return Err("Deletion preview cancelled".into());
+    }
+    for entry in optional_entries(folder)? {
+        let path = entry?.path();
+        reject_link(&path)?;
+        let meta = fs::metadata(&path)?;
+        if meta.is_dir() {
+            add_tree(root, &path, cancel, files, directories)?;
+        } else if meta.is_file() {
+            push_delete_file(root, &path, cancel, files)?;
+        } else {
+            return Err("Non-ordinary meeting file; deletion blocked".into());
+        }
+    }
+    directories.push(folder.to_owned());
+    if directories.len() > 500000 {
+        return Err("Deletion directory bound exceeded".into());
+    }
+    Ok(())
+}
 /// Reads the bounded meeting identity from an unfinished archive record.
 pub(super) fn pending_meeting(path: &Path) -> Result<String> {
     regular(path)?;
@@ -361,6 +407,7 @@ pub fn delete_archived_meeting(
         return Err("Invalid archived meeting identity".into());
     }
     let _operation = operation_lock(root)?;
+    let _publication = publication_lease(root, true)?;
     if confirmation != format!("DELETE {id}") {
         return Err("Permanent deletion requires the exact meeting confirmation".into());
     }
@@ -505,6 +552,7 @@ pub fn resume_deletion(
     mut progress: impl FnMut(u64, u64),
 ) -> Result<String> {
     let _operation = operation_lock(root)?;
+    let _publication = publication_lease(root, true)?;
     let (log, mut record) = deletion_log(root, log_id)?;
     if !matches!(record["phase"].as_str(), Some("confirmed" | "deleting")) {
         return Err("This deletion is not unfinished".into());

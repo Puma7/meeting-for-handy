@@ -1002,6 +1002,22 @@ pub(crate) fn lease(folder: &Path) -> Result<SessionLease> {
         relocation: Some(relocation),
     })
 }
+/// Holds cross-process relocation exclusion without opening or repairing a transcript.
+/// The internal lock handle is released on Windows so the confirmed tree can be removed;
+/// the external stable lease remains held until removal finishes.
+pub(crate) fn erasure_lease(folder: &Path) -> Result<RelocationGuard> {
+    let mut owner = lease(folder)?;
+    let internal = owner.internal.take();
+    #[cfg(windows)]
+    let internal = {
+        drop(internal);
+        None
+    };
+    Ok(RelocationGuard {
+        _internal: internal,
+        _relocation: owner.relocation.take().ok_or("Missing erasure lease")?,
+    })
+}
 fn read_json<T: DeserializeOwned>(path: &Path) -> Result<T> {
     reject_link(path)?;
     let file = File::open(path)?;

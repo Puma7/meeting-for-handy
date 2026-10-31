@@ -371,6 +371,12 @@ main {
 .analysis-discovery-error {
   display: block;
 }
+.pending-erasures {
+  display: block;
+}
+.pending-erasures .session-row {
+  flex-wrap: wrap;
+}
 .notice strong {
   font-weight: 600;
 }
@@ -2319,5 +2325,35 @@ p {
     border-radius: 10px;
     box-shadow: 0 5px 22px #0002;
     font-size: 13px;
+  }
+}
+
+/* A single explicit erasure action remains visible without crowding history rows. */
+.session-row-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+.erasure-button {
+  color: var(--color-error);
+}
+.erasure-dialog {
+  max-height: calc(100dvh - 32px);
+  overflow-y: auto;
+}
+.erasure-dialog .erasure-meeting {
+  overflow-wrap: anywhere;
+}
+.erasure-dialog input {
+  width: 100%;
+}
+.erasure-dialog .dialog-actions {
+  flex-wrap: wrap;
+}
+@media (max-width: 540px) {
+  .erasure-dialog .dialog-actions button {
+    white-space: normal;
+    flex: 1 1 160px;
   }
 }

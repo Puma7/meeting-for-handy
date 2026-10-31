@@ -29,6 +29,14 @@ function jobInvoke<T>(
   return pending;
 }
 export const desktopApi: DesktopApi = {
+  previewMeetingErasure: (meetingId) =>
+    jobInvoke("preview_meeting_erasure", { meetingId }),
+  getMeetingErasurePreview: (jobId) =>
+    desktopInvoke("get_meeting_erasure_preview", { jobId }),
+  eraseMeetingNow: (previewId, meetingId, confirmation) =>
+    jobInvoke("erase_meeting_now", { previewId, meetingId, confirmation }),
+  listPendingErasures: () => desktopInvoke("list_pending_erasures"),
+
   listAudioCopies: (offset) => desktopInvoke("list_audio_copies", { offset }),
   transcribeAudioCopy: (runId, modelId, confirmed) =>
     jobInvoke("transcribe_audio_copy", { runId, modelId, confirmed }),

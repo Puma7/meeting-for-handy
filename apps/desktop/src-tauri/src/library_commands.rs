@@ -24,7 +24,8 @@ pub(crate) fn edit_metadata(
     pinned: bool,
 ) -> AppResult<meeting_core::metadata::Metadata> {
     let _lease = service.reserve_operation(crate::operations::Kind::Mutation)?;
-
+    let _source = meeting_core::archive::source_mutation_lease(&service.root)
+        .map_err(|_| "Meetingablage wird gerade geändert. Bitte kurz warten. / Meeting storage is being changed; retry shortly.")?;
     let data = service.data(meeting_id)?;
     let mut meta=meeting_core::metadata::edit(&service.root,meeting_id,expected_revision,title,pinned)
             .map_err(|_|"Meeting labels could not be saved. Reload the meeting; originals are preserved. / Meetingname oder VIP-Markierung konnten nicht gespeichert werden. Bitte die Sitzung neu laden.")?;

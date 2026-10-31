@@ -95,6 +95,8 @@ pub(crate) fn save_labels(
     assignments: Vec<meeting_core::speakers::Assignment>,
 ) -> AppResult<meeting_core::speakers::SpeakerDocument> {
     let _lease = service.reserve_operation(crate::operations::Kind::Mutation)?;
+    let _source = meeting_core::archive::source_mutation_lease(&service.root)
+        .map_err(|_| "Meetingablage wird gerade geändert. Bitte kurz warten. / Meeting storage is being changed; retry shortly.")?;
     let data = service.data(meeting_id)?;
     meeting_core::speakers::save(&service.root,&data,expected_revision,enabled,assignments).map_err(|_|"Speaker labels could not be saved. Reload and check the original section and quote. / Sprecherzuordnung nicht gespeichert. Bitte neu laden und Originalabschnitt sowie Zitat prüfen.".into())
 }

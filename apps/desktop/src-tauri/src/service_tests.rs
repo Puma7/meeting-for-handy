@@ -1,5 +1,399 @@
 //! Synthetic service-state regressions; ordinary tests never open audio devices.
 use super::*;
+use std::time::Duration;
+
+/// A parked read-only retention scan may coexist with ordinary native edits.
+#[test]
+fn retention_preview_allows_metadata_and_speaker_edits_during_the_scan() {
+    let root = fixture_root("retention-preview-mutations");
+    let service = Service::new(root.clone()).unwrap();
+    let store =
+        SessionStore::create(&root.join("sessions"), "Synthetic preview", "m", "s", None).unwrap();
+    let id = store.snapshot().unwrap().id;
+    store.set_status("complete").unwrap();
+    drop(store);
+    let _index = service.reserve_operation(operations::Kind::Index).unwrap();
+    let (entered_tx, entered_rx) = std::sync::mpsc::channel();
+    let (release_tx, release_rx) = std::sync::mpsc::channel();
+    let worker_root = root.clone();
+    let worker = std::thread::spawn(move || {
+        let mut announced = false;
+        retention_commands::publish_preview(
+            &worker_root,
+            &"e".repeat(32),
+            &AtomicBool::new(false),
+            |_, _| {
+                if !announced {
+                    announced = true;
+                    entered_tx.send(()).unwrap();
+                    release_rx.recv_timeout(Duration::from_secs(10)).unwrap();
+                }
+            },
+        )
+    });
+    entered_rx.recv_timeout(Duration::from_secs(10)).unwrap();
+    let metadata = library_commands::edit_metadata(
+        &service,
+        &id,
+        0,
+        Some("Synthetic renamed while scanning".into()),
+        true,
+    );
+    let speakers = speaker_commands::save_labels(&service, &id, 0, false, vec![]);
+    // Release the ordinary writer-capable view so it cannot mask a missing
+    // publication fence through the independent session writer lock.
+    service.lock().unwrap().view = None;
+    let erasure_blocked =
+        meeting_core::archive::preview_erasure(&root, &id, &AtomicBool::new(false)).is_err();
+    release_tx.send(()).unwrap();
+    worker.join().unwrap().unwrap();
+    assert!(
+        metadata.is_ok(),
+        "Read-only retention scan blocked metadata: {metadata:?}"
+    );
+    assert!(
+        speakers.is_ok(),
+        "Read-only retention scan blocked speaker labels: {speakers:?}"
+    );
+    assert!(
+        erasure_blocked,
+        "Retention publication allowed concurrent erasure"
+    );
+    assert_eq!(
+        meeting_core::metadata::read(&root, &id)
+            .unwrap()
+            .title
+            .as_deref(),
+        Some("Synthetic renamed while scanning")
+    );
+}
+
+/// A second Service's erasure lease must fence both the title snapshot and plan publication.
+#[test]
+fn retention_plan_publication_obeys_cross_service_erasure_exclusion() {
+    let root = fixture_root("retention-publication-erasure");
+    let service = Service::new(root.clone()).unwrap();
+    let other = Service::new(root.clone()).unwrap();
+    let store = SessionStore::create(
+        &root.join("sessions"),
+        "Synthetic retention title canary",
+        "m",
+        "s",
+        None,
+    )
+    .unwrap();
+    let id = store.snapshot().unwrap().id;
+    store.set_status("complete").unwrap();
+    drop(store);
+    let manifest = root.join("sessions").join(&id).join("session.json");
+    let mut value: serde_json::Value =
+        serde_json::from_slice(&fs::read(&manifest).unwrap()).unwrap();
+    value["startedAt"] = "2020-01-01T00:00:00Z".into();
+    value["endedAt"] = "2020-01-01T00:01:00Z".into();
+    fs::write(&manifest, serde_json::to_vec(&value).unwrap()).unwrap();
+    let policy = meeting_core::retention::Policy {
+        archive_after_days: Some(365),
+        ..Default::default()
+    };
+    meeting_core::retention::save_policy(&root, 0, policy).unwrap();
+    let job = "d".repeat(32);
+    let plan = root.join("retention-plans").join(format!("{job}.json"));
+    let cancel = AtomicBool::new(false);
+    let preview = meeting_core::archive::preview_erasure(&other.root, &id, &cancel).unwrap();
+    let worker_root = other.root.clone();
+    let worker_id = id.clone();
+    let (entered_tx, entered_rx) = std::sync::mpsc::channel();
+    let (release_tx, release_rx) = std::sync::mpsc::channel();
+    let erasure = std::thread::spawn(move || {
+        let stop = AtomicBool::new(false);
+        meeting_core::archive::erase_meeting(
+            &worker_root,
+            &worker_id,
+            &preview.fingerprint,
+            &format!("DELETE {worker_id}"),
+            &stop,
+            |_, _| {
+                entered_tx.send(()).unwrap();
+                release_rx.recv_timeout(Duration::from_secs(10)).unwrap();
+                stop.store(true, Ordering::Release);
+            },
+        )
+    });
+    entered_rx.recv_timeout(Duration::from_secs(10)).unwrap();
+    let publication = retention_commands::publish_preview(&service.root, &job, &cancel, |_, _| {});
+    release_tx.send(()).unwrap();
+    assert!(
+        erasure.join().unwrap().is_err(),
+        "Synthetic erasure should stop before first removal"
+    );
+    assert!(
+        publication.is_err(),
+        "A content-bearing retention plan bypassed another Service's erasure exclusion"
+    );
+    assert!(!plan.exists());
+    retention_commands::publish_preview(&service.root, &job, &cancel, |_, _| {}).unwrap();
+    let value: serde_json::Value = serde_json::from_slice(&fs::read(&plan).unwrap()).unwrap();
+    assert!(value["candidates"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|candidate| candidate["meetingId"] == id
+            && candidate["title"] == "Synthetic retention title canary"));
+    let preview = meeting_core::archive::preview_erasure(&root, &id, &cancel).unwrap();
+    meeting_core::archive::erase_meeting(
+        &root,
+        &id,
+        &preview.fingerprint,
+        &format!("DELETE {id}"),
+        &cancel,
+        |_, _| {},
+    )
+    .unwrap();
+    assert!(
+        !plan.exists(),
+        "Completed erasure left the title-bearing retention preview"
+    );
+}
+
+/// A maintenance snapshot delayed until after erasure must not reinsert its saved text.
+#[test]
+fn delayed_maintenance_snapshots_cannot_repopulate_an_erased_index() {
+    for archived in [false, true] {
+        let root = fixture_root("late-maintenance-index");
+        let store = SessionStore::create(
+            &root.join("sessions"),
+            "Synthetic delayed maintenance",
+            "m",
+            "s",
+            None,
+        )
+        .unwrap();
+        let mut writer = meeting_core::PcmWriter::new(store.clone(), "system").unwrap();
+        writer.append(&[42; 1600]).unwrap();
+        writer.finish().unwrap();
+        drop(writer);
+        let part = store.snapshot().unwrap().parts[0].clone();
+        store
+            .append_transcript(meeting_core::TranscriptCheckpoint {
+                sequence: 0,
+                at: String::new(),
+                file: part.file,
+                model_id: "m".into(),
+                full: "syntheticlatemaintenancecanary".into(),
+                committed: "syntheticlatemaintenancecanary".into(),
+                tentative: String::new(),
+                processed_samples: part.confirmed_sample_count,
+                final_text: true,
+                revision_after_restart: false,
+            })
+            .unwrap();
+        store.set_status("complete").unwrap();
+        let folder = store.folder().to_owned();
+        drop(store);
+        let cancel = AtomicBool::new(false);
+        let stale = if archived {
+            meeting_core::archive::archive_audio(
+                &root,
+                &folder.file_name().unwrap().to_string_lossy(),
+                0,
+                &cancel,
+                |_, _| {},
+            )
+            .unwrap();
+            meeting_core::archive::read_archived_transcript(&folder)
+                .unwrap()
+                .unwrap()
+        } else {
+            SessionStore::open(&folder).unwrap().snapshot().unwrap()
+        };
+        // Both real maintenance source forms can be indexed before deletion.
+        library_service::update(&root, &stale).unwrap();
+        let preview = meeting_core::archive::preview_erasure(&root, &stale.id, &cancel).unwrap();
+        meeting_core::archive::erase_meeting(
+            &root,
+            &stale.id,
+            &preview.fingerprint,
+            &format!("DELETE {}", stale.id),
+            &cancel,
+            |_, _| {},
+        )
+        .unwrap();
+        assert!(
+            library_service::update(&root, &stale).is_err(),
+            "A delayed maintenance snapshot recreated erased transcript content"
+        );
+        let index = meeting_core::library::LibraryIndex::open(&root).unwrap();
+        assert_eq!(
+            index
+                .search("syntheticlatemaintenancecanary", 0, 25)
+                .unwrap()
+                .total,
+            0
+        );
+        assert!(!folder.exists());
+    }
+}
+
+#[test]
+fn recording_transitions_keep_saved_text_readable_without_maintenance_admission() {
+    let root = fixture_root("read-during-capture-transition");
+    let service = Service::new(root.clone()).unwrap();
+    let store = SessionStore::create(
+        &root.join("sessions"),
+        "Synthetic readable during stop",
+        "m",
+        "s",
+        None,
+    )
+    .unwrap();
+    let id = store.snapshot().unwrap().id;
+    service.lock().unwrap().view = Some(store);
+    // Models the existing stop/reconnect transition; no device is opened here.
+    service.lock().unwrap().transitioning = true;
+    assert_eq!(
+        service.data(&id).unwrap().title,
+        "Synthetic readable during stop"
+    );
+    service.lock().unwrap().transitioning = false;
+}
+
+#[test]
+fn annotation_commands_fence_the_source_snapshot_and_commit_with_one_os_lease() {
+    for speaker in [false, true] {
+        let root = fixture_root("annotation-erasure-fence");
+        let service = Service::new(root.clone()).unwrap();
+        let store = SessionStore::create(
+            &root.join("sessions"),
+            "Synthetic archived source",
+            "m",
+            "s",
+            None,
+        )
+        .unwrap();
+        let id = store.snapshot().unwrap().id;
+        let mut writer = meeting_core::PcmWriter::new(store.clone(), "system").unwrap();
+        writer.append(&[42; 1600]).unwrap();
+        writer.finish().unwrap();
+        drop(writer);
+        let part = store.snapshot().unwrap().parts[0].clone();
+        store
+            .append_transcript(meeting_core::TranscriptCheckpoint {
+                sequence: 0,
+                at: String::new(),
+                file: part.file,
+                model_id: "m".into(),
+                full: "Synthetic source text".into(),
+                committed: "Synthetic source text".into(),
+                tentative: String::new(),
+                processed_samples: part.confirmed_sample_count,
+                final_text: true,
+                revision_after_restart: false,
+            })
+            .unwrap();
+        store.set_status("complete").unwrap();
+        drop(store);
+        meeting_core::archive::archive_audio(&root, &id, 0, &AtomicBool::new(false), |_, _| {})
+            .unwrap();
+        let parent = root.join(if speaker {
+            "speaker-labels"
+        } else {
+            "user-metadata"
+        });
+        fs::create_dir_all(&parent).unwrap();
+        let remote = Service::new(root.clone()).unwrap();
+        let source = root.join("sessions").join(&id).join("session.json");
+        let before = fs::read(&source).unwrap();
+        // Deterministic ordering: erasure already owns its OS lease before the
+        // second Service attempts either mutation. No probe competes with a writer.
+        let fence = meeting_core::archive::source_mutation_lease(&root).unwrap();
+        let mutate = || {
+            if speaker {
+                speaker_commands::save_labels(&remote, &id, 0, false, vec![]).map(|_| ())
+            } else {
+                library_commands::edit_metadata(
+                    &remote,
+                    &id,
+                    0,
+                    Some("Synthetic edited title".into()),
+                    false,
+                )
+                .map(|_| ())
+            }
+        };
+        assert!(
+            mutate().is_err(),
+            "Mutation bypassed process-shared erasure admission"
+        );
+        assert_eq!(fs::read(&source).unwrap(), before);
+        assert!(!parent.join(format!("{id}.json")).exists());
+        assert!(!root.join("library-index").exists());
+        drop(fence);
+        mutate().unwrap();
+        drop(remote);
+        drop(service);
+        let cancel = AtomicBool::new(false);
+        let preview = meeting_core::archive::preview_erasure(&root, &id, &cancel).unwrap();
+        meeting_core::archive::erase_meeting(
+            &root,
+            &id,
+            &preview.fingerprint,
+            &format!("DELETE {id}"),
+            &cancel,
+            |_, _| {},
+        )
+        .unwrap();
+        assert!(!parent.join(format!("{id}.json")).exists());
+        assert!(!root.join("sessions").join(&id).exists());
+        assert!(!root.join("library-index").exists());
+    }
+}
+
+#[test]
+fn meeting_erasure_reservation_refuses_all_writers_and_releases_only_an_inactive_view() {
+    let root = fixture_root("erasure-admission");
+    let service = Arc::new(Service::new(root.clone()).unwrap());
+    let store = SessionStore::create(
+        &root.join("sessions"),
+        "Synthetic retained original",
+        "m",
+        "s",
+        None,
+    )
+    .unwrap();
+    let id = store.snapshot().unwrap().id;
+    let path = store.folder().join("session.json");
+    let before = fs::read(&path).unwrap();
+    service.lock().unwrap().view = Some(store);
+    for kind in [
+        operations::Kind::Recording,
+        operations::Kind::Analysis,
+        operations::Kind::Speakers,
+        operations::Kind::Index,
+        operations::Kind::Export,
+        operations::Kind::Mutation,
+        operations::Kind::LiveNotes,
+    ] {
+        let writer = service.reserve_operation(kind).unwrap();
+        assert!(retention_commands::reserve(&service).is_err());
+        assert!(service.lock().unwrap().view.is_some());
+        assert_eq!(fs::read(&path).unwrap(), before);
+        drop(writer);
+    }
+    let maintenance = retention_commands::reserve(&service).unwrap();
+    assert!(service.lock().unwrap().view.is_none());
+    assert!(service.data(&id).is_err());
+    assert!(service
+        .reserve_operation(operations::Kind::Recording)
+        .is_err());
+    assert!(meeting_core::archive::preview_erasure(&root, &id, &AtomicBool::new(false)).is_ok());
+    assert_eq!(
+        fs::read(&path).unwrap(),
+        before,
+        "A preview must never erase original content"
+    );
+    drop(maintenance);
+    assert!(service.data(&id).is_ok());
+}
 
 #[test]
 fn audio_level_poll_is_idle_without_capture_and_never_waits_for_app_state() {

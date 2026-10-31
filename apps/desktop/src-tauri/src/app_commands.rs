@@ -208,6 +208,8 @@ pub(crate) async fn export_transcript(
     let service = Arc::clone(&service);
     blocking(move || {
         let _operation = service.reserve_operation(operations::Kind::Export)?;
+        let _source = meeting_core::archive::source_publication_lease(&service.root)
+            .map_err(|_| "Meeting erasure is in progress; wait for it to finish. / Meetingdaten werden gerade gelöscht.")?;
         let data = service.data(&id)?;
         if data.read_only {
             return Err("Diese Originalsitzung ist schreibgeschützt. Das Transkript kann weiterhin vollständig kopiert werden. / This original session is read-only; the full transcript can still be copied.".into());

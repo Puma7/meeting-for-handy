@@ -59,16 +59,25 @@ pub(crate) fn preview_retention(service: State<'_, Arc<Service>>) -> AppResult<S
         .maintenance_jobs
         .start_work("cleanup-preview", move |id, jobs, cancel| {
             let _lease = lease;
-            let mut plan = meeting_core::retention::preview(
-                &owned.root,
-                chrono_now(),
-                cancel,
-                |done, total| jobs.update_work(id, done, total),
-            )?;
-            plan.id = id.to_owned();
-            crate::create_json(&plans(&owned.root)?.join(format!("{id}.json")), &plan)
-                .map_err(|e| e.into())
+            publish_preview(&owned.root, id, cancel, |done, total| {
+                jobs.update_work(id, done, total)
+            })
         })
+}
+/// Keeps construction and publication in one native operation; plans contain original titles.
+pub(crate) fn publish_preview(
+    root: &Path,
+    id: &str,
+    cancel: &std::sync::atomic::AtomicBool,
+    progress: impl FnMut(u64, u64),
+) -> meeting_core::Result<()> {
+    crate::validate_id(id)?;
+    // Erasure takes exclusive publication admission. Share this lease through
+    // the final write without excluding unrelated metadata or speaker edits.
+    let _source = meeting_core::archive::source_publication_lease(root)?;
+    let mut plan = meeting_core::retention::preview(root, chrono_now(), cancel, progress)?;
+    plan.id = id.to_owned();
+    crate::create_json(&plans(root)?.join(format!("{id}.json")), &plan).map_err(|e| e.into())
 }
 fn chrono_now() -> chrono::DateTime<chrono::Utc> {
     chrono::Utc::now()
@@ -120,7 +129,7 @@ pub(crate) fn cancel_maintenance(service: State<'_, Arc<Service>>, job_id: Strin
     service.maintenance_jobs.cancel(&job_id)
 }
 /// Reserve all operations that could move sources before starting the background job.
-struct MaintenanceGuard {
+pub(super) struct MaintenanceGuard {
     service: Arc<Service>,
     _lease: crate::operations::Lease,
 }
@@ -130,16 +139,18 @@ impl Drop for MaintenanceGuard {
     fn drop(&mut self) {
         if let Ok(mut inner) = self.service.lock() {
             inner.transitioning = false;
+            inner.maintenance_reserved = false;
         }
     }
 }
 /// Acquire exclusive maintenance admission, release the cached session view and mark its
 /// transition.
-fn reserve(service: &Arc<Service>) -> AppResult<MaintenanceGuard> {
+pub(super) fn reserve(service: &Arc<Service>) -> AppResult<MaintenanceGuard> {
     let lease = service.reserve_operation(crate::operations::Kind::Maintenance)?;
     let mut inner = service.lock()?;
     inner.view = None;
     inner.transitioning = true;
+    inner.maintenance_reserved = true;
     Ok(MaintenanceGuard {
         service: service.clone(),
         _lease: lease,

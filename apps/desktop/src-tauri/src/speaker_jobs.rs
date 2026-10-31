@@ -323,6 +323,27 @@ pub(super) struct Jobs {
     inner: Mutex<Option<Job>>,
 }
 impl Jobs {
+    /// Discards finished section text for exactly the explicitly erased meeting.
+    pub(crate) fn forget(&self, meeting: &str) -> AppResult<()> {
+        let mut state = self
+            .inner
+            .lock()
+            .map_err(|_| "Sprechersteuerung ist gesperrt.")?;
+        if state
+            .as_ref()
+            .is_some_and(|job| job.view.meeting_id == meeting && job.view.status == "running")
+        {
+            return Err("Sprecherprüfung läuft noch. / Speaker analysis is still running.".into());
+        }
+        if state
+            .as_ref()
+            .is_some_and(|job| job.view.meeting_id == meeting)
+        {
+            *state = None;
+        }
+        Ok(())
+    }
+
     pub fn snapshot(&self) -> Option<Progress> {
         let state = self.inner.lock().ok()?;
         let job = state.as_ref()?;
@@ -369,6 +390,8 @@ impl Jobs {
             return Err("Invalid experimental speaker request".into());
         }
         let lease = service.reserve_operation(crate::operations::Kind::Speakers)?;
+        let source_lease = meeting_core::archive::source_publication_lease(&service.root)
+            .map_err(|_| "Meeting erasure is in progress; wait for it to finish. / Meetingdaten werden gerade gelöscht.")?;
         let data = service.data(&meeting_id)?;
         let recording = service.lock()?.active.as_ref().is_some_and(|a| {
             a.capture.is_some()
@@ -415,6 +438,7 @@ impl Jobs {
         let owned = id.clone();
         let spawn=std::thread::Builder::new().name("meeting-optional-speakers".into()).spawn(move||{
    let _lease = lease;
+   let _source_lease = source_lease;
    let result=std::panic::catch_unwind(std::panic::AssertUnwindSafe(||run(&service,&jobs,&owned,&meeting_id,&model_id,&mode,&cancel))).unwrap_or_else(|_|Err("Optional speaker worker stopped unexpectedly; capture and original transcripts are preserved".into()));
    jobs.update(&owned,|p|{p.status=if result.is_ok(){"complete"}else if cancel.load(Ordering::Acquire){"cancelled"}else{"failed"}.into();p.stage="finished".into();p.error=result.err();if p.total_tasks==0{p.total_tasks=p.confirmed_tasks;}});
   });

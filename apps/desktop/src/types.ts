@@ -401,7 +401,29 @@ export interface NotesProgress {
  * Typed renderer/native boundary. Optional methods describe available capabilities;
  * native commands still validate IDs, file grants and explicit confirmations.
  */
+export interface ErasurePreview {
+  meetingId: string;
+  fingerprint: string;
+  files: number;
+  bytes: number;
+  rebuildSearch: boolean;
+  /** Unassignable interrupted metadata stays intact and is disclosed before confirmation. */
+  preservedAtomicRemnants?: number;
+}
+export interface PendingErasure {
+  meetingId: string;
+  confirmedAt: string;
+}
 export interface DesktopApi {
+  previewMeetingErasure?(meetingId: string): Promise<string>;
+  getMeetingErasurePreview?(jobId: string): Promise<ErasurePreview>;
+  eraseMeetingNow?(
+    previewId: string,
+    meetingId: string,
+    confirmation: string,
+  ): Promise<string>;
+  listPendingErasures?(): Promise<PendingErasure[]>;
+
   listAudioCopies?(offset: number): Promise<AudioCopyPage>;
   transcribeAudioCopy?(
     runId: string,
