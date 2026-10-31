@@ -80,6 +80,7 @@ struct Job {
     interval_ms: Arc<AtomicU64>,
     shared: Arc<Mutex<Shared>>,
     worker: Option<thread::JoinHandle<()>>,
+    models: crate::model_sessions::Models,
 }
 impl Job {
     fn running(&self) -> bool {
@@ -297,6 +298,27 @@ impl LiveNotes {
             .map_err(|_| "Live-Zusammenfassung ist gesperrt.".into())
     }
 
+    /// Checks inactivity and releases the matching meeting atomically with respect to start.
+    /// The caller has already verified complete coverage of the current transcript.
+    pub(crate) fn finish_inactive_model(
+        &self,
+        meeting: &str,
+        models: &crate::model_sessions::Models,
+    ) {
+        let Ok(guard) = self.lock() else {
+            return;
+        };
+        if guard
+            .as_ref()
+            .is_some_and(|job| job.meeting_id == meeting && job.running())
+        {
+            return;
+        }
+        let cleanup = models.detach_owner(&crate::model_sessions::Owner::Live(meeting.to_owned()));
+        drop(guard);
+        cleanup();
+    }
+
     pub(crate) fn status(&self, service: &Service, meeting_id: &str) -> AppResult<LiveNotesStatus> {
         validate_id(meeting_id)?;
         if let Some(job) = self.lock()?.as_ref().filter(|j| j.meeting_id == meeting_id) {
@@ -334,14 +356,22 @@ impl LiveNotes {
 
     pub(crate) fn stop(&self) -> AppResult<bool> {
         let guard = self.lock()?;
-        let Some(job) = guard.as_ref().filter(|j| j.running()) else {
+        let Some(job) = guard.as_ref() else {
             return Ok(false);
         };
-        job.control.cancel();
-        if let Ok(mut shared) = job.shared.lock() {
-            shared.status = "stopped".into();
+        let running = job.running();
+        if running {
+            job.control.cancel();
+            if let Ok(mut shared) = job.shared.lock() {
+                shared.status = "stopped".into();
+            }
         }
-        Ok(true)
+        let cleanup = job
+            .models
+            .detach_owner(&crate::model_sessions::Owner::Live(job.meeting_id.clone()));
+        drop(guard);
+        cleanup();
+        Ok(running)
     }
 
     /// Starts live notes for one meeting. Saved keys still need cloud text release for this
@@ -394,6 +424,12 @@ impl LiveNotes {
             cloud_consent: request.cloud_consent,
             api_key: std::mem::take(&mut *key),
         };
+        let model_work = service.model_sessions.reserve(
+            crate::model_sessions::Owner::Live(request.meeting_id.clone()),
+            &connection,
+            crate::local_models::provider_for_endpoint(&connection.endpoint),
+        )?;
+        let model_lease = model_work.as_ref().map(|work| work.lease()).transpose()?;
         let runner = LiveRunner::start(
             &live_root(service, &request.meeting_id),
             &request.meeting_id,
@@ -401,6 +437,12 @@ impl LiveNotes {
             &request.language,
         )
         .map_err(|e| e.to_string())?;
+        let runner = match &model_lease {
+            Some(lease) => runner
+                .with_residency(Arc::clone(lease))
+                .map_err(|e| e.to_string())?,
+            None => runner,
+        };
         let (texts, _) = live_texts(&data);
         let shared = Arc::new(Mutex::new(Shared {
             status: "starting".into(),
@@ -421,8 +463,11 @@ impl LiveNotes {
             interval_ms: Arc::new(AtomicU64::new(clamp_interval(request.interval_ms))),
             shared,
             worker: None,
+            models: service.model_sessions.clone(),
         };
         let worker = Worker {
+            model_work,
+            model_lease,
             _lease: lease,
             service: Arc::clone(service),
             meeting_id: request.meeting_id,
@@ -478,6 +523,8 @@ fn overview_retry(due: bool, failures: u32, manual: bool, since_attempt: Option<
 }
 
 struct Worker {
+    model_work: Option<crate::model_sessions::ModelWork>,
+    model_lease: Option<Arc<meeting_notes::residency::ModelLease>>,
     _lease: crate::operations::Lease,
     service: Arc<Service>,
     meeting_id: String,
@@ -525,6 +572,26 @@ impl Worker {
     /// workers with backlog. Retries retain their trigger and backoff; cancellation wins
     /// over later progress, and completed windows remain available after a stop.
     fn run(self, mut runner: LiveRunner) {
+        if let Some(lease) = &self.model_lease {
+            if let Err(error) = lease.prepare(&self.control) {
+                if self.control.is_cancelled() {
+                    if let Some(work) = &self.model_work {
+                        work.finish();
+                    }
+                    self.service
+                        .model_sessions
+                        .finish_owner(&crate::model_sessions::Owner::Live(self.meeting_id.clone()));
+                    self.set(|shared| {
+                        shared.status = "failed".into();
+                        shared.error = Some(error.to_string());
+                    });
+                    return;
+                }
+                // Each inference prepares again. Keep the existing update/backoff
+                // loop and retained owner available after a transient load failure.
+                self.set(|shared| shared.error = Some(error.to_string()));
+            }
+        }
         let mut failures: u32 = 0;
         let mut overview_failures: u32 = 0;
         let mut overview_attempt: Option<Instant> = None;
@@ -597,6 +664,14 @@ impl Worker {
                 trigger = Some(Trigger::Manual);
             }
             if finished && trigger.is_none() && !overview_open {
+                if !runner.overview_due() {
+                    if let Some(work) = &self.model_work {
+                        work.finish();
+                    }
+                    self.service
+                        .model_sessions
+                        .finish_owner(&crate::model_sessions::Owner::Live(self.meeting_id.clone()));
+                }
                 self.publish(&runner);
                 self.set(|s| {
                     s.status = if runner.overview_due() {
@@ -678,6 +753,12 @@ impl Worker {
         }
         self.publish(&runner);
         self.set(|s| s.status = "stopped".into());
+        if let Some(work) = &self.model_work {
+            work.finish();
+        }
+        self.service
+            .model_sessions
+            .finish_owner(&crate::model_sessions::Owner::Live(self.meeting_id.clone()));
     }
 }
 
@@ -685,6 +766,106 @@ impl Worker {
 mod tests {
     use super::*;
     use meeting_core::SessionStore;
+
+    /// A transient native preload refusal must leave the worker alive until explicit cancellation.
+    #[test]
+    fn transient_preload_failure_keeps_the_live_loop_and_anchor_available() {
+        use std::io::{Read, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let endpoint = format!("http://{}/v1/", listener.local_addr().unwrap());
+        let server = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            stream
+                .set_read_timeout(Some(Duration::from_secs(3)))
+                .unwrap();
+            let mut bytes = Vec::new();
+            let mut buffer = [0; 1024];
+            while !bytes.windows(4).any(|p| p == b"\r\n\r\n") {
+                let n = stream.read(&mut buffer).unwrap();
+                assert!(n > 0 && bytes.len() < 8192);
+                bytes.extend_from_slice(&buffer[..n]);
+            }
+            stream
+                .write_all(
+                    b"HTTP/1.1 503 Synthetic\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}",
+                )
+                .unwrap();
+        });
+        let root = fixture_root("preload-retry");
+        let service = Arc::new(Service::new(root.clone()).unwrap());
+        let store =
+            SessionStore::create(&root.join("sessions"), "Synthetic preload", "m", "s", None)
+                .unwrap();
+        let id = store.snapshot().unwrap().id;
+        service.lock().unwrap().view = Some(store);
+        let connection = meeting_notes::Connection {
+            endpoint,
+            model: "synthetic".into(),
+            mode: "local".into(),
+            cloud_consent: false,
+            api_key: String::new(),
+        };
+        let work = service
+            .model_sessions
+            .reserve(
+                crate::model_sessions::Owner::Live(id.clone()),
+                &connection,
+                Some(meeting_notes::residency::LocalProvider::Ollama),
+            )
+            .unwrap()
+            .unwrap();
+        let lease = work.lease().unwrap();
+        let runner = LiveRunner::start(&live_root(&service, &id), &id, connection, "de")
+            .unwrap()
+            .with_residency(Arc::clone(&lease))
+            .unwrap();
+        let shared = Arc::new(Mutex::new(Shared {
+            status: "starting".into(),
+            waiting_for_transcript: false,
+            error: None,
+            pending_chars: 0,
+            last_update: Instant::now(),
+            last_trigger: None,
+            retry_at: None,
+            view: None,
+        }));
+        let control = AnalysisControl::default();
+        let worker = Worker {
+            model_work: Some(work.clone()),
+            model_lease: Some(lease),
+            _lease: service
+                .reserve_operation(crate::operations::Kind::LiveNotes)
+                .unwrap(),
+            service: Arc::clone(&service),
+            meeting_id: id,
+            control: control.clone(),
+            manual: Arc::new(AtomicBool::new(false)),
+            interval_ms: Arc::new(AtomicU64::new(DEFAULT_INTERVAL_MS)),
+            shared: Arc::clone(&shared),
+        };
+        let handle = thread::spawn(move || worker.run(runner));
+        server.join().unwrap();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while shared.lock().unwrap().status == "starting" && Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(10));
+        }
+        let status = shared.lock().unwrap().status.clone();
+        let running = !handle.is_finished();
+        let retained = work.lease().is_ok();
+        control.cancel();
+        handle.join().unwrap();
+        assert_eq!(
+            status, "waiting",
+            "A transient preload refusal ended the live summary"
+        );
+        assert!(running && retained);
+        assert!(
+            work.lease().is_err(),
+            "Explicit stop must release this owner"
+        );
+        drop(service);
+        std::fs::remove_dir_all(root).unwrap();
+    }
 
     #[test]
     fn catching_up_with_recognition_keeps_unrelated_errors() {
@@ -715,6 +896,7 @@ mod tests {
             interval_ms: Arc::new(AtomicU64::new(DEFAULT_INTERVAL_MS)),
             shared: Arc::clone(&shared),
             worker: None,
+            models: crate::model_sessions::Models::default(),
         };
         assert!(job.status().waiting_for_transcript);
         for status in ["stopped", "finished", "partial", "failed"] {

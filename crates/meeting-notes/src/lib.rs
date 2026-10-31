@@ -6,6 +6,7 @@ pub mod live;
 mod markdown;
 mod models;
 pub mod name_candidates;
+pub mod residency;
 mod service;
 mod templates;
 mod transport;
@@ -21,8 +22,8 @@ pub use models::{
     Rejections, Section, Source, Step, Template, RESULT_SCHEMA,
 };
 pub use service::{
-    analyze, analyze_controlled, read_analysis, read_pending_analysis, read_snapshot, render_text,
-    source_hash, UnsupportedFormat,
+    analyze, analyze_controlled, analyze_controlled_resident, read_analysis, read_pending_analysis,
+    read_snapshot, render_text, source_hash, UnsupportedFormat,
 };
 pub use templates::{validate_library, TemplateLibrary, TemplateStore};
 pub use transport::{credential_account, local_json_lines, local_model_ids, TextClient};

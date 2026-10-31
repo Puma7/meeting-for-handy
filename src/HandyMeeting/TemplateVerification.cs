@@ -145,7 +145,8 @@ public static class TemplateVerification
     private static bool IsLeaseContention(IOException error) => error.HResult == unchecked((int)0x80070020) || error.HResult == unchecked((int)0x80070021);
     // Test harness only: the owned child has already exited. Probe the same lease
     // semantics as production, without deleting the lock or retrying GenerateAsync.
-    private static async Task WaitForReleasedTestLeaseAsync(string path, TimeSpan deadline)
+    /// <summary>Await only a confirmed-exited test child's sharing violation under the existing bound, without deleting or modifying its lease.</summary>
+    internal static async Task WaitForReleasedTestLeaseAsync(string path, TimeSpan deadline)
     {
         if (deadline <= TimeSpan.Zero) throw new ArgumentOutOfRangeException(nameof(deadline));
         var clock = Stopwatch.StartNew(); IOException? contention = null;

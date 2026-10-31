@@ -10,6 +10,7 @@ mod live_commands;
 mod live_notes;
 mod local_models;
 mod meeting_files;
+mod model_sessions;
 mod name_reference;
 mod notes_commands;
 mod notes_service;
@@ -159,6 +160,7 @@ struct Service {
     notes_jobs: notes_service::NotesJobs,
     live_notes: live_notes::LiveNotes,
     model_pulls: Arc<local_models::Pulls>,
+    model_sessions: model_sessions::Models,
     library_jobs: Arc<library_service::Jobs>,
     updater: updater::Updater,
     speaker_jobs: Arc<speaker_jobs::Jobs>,
@@ -237,6 +239,7 @@ impl Service {
             notes_jobs: notes_service::NotesJobs::default(),
             live_notes: live_notes::LiveNotes::default(),
             model_pulls: Arc::new(local_models::Pulls::default()),
+            model_sessions: model_sessions::Models::default(),
             library_jobs: Arc::new(library_service::Jobs::default()),
             updater: updater::Updater::default(),
             speaker_jobs: Arc::new(speaker_jobs::Jobs::default()),

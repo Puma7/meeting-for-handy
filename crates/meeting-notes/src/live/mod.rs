@@ -87,6 +87,14 @@ pub struct LiveRunner {
 }
 
 impl LiveRunner {
+    /// Keeps the chosen local model available across windows and the final stored overview.
+    pub fn with_residency(
+        mut self,
+        lease: std::sync::Arc<crate::residency::ModelLease>,
+    ) -> Result<Self> {
+        self.client = self.client.with_residency(lease)?;
+        Ok(self)
+    }
     /// Continues the newest verified run with the same model, route, prompt and language, or
     /// starts a new one. Damaged runs stay untouched and are counted.
     pub fn start(

@@ -285,12 +285,43 @@ pub fn analyze_controlled(
     connection: Connection,
     resume: Option<&str>,
     control: &AnalysisControl,
+    on_progress: impl FnMut(AnalysisProgress),
+) -> Result<Analysis> {
+    analyze_controlled_resident(
+        root,
+        meeting_id,
+        sources,
+        template,
+        connection,
+        resume,
+        control,
+        None,
+        on_progress,
+    )
+}
+
+/// The coordinator supplies only a local model lease, never session/audio access to transport.
+/// The caller retains failed work's lease until retry or explicit cancellation.
+#[allow(clippy::too_many_arguments)]
+pub fn analyze_controlled_resident(
+    root: &Path,
+    meeting_id: &str,
+    sources: Vec<Source>,
+    template: Template,
+    connection: Connection,
+    resume: Option<&str>,
+    control: &AnalysisControl,
+    residency: Option<std::sync::Arc<crate::residency::ModelLease>>,
     mut on_progress: impl FnMut(AnalysisProgress),
 ) -> Result<Analysis> {
     control.check()?;
     validate_template(&template)?;
     validate_sources(&sources)?;
     let client = TextClient::new(&connection)?;
+    let client = match residency {
+        Some(lease) => client.with_residency(lease)?,
+        None => client,
+    };
     let id = resume
         .map(str::to_string)
         .unwrap_or_else(|| uuid::Uuid::new_v4().simple().to_string());

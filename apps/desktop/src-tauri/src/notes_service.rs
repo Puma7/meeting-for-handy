@@ -221,6 +221,8 @@ pub(crate) fn analyze(service: &Service, mut request: NotesRequest) -> AppResult
         id: &id,
         finished: false,
     };
+    let mut model_work = None;
+    let mut model_lease = None;
     let result = (|| {
         control.check()?;
         if valid_legacy_id(&request.meeting_id) {
@@ -259,7 +261,20 @@ pub(crate) fn analyze(service: &Service, mut request: NotesRequest) -> AppResult
             cloud_consent: request.cloud_consent,
             api_key: std::mem::take(&mut *key),
         };
-        meeting_notes::analyze_controlled(
+        model_work = service
+            .model_sessions
+            .reserve(
+                crate::model_sessions::Owner::Analysis(request.meeting_id.clone()),
+                &connection,
+                crate::local_models::provider_for_endpoint(&connection.endpoint),
+            )
+            .map_err(anyhow::Error::msg)?;
+        model_lease = model_work
+            .as_ref()
+            .map(|work| work.lease())
+            .transpose()
+            .map_err(anyhow::Error::msg)?;
+        meeting_notes::analyze_controlled_resident(
             &service
                 .root
                 .join("sessions")
@@ -271,9 +286,34 @@ pub(crate) fn analyze(service: &Service, mut request: NotesRequest) -> AppResult
             connection,
             request.resume_run_id.as_deref(),
             &control,
+            model_lease.clone(),
             |p| service.notes_jobs.update(&id, p),
         )
     })();
+    if result.is_ok() || result.as_ref().is_err_and(meeting_notes::is_cancelled) {
+        service
+            .model_sessions
+            .finish_owner(&crate::model_sessions::Owner::Analysis(
+                request.meeting_id.clone(),
+            ));
+    }
+    if let Ok(analysis) = &result {
+        // A resumed old transcript must not release a newer incomplete live finalization.
+        if let Ok(data) = service.data(&request.meeting_id) {
+            if data.status == "complete"
+                && data.parts.iter().all(|part| part.status == "complete")
+                && note_sources(&data)
+                    .ok()
+                    .and_then(|sources| meeting_notes::source_hash(&sources).ok())
+                    .as_ref()
+                    == Some(&analysis.source_hash)
+            {
+                service
+                    .live_notes
+                    .finish_inactive_model(&request.meeting_id, &service.model_sessions);
+            }
+        }
+    }
     service.notes_jobs.finish(&id, &result);
     guard.finished = true;
     result.map_err(|error| error.to_string())
