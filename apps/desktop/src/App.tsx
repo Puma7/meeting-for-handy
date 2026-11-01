@@ -2044,11 +2044,17 @@ export default function App({ api = desktopApi }: { api?: DesktopApi }) {
             )}
           </div>
         </header>
-        {openingMeeting && (
-          <p role="status">
-            {locale === "de" ? "Meeting wird geöffnet…" : "Opening meeting…"}
-          </p>
-        )}
+        <p
+          role="status"
+          aria-live="polite"
+          className={openingMeeting ? undefined : "sr-only"}
+        >
+          {openingMeeting
+            ? locale === "de"
+              ? "Meeting wird geöffnet…"
+              : "Opening meeting…"
+            : ""}
+        </p>
         {(page === "meeting"
           ? liveMeeting
           : page === "detail"

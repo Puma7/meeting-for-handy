@@ -181,26 +181,45 @@ it.each([false, true])(
   },
 );
 
-it("acknowledges a slow history open and does not submit it twice", async () => {
-  const api = fakeApi();
-  let finish!: (item: Meeting) => void;
-  api.getMeeting = vi.fn(
-    () =>
-      new Promise<Meeting>((resolve) => {
-        finish = resolve;
-      }),
-  );
-  render(<App api={api} />);
-  await screen.findByRole("button", { name: "Historie" });
-  await userEvent.click(screen.getByRole("button", { name: "Historie" }));
-  const open = await screen.findByRole("button", { name: "Öffnen" });
-  fireEvent.click(open);
-  fireEvent.click(open);
-  expect(api.getMeeting).toHaveBeenCalledTimes(1);
-  expect(screen.getByText("Meeting wird geöffnet…")).toBeTruthy();
-  await act(async () => finish(meeting));
-  expect(api.getMeeting).toHaveBeenCalledTimes(1);
-});
+it.each(["de", "en"] as const)(
+  "acknowledges a slow history open in a persistent polite region without submitting twice (%s)",
+  async (locale) => {
+    localStorage.setItem(
+      "handymeeting.rust.beta.preferences.v1",
+      JSON.stringify({ locale }),
+    );
+    const t = locale === "de" ? de : en;
+    const api = fakeApi();
+    let finish!: (item: Meeting) => void;
+    api.getMeeting = vi.fn(
+      () =>
+        new Promise<Meeting>((resolve) => {
+          finish = resolve;
+        }),
+    );
+    const { container } = render(<App api={api} />);
+    await screen.findByRole("button", { name: t.history });
+    await userEvent.click(screen.getByRole("button", { name: t.history }));
+    const persistent = container.querySelector('main > p[role="status"]');
+    expect(persistent).not.toBeNull();
+    expect(persistent!.textContent).toBe("");
+    expect(persistent!.getAttribute("aria-live")).toBe("polite");
+    const open = await screen.findByRole("button", {
+      name: locale === "de" ? "Öffnen" : "Open",
+    });
+    fireEvent.click(open);
+    fireEvent.click(open);
+    expect(api.getMeeting).toHaveBeenCalledTimes(1);
+    expect(container.querySelector('main > p[role="status"]')).toBe(persistent);
+    expect(persistent!.textContent).toBe(
+      locale === "de" ? "Meeting wird geöffnet…" : "Opening meeting…",
+    );
+    await act(async () => finish(meeting));
+    expect(api.getMeeting).toHaveBeenCalledTimes(1);
+    expect(container.querySelector('main > p[role="status"]')).toBe(persistent);
+    expect(persistent!.textContent).toBe("");
+  },
+);
 
 it.each([false, true])(
   "keeps only the latest queued history selection after a pending request (failure=%s)",

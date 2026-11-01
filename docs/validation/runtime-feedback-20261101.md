@@ -9,8 +9,9 @@ Eine lokale Antwort mit `finish_reason=length` wird einmal mit 4096 statt
 Temperatur bleiben gleich. Eine weiterhin abgeschnittene Antwort wird nicht
 übernommen. Andere Abschlussgründe und ungültiges JSON werden nicht repariert.
 
-Nur ausdrücklich erkannte Kontextfehler des lokalen Dienstes erlauben kleinere
-Anfragen. Ein begrenzter JSON-Fehlerkörper wird dafür ausgewertet; sein Inhalt
+Kleinere lokale Anfragen sind nur nach ausdrücklich erkannten Kontextfehlern
+oder einer trotz einmaliger Wiederholung weiterhin abgeschnittenen Antwort
+zulässig. Für Kontextfehler wird ein begrenzter JSON-Fehlerkörper ausgewertet; sein Inhalt
 wird weder angezeigt noch gespeichert. Andere HTTP-400-Fehler werden nicht
 automatisch wiederholt. Die Nachbearbeitung halbiert denselben Quellenblock
 höchstens vier Ebenen tief. Erst ein vollständig geprüfter ursprünglicher Block
@@ -384,3 +385,33 @@ Native Quellen und Abhängigkeiten bleiben zum vorherigen tatsächlich geprüfte
 Stand bytegleich; die 449 Rusttests und der echte lokale Modellreferenzlauf
 wurden für diese UI-Korrektur nicht wiederholt. Ganze TEST_REPORT.md und
 Prüf-/Schutz-/Reviewerregeln bleiben unverändert.
+
+## Dauerhafter Öffnungsstatus und vollständige Budgetbeschreibung
+
+Auch der Öffnungsstatus der Historie bleibt jetzt vor, während und nach einem
+Abruf als derselbe höfliche Statusbereich vorhanden. Er trägt im Ruhezustand
+keinen Text und ist platzsparend verborgen; während eines langsamen Abrufs
+erscheint die lokalisierte Öffnungsmeldung darin. Zwei verschärfte DE/EN-Fälle
+scheiterten vorher am fehlenden ursprünglichen Bereich. Danach bleibt dessen
+Knotenidentität erhalten, die Meldung endet und ein Doppelklick erzeugt weiterhin
+nur einen Abruf. Alle 314 UI-Prüfungen, TypeScript, Produktionsbuild, Formatierung
+und die Gesamtprüfung bestehen. Vier synthetische Voll-App-Browserfälle bei
+1280/390 Pixeln prüfen denselben Ablauf in beiden Sprachen ohne horizontalen
+Überlauf oder Konsolenfehler. Tatsächliche Screenreader-Sprachausgabe ist damit
+nicht nachgewiesen.
+
+Die einleitende Beschreibung kleinerer Anfragen wurde gegen den unveränderten
+Transport und die Live-Schleifen korrigiert: Neben erkannten Kontextfehlern erlaubt
+auch eine nach einmaliger Wiederholung weiterhin abgeschnittene lokale Antwort
+die begrenzte Aufteilung bzw. Verkleinerung. Der begrenzte JSON-Fehlerkörper wird
+nur zur Kontextfehlerklassifikation betrachtet. Antworten werden nicht repariert
+oder ungeprüft übernommen; beliebige Fehler und Cloud-Anfragen erhalten dadurch
+keine weitere Wiederholung. Es handelt sich um eine Dokumentationskorrektur,
+keine Änderung der Wiederholungs-, Beleg- oder Schutzregeln.
+
+Sämtliche nativen Quellen bleiben bytegleich zum tatsächlichen 449-Rustteststand
+und echten lokalen Referenzlauf mit Promptfassung 4. Diese Prüfungen wurden für
+Öffnungsstatus und Dokumentation nicht erneut ausgeführt. Die gelesene Empfehlung
+einer zusätzlichen gemeinsamen Gesamtlaufzeitgrenze ist eine Härtungsoption,
+keine etablierte Sicherheitslücke; die bereits dokumentierte Betriebsgrenze bleibt
+ausdrücklich bestehen.
