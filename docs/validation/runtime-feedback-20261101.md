@@ -222,12 +222,18 @@ Screenreader-Sprachausgabe, native Sitzung oder echte Modell-/Updateanfrage.
 Native Quellen und deren frühere reale Referenz bleiben byteunverändert.
 
 Ein früherer Linux-CI-Lauf auf 06 wurde von der unveränderten virtuellen
-Audioaufnahmeprüfung abgewiesen: angeforderte acht Sekunden, beobachtete Spuren
+Audioaufnahmeprüfung abgewiesen: angeforderte neun Sekunden, beobachtete Spuren
 10155 und 10150 Millisekunden, erlaubte Obergrenze zehn Sekunden. Die gemeldete
 Aufnahme war unvollständig; die Ursache der Überschreitung ist damit nicht bewiesen.
 Aufnahmecode, virtuelle Fixture, Verifier und Workflow sind zur Basis bytegleich.
 Der fehlgeschlagene Lauf bleibt erhalten. Die Grenze wird nicht angehoben; aktuelle
 Ziel-CI-Ergebnisse müssen dem tatsächlichen neuen Head zugeordnet werden.
+
+Der ursprüngliche Vermerk nannte hier fälschlich acht angeforderte Sekunden.
+Die unveränderte Fixture fordert neun Sekunden an; mindestens acht Sekunden
+qualifizierter Ton und höchstens zehn Sekunden Gesamtspur sind getrennte
+Prüfbedingungen. Der frühere Textfehler wird damit korrigiert, keine Messung oder
+Prüfgrenze umgedeutet.
 
 Die nächste vollständige Runde fand außerdem eine Zustandsänderung durch die
 neue Update-Aktion: Bei bereits als `ready` bestätigtem Installer hätte ein
@@ -438,3 +444,27 @@ Prüf- und Schutzregeln bleiben bytegleich zum tatsächlichen 449-Rustteststand
 und echten lokalen Referenzlauf; diese nativen Prüfungen wurden für die reine
 Oberflächenrückmeldung nicht wiederholt. Die Browserprüfung verwendet ausschließlich
 synthetische Befehls- und Statusantworten, keinen echten Worker oder Modellaufruf.
+
+## Unterschiedliche Linux-Ziel-CI-Ergebnisse bei gleicher Audio-Fixture
+
+Auf Kandidat 14 scheiterte die virtuelle Aufnahme erneut an der unveränderten
+Zehn-Sekunden-Obergrenze: beide Spuren 10142 Millisekunden, Diagnosezeit 10148
+Millisekunden, Spurdifferenz null. Native Anfangsauffüllung: 10687 System- und
+17872 Mikrofonsamples; beide Spuren blieben ausdrücklich unvollständig.
+Sprachprüfung, Neustart und Wiederöffnung davor bestanden. Nachfolgende Linux-
+GUI- und Paketierungsschritte wurden wegen des Fehlers nicht ausgeführt.
+
+Der vorherige echte Linux-Lauf auf Kandidat 13 bestand dieselbe Audio-Fixture
+mit 9037 Millisekunden je Spur und 144600 bzw. 144399 qualifizierten Tonsamples,
+ausdrücklich `passed-with-startup-gaps`, `completeCapture=false`. Dieser Lauf ist
+nur ein Vergleich und wird keinem späteren Head zugerechnet. Alle Audio-,
+Fixture-, Verifier- und Workflowbytes sind zwischen den verglichenen Kandidaten
+gleich. Die Diagnose wartet neun Sekunden nach Rückkehr des Aufnahmebeginns;
+ihre Gesamtzeit umfasst zusätzlich Start und Abschluss. Das erklärt die
+unterschiedlichen Zeitbegriffe, beweist aber nicht die konkrete Ursache der
+veränderlichen Startzeit oder einer hörbaren Lücke.
+
+Fehlläufe und Vergleich bleiben erhalten. Es gibt keine angehobene Zeitgrenze,
+keinen ausgeblendeten Startfehler und keine aus einem Wiederholungserfolg
+abgeleitete Fehlerbehebung. Diese Nachtragskorrektur ändert ausschließlich die
+Validierungsnotiz; Produktcode, Tests und Regeln bleiben unverändert.
