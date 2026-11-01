@@ -385,7 +385,13 @@ export default function LiveNotesPanel({
     setRefreshPending(true);
     setError(null);
     try {
-      await api.refreshLiveNotes();
+      const accepted = await api.refreshLiveNotes();
+      if (!accepted && current(call))
+        setError(
+          de
+            ? "Die Live-Aktualisierung wurde nicht angenommen. Prüfe den aktuellen Status und versuche es erneut."
+            : "The live update request was not accepted. Check the current status and try again.",
+        );
       if (current(call)) await poll();
     } catch (e) {
       if (current(call)) setError(errorMessage(e));

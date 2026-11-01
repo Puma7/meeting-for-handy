@@ -181,6 +181,46 @@ it("exports the incomplete overview coverage instead of presenting a newer windo
   expect(text).toContain("Zweiter Punkt");
 });
 
+it.each([
+  [
+    "de",
+    "Jetzt aktualisieren",
+    "Die Live-Aktualisierung wurde nicht angenommen. Prüfe den aktuellen Status und versuche es erneut.",
+  ],
+  [
+    "en",
+    "Update now",
+    "The live update request was not accepted. Check the current status and try again.",
+  ],
+] as const)(
+  "reports a rejected refresh and still polls the actual status (%s)",
+  async (locale, label, message) => {
+    const api = {
+      getLiveNotes: vi
+        .fn()
+        .mockResolvedValueOnce(status({ status: "waiting", running: true }))
+        .mockResolvedValue(status()),
+      startLiveNotes: vi.fn(),
+      refreshLiveNotes: vi.fn().mockResolvedValue(false),
+    };
+    setup(api, { locale });
+    await userEvent.click(await screen.findByRole("button", { name: label }));
+    expect(await screen.findByRole("alert")).toHaveProperty(
+      "textContent",
+      message,
+    );
+    expect(api.getLiveNotes).toHaveBeenCalledTimes(2);
+    expect(api.refreshLiveNotes).toHaveBeenCalledTimes(1);
+    expect(api.startLiveNotes).not.toHaveBeenCalled();
+    expect(
+      screen.queryByRole("button", {
+        name:
+          locale === "de" ? "Aktualisierung angefordert…" : "Update requested…",
+      }),
+    ).toBeNull();
+  },
+);
+
 it("acknowledges a manual refresh immediately and queues it only once while IPC is pending", async () => {
   let finish!: (value: boolean) => void;
   const refresh = vi.fn(
@@ -1059,9 +1099,13 @@ it("reports a failed download-state lookup instead of leaving an unhandled rejec
   ).toBeTruthy();
 });
 
-it.each(["refresh", "stop"] as const)(
-  "does not poll the old meeting after a late %s but still polls a current action",
-  async (operation) => {
+it.each([
+  ["refresh", true],
+  ["refresh", false],
+  ["stop", true],
+] as const)(
+  "does not poll the old meeting after a late %s (accepted=%s) but still polls a current action",
+  async (operation, accepted) => {
     const a = "a".repeat(32),
       b = "b".repeat(32);
     let finish!: (value: boolean) => void;
@@ -1105,7 +1149,7 @@ it.each(["refresh", "stop"] as const)(
     await screen.findByRole("button", { name: label });
     changed = true;
     const previousA = getLiveNotes.mock.calls.filter(([id]) => id === a).length;
-    await act(async () => finish(true));
+    await act(async () => finish(accepted));
     expect(
       screen.queryByText("Synthetic stale meeting A poll failure"),
     ).toBeNull();

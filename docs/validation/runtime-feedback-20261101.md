@@ -415,3 +415,26 @@ und echten lokalen Referenzlauf mit Promptfassung 4. Diese Prüfungen wurden fü
 einer zusätzlichen gemeinsamen Gesamtlaufzeitgrenze ist eine Härtungsoption,
 keine etablierte Sicherheitslücke; die bereits dokumentierte Betriebsgrenze bleibt
 ausdrücklich bestehen.
+
+## Abgelehnte manuelle Live-Aktualisierung
+
+Ein nativer Aktualisierungsaufruf kann ausdrücklich `false` zurückgeben, wenn
+kein laufender Job die Anforderung annimmt. Die Oberfläche wertete dieses
+Ergebnis zuvor nicht aus. Zwei DE/EN-Vorherfälle zeigten keine Erklärung der
+Ablehnung. Jetzt meldet die aktuelle Ansicht, dass die Aktualisierung nicht
+angenommen wurde, und nennt Statusprüfung bzw. erneuten Versuch als nächste
+Handlung. Die anschließende Statusabfrage bleibt erhalten. Eine verspätete
+Ablehnung nach Meetingwechsel verändert die neue Ansicht nicht und startet
+keine Abfrage des früheren Meetings. Die vorhandene Generation schützt beide
+Fälle; es gibt keinen automatischen Neustart, Anbieterwechsel oder neuen Auftrag.
+
+Danach bestehen alle 317 UI-Prüfungen, TypeScript, Produktionsbuild,
+Formatierung und die erneute Gesamtprüfung. Acht synthetische Browserfälle
+prüfen aktuelle und veraltete Ablehnungen auf Deutsch/Englisch bei 1280/390
+Pixeln: verständliche Meldung und aktuelle Statusabfrage nur für die aktuelle
+Auswahl, keine alte Meldung oder Folgeabfrage im neuen Meeting. Kein horizontaler
+Überlauf oder Konsolenfehler. Native Quellen, Provideranbindung, Datenformate,
+Prüf- und Schutzregeln bleiben bytegleich zum tatsächlichen 449-Rustteststand
+und echten lokalen Referenzlauf; diese nativen Prüfungen wurden für die reine
+Oberflächenrückmeldung nicht wiederholt. Die Browserprüfung verwendet ausschließlich
+synthetische Befehls- und Statusantworten, keinen echten Worker oder Modellaufruf.
