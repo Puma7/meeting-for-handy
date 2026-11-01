@@ -2030,7 +2030,7 @@ export default function App({ api = desktopApi }: { api?: DesktopApi }) {
         )}
         <header className="page-header">
           <div>
-            <h1 tabIndex={-1} title={page === "notes" ? t.draft : undefined}>
+            <h1 tabIndex={-1}>
               {page === "detail" ? t.meetingDetail : t[page]}
             </h1>
             {page !== "notes" && (
@@ -2540,7 +2540,13 @@ export default function App({ api = desktopApi }: { api?: DesktopApi }) {
             className="pending-analyses"
             aria-label={t.unfinishedAnalyses}
           >
-            <h2 title={t.resumeHelp}>{t.unfinishedAnalyses}</h2>
+            <h2>{t.unfinishedAnalyses}</h2>
+            <details className="help-disclosure">
+              <summary>
+                {locale === "de" ? "Wie geht es weiter?" : "How do I resume?"}
+              </summary>
+              <p>{t.resumeHelp}</p>
+            </details>
             <div className="pending-analyses-list">
               {pendingAnalyses.map((run) => (
                 <div className="pending-analysis-row" key={run.id}>

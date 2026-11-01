@@ -428,6 +428,13 @@ export default function LiveNotesPanel({
 
   if (!available || headless) return null;
   const view = status?.view ?? null;
+  // The native typed budget failure and the retained diagnostic must agree;
+  // an older context diagnostic must not replace a newer unrelated error.
+  const matchingContextFailure =
+    view?.lastRequest?.request.result === "contextLimit" &&
+    Boolean(
+      status?.error?.startsWith("Der Text passt nicht in den Modellkontext."),
+    );
   const running = status?.running ?? false;
   const staleOverview = view !== null && overviewPending(view);
   const hasContent = Boolean(
@@ -732,14 +739,14 @@ export default function LiveNotesPanel({
           </button>
         )}
       </details>
-      {(error || status?.error) && (
+      {(error || (status?.error && !matchingContextFailure)) && (
         <p className="notice warning" role="alert">
           {error ?? status?.error}
         </p>
       )}
       {view?.lastRequest &&
         !error &&
-        !status?.error &&
+        (!status?.error || matchingContextFailure) &&
         view.lastRequest.request.result !== "stored" && (
           <p className="notice warning" role="status">
             {de

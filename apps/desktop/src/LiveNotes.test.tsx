@@ -99,6 +99,50 @@ const local: LiveConnection = {
   useSavedKey: false,
 };
 
+it.each([true, false])(
+  "shows a localized matching context failure without reviving an unrelated old diagnostic (%s)",
+  async (matching) => {
+    const message = matching
+      ? "Der Text passt nicht in den Modellkontext. Kleinere Abschnitte oder mehr Kontext im lokalen Dienst verwenden; gesicherte Ergebnisse bleiben erhalten."
+      : "KI-Dienst meldet HTTP 500. Es wird kein anderer Anbieter verwendet.";
+    setup(
+      {
+        startLiveNotes: vi.fn(),
+        getLiveNotes: vi.fn().mockResolvedValue(
+          status({
+            status: "failed",
+            error: message,
+            view: {
+              ...view,
+              lastRequest: {
+                operation: "window",
+                window: 3,
+                request: {
+                  result: "contextLimit",
+                  httpStatus: 400,
+                  finish: null,
+                  elapsedMs: 1000,
+                  outputLimit: 2048,
+                },
+              },
+            },
+          }),
+        ),
+      },
+      { locale: "en" },
+    );
+    await screen.findByText("Stopped after errors");
+    if (matching)
+      expect(
+        await screen.findByText(/Model context is too small/),
+      ).toBeTruthy();
+    else {
+      expect(screen.queryByText(/Model context is too small/)).toBeNull();
+      expect(screen.getByText(message)).toBeTruthy();
+    }
+  },
+);
+
 it("does not call a finished run complete while its overview still covers only the first window", async () => {
   const start = vi
     .fn()

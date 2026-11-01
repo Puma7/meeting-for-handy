@@ -185,7 +185,7 @@ export default function UpdatePanel({
             )}
           </p>
         )}
-        {(error || job?.error) && <p role="alert">{error ?? job?.error}</p>}
+        {error && error !== job?.error && <p role="alert">{error}</p>}
       </div>
     );
   if (

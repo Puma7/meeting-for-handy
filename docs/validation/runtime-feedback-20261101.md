@@ -190,3 +190,40 @@ nicht als neu ausgeführte Prüfungen dieser UI-Nacharbeit bezeichnet.
 Die erneute synthetische Browserprüfung bei 1280 und 390 Pixeln bestätigt außerdem
 die neu gewählte Nachbearbeitung und die Einstellungen nach verspäteter
 Historienantwort; eine veraltete vorgemerkte Aufnahme wird nicht mehr abgerufen.
+
+## Weitere Rückmeldungen und erreichbare Hinweise
+
+Die vollständige Reviewrunde bestätigte drei weitere UI-Probleme. Erläuterungen
+waren teilweise nur per Hover-Titel erreichbar. Die knappe Seitenüberschrift
+bleibt erhalten; eine geschlossene native Aufklapphilfe im Ergebnisbereich und
+eine weitere bei unfertigen Auswertungen machen die Erklärungen jetzt per
+Tastatur und Touch erreichbar. Fertige Ergebnisse behalten ihren sichtbaren
+KI-Entwurfshinweis. Dauerhafte lange Absätze unter der Seitenüberschrift werden
+nicht wieder eingeführt. Die vorhandene Tastaturprüfung belegt bereits den Fokus
+des Seitenkopfs nach Navigation.
+
+Eine passende Kontextdiagnose wurde zuvor durch den deutschen nativen Fehlertext
+unterdrückt. Stimmen der native Kontextfehler und die gespeicherte Diagnose
+überein, bleibt nun die lokalisierte Erklärung sichtbar. Eine ältere Kontextdiagnose
+ersetzt keinen neuen unabhängigen Fehler. Die kompakte Update-Aktion dupliziert
+keine native Jobfehlermeldung mehr; die maßgebliche vollständige Ansicht zeigt
+sie weiter an und kann sie wirksam ausblenden. Eigenständige lokale Aktionsfehler
+bleiben sichtbar.
+
+Fünf aussagekräftige Vorherfälle scheiterten gegen die tatsächlich veröffentlichten
+06-Produktbytes. Zwei zusätzliche Gegenfälle bestanden schon vorher. Danach
+bestehen alle sieben Fälle und sämtliche 299 UI-Prüfungen sowie TypeScript,
+Produktionsbuild, Formatierung und die erneute Gesamtprüfung. Eine synthetische
+Edge-Prüfung bei 1280 und 390 Pixeln öffnet beide Hilfen per Enter und Klick,
+prüft einmalige und wirksam ausgeblendete Updatefehler sowie die englische
+Kontextwarnung. Keine Konsolenfehler oder horizontaler Überlauf; keine tatsächliche
+Screenreader-Sprachausgabe, native Sitzung oder echte Modell-/Updateanfrage.
+Native Quellen und deren frühere reale Referenz bleiben byteunverändert.
+
+Ein früherer Linux-CI-Lauf auf 06 wurde von der unveränderten virtuellen
+Audioaufnahmeprüfung abgewiesen: angeforderte acht Sekunden, beobachtete Spuren
+10155 und 10150 Millisekunden, erlaubte Obergrenze zehn Sekunden. Die gemeldete
+Aufnahme war unvollständig; die Ursache der Überschreitung ist damit nicht bewiesen.
+Aufnahmecode, virtuelle Fixture, Verifier und Workflow sind zur Basis bytegleich.
+Der fehlgeschlagene Lauf bleibt erhalten. Die Grenze wird nicht angehoben; aktuelle
+Ziel-CI-Ergebnisse müssen dem tatsächlichen neuen Head zugeordnet werden.

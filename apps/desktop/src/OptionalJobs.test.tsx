@@ -555,6 +555,78 @@ it("blocks installation while archive maintenance is running", async () => {
   });
   expect((button as HTMLButtonElement).disabled).toBe(true);
 });
+it.each(["de", "en"] as const)(
+  "announces a native update failure once and keeps it dismissed across refresh (%s)",
+  async (locale) => {
+    let attempt = 1;
+    const api = {
+      checkForUpdate: vi.fn(),
+      getUpdateProgress: vi.fn(async () => ({
+        status: "failed",
+        version: "synthetic",
+        receivedBytes: 0,
+        totalBytes: 0,
+        elapsedMs: 0,
+        error: "Synthetic native update failure",
+        attempt,
+      })),
+    } as unknown as DesktopApi;
+    render(
+      <>
+        <UpdatePanel api={api} locale={locale} shortcut />
+        <UpdatePanel api={api} locale={locale} footer />
+      </>,
+    );
+    await screen.findByRole("button", {
+      name: locale === "de" ? "Ausblenden" : "Dismiss",
+    });
+    expect(
+      screen.getAllByRole("alert").map((item) => item.textContent),
+    ).toEqual(["Synthetic native update failure"]);
+    await userEvent.click(
+      screen.getByRole("button", {
+        name: locale === "de" ? "Ausblenden" : "Dismiss",
+      }),
+    );
+    expect(screen.queryAllByRole("alert")).toHaveLength(0);
+    await act(async () => requestJobStatusRefresh());
+    expect(screen.queryAllByRole("alert")).toHaveLength(0);
+    attempt = 2;
+    act(() => requestJobStatusRefresh());
+    await screen.findByRole("button", {
+      name: locale === "de" ? "Ausblenden" : "Dismiss",
+    });
+    expect(screen.getAllByRole("alert")).toHaveLength(1);
+  },
+);
+
+it("retains a shortcut command failure when no native job reports it", async () => {
+  const api = {
+    checkForUpdate: vi
+      .fn()
+      .mockRejectedValue(new Error("Synthetic shortcut command failed")),
+    getUpdateProgress: vi
+      .fn()
+      .mockResolvedValueOnce({
+        status: "idle",
+        receivedBytes: 0,
+        totalBytes: 0,
+        elapsedMs: 0,
+        error: null,
+      })
+      .mockImplementation(() => new Promise(() => {})),
+  } as unknown as DesktopApi;
+  render(<UpdatePanel api={api} locale="en" shortcut />);
+  await waitFor(() => expect(api.getUpdateProgress).toHaveBeenCalledOnce());
+  await userEvent.click(
+    screen.getByRole("button", { name: "Check for updates" }),
+  );
+  expect(await screen.findByRole("alert")).toHaveProperty(
+    "textContent",
+    "Synthetic shortcut command failed",
+  );
+});
+
 it("does not keep a cancelled download in the footer and lets a failure be dismissed", async () => {
   let status = "cancelled";
   const api = {

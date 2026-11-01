@@ -11,6 +11,7 @@ import userEvent from "@testing-library/user-event";
 import App from "./App";
 import { testServices } from "./test-services";
 import { defaultTemplate, renderTranscript, validateLibrary } from "./domain";
+import { de, en } from "./i18n";
 import type { AnalysisResult, AppState, DesktopApi, Meeting } from "./types";
 // Full-App cases render the whole UI with its status polling. On slow CI runners
 // (macos-15-intel) they exceeded the 5 s default; focused component files keep it.
@@ -59,6 +60,67 @@ function state(active: Meeting | null = null): AppState {
     },
   };
 }
+it.each(["de", "en"] as const)(
+  "offers compact, activatable result and resume guidance (%s)",
+  async (locale) => {
+    localStorage.setItem(
+      "handymeeting.rust.beta.preferences.v1",
+      JSON.stringify({ locale }),
+    );
+    const t = locale === "de" ? de : en;
+    const api = fakeApi(meeting);
+    api.listUnfinishedAnalyses = vi.fn().mockResolvedValue({
+      items: [
+        {
+          id: "a".repeat(32),
+          meetingId: meeting.id,
+          sourceHash: "synthetic",
+          template: defaultTemplate(locale),
+          createdAt: meeting.startedAt,
+          model: "synthetic",
+          mode: "local",
+          endpoint: "http://127.0.0.1:9/v1/",
+          confirmedTasks: 1,
+          totalTasks: 2,
+          promptVersion: "synthetic",
+          resumable: true,
+        },
+      ],
+      skipped: [],
+    });
+    render(<App api={api} />);
+    await waitFor(() =>
+      expect(
+        (screen.getByRole("button", { name: t.start }) as HTMLButtonElement)
+          .disabled,
+      ).toBe(false),
+    );
+    await userEvent.click(screen.getByRole("button", { name: t.notes }));
+    await screen.findByRole("heading", { name: t.unfinishedAnalyses });
+    const draftHelp = screen.getByText(
+      locale === "de" ? "Hinweise zu KI-Ergebnissen" : "About AI results",
+    );
+    const resumeHelp = screen.getByText(
+      locale === "de" ? "Wie geht es weiter?" : "How do I resume?",
+    );
+    for (const [summary, text] of [
+      [draftHelp, t.draft],
+      [resumeHelp, t.resumeHelp],
+    ] as const) {
+      const disclosure = summary.closest("details")!;
+      expect(disclosure.open).toBe(false);
+      await userEvent.click(summary);
+      expect(disclosure.open).toBe(true);
+      expect(within(disclosure).getByText(text)).toBeTruthy();
+    }
+    expect(
+      screen
+        .getByRole("heading", { level: 1, name: t.notes })
+        .hasAttribute("title"),
+    ).toBe(false);
+  },
+);
+
 it("checks for updates from the sidebar without leaving the current page", async () => {
   const api = fakeApi();
   api.checkForUpdate = vi.fn().mockResolvedValue(undefined);

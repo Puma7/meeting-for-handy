@@ -627,7 +627,20 @@ export default function NotesView({
           )}
         </div>
         <div className="analysis-footer">
-          <span>{result ? t.draft : ""}</span>
+          <div>
+            {result ? (
+              t.draft
+            ) : (
+              <details className="help-disclosure">
+                <summary>
+                  {locale === "de"
+                    ? "Hinweise zu KI-Ergebnissen"
+                    : "About AI results"}
+                </summary>
+                <p>{t.draft}</p>
+              </details>
+            )}
+          </div>
           <button
             className="secondary"
             disabled={!result || busy}
