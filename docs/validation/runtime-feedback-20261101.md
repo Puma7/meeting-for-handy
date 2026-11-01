@@ -468,3 +468,48 @@ Fehlläufe und Vergleich bleiben erhalten. Es gibt keine angehobene Zeitgrenze,
 keinen ausgeblendeten Startfehler und keine aus einem Wiederholungserfolg
 abgeleitete Fehlerbehebung. Diese Nachtragskorrektur ändert ausschließlich die
 Validierungsnotiz; Produktcode, Tests und Regeln bleiben unverändert.
+
+## Zutreffende VIP-Aufhebung und reproduzierbare Startup-Diagnoseprüfung
+
+Der Tooltip des bereits aktiven VIP-Schalters versprach noch Anheften und
+Schutz, obwohl die Aktion den Schutz aufhebt. Zwei verstärkte DE/EN-Vorherfälle
+scheiterten daran. Jetzt beschreibt der aktive Zustand ausdrücklich das Lösen
+und Aufheben des Schutzes vor automatischem Aufräumen; der bisherige Hinweis
+zum Anheften bleibt im inaktiven Zustand erhalten. Die sichtbare Erklärung des
+aktuellen VIP-Schutzes, Tastaturbedienung und unveränderte Metadatenrevision
+bleiben erhalten. Die Regression prüft außerdem, dass erst der ausdrückliche
+Klick die bestehende Metadatenschnittstelle einmal mit `pinned=false` aufruft.
+Alle 317 UI-Prüfungen, TypeScript, Produktionsbuild und Formatierung bestehen.
+Acht synthetische Browserfälle prüfen DE/EN, beide Zustände und 1280/390 Pixel
+ohne horizontalen Überlauf oder Konsolenfehler. Keine tatsächliche Metadaten-
+änderung, Aufräumaktion oder Screenreader-Sprachausgabe wird daraus abgeleitet.
+
+Der Windows-CI-Lauf auf Kandidat 15 scheiterte in einer vorhandenen synthetischen
+Startup-Prüfung. Der Hilfsprozess sendet neun Nullsamples und exakt `71, -72`,
+bleibt danach aber absichtlich still und wartet auf Eingabe. Die Prüfung
+forderte unmittelbar nach den beiden Werten das Dateiende. In der echten
+Fehlermeldung standen die beiden Werte unverändert am erwarteten Ort; danach
+folgten 35056 Nullsamples. Der produktive Transport erklärt und füllt längere
+Paketpausen bereits regulär auf seiner Empfangsuhr. Ein verzögerter Beobachter
+konnte diese spätere Auffüllung auslösen, bevor der Test den Stopp anforderte.
+
+Der lokale Vorherfall wartet gezielt auf diese vorhandene Pausenmeldung und
+reproduziert denselben falschen Dateiende-Vergleich. Die korrigierte Prüfung
+verlangt weiterhin den exakten Anfang aus gezählter nativer Auffüllung und neun
+eingehenden Nullsamples sowie die beiden ursprünglichen Werte unverändert.
+Zusätzlich verlangt sie einen nichtleeren, ausschließlich aus Nullen bestehenden
+späteren Pausenbereich und dessen ausdrückliche vorhandene Diagnosemeldung.
+Alle fünf Felder der begrenzten Startup-Diagnose bleiben geprüft. Spätere Pausen
+werden somit nicht als anfängliche Geräteauffüllung gezählt. Die Änderung liegt ausschließlich
+im `cfg(test)`-Modul; die 21085 Bytes davor sind zur veröffentlichten Fassung
+bytegleich. Capture-Adapter, Recorder, Dauergrenzen, Tonfenster, CI-Verifier und
+Datenschutzabläufe wurden nicht geändert.
+
+Frisch danach bestehen alle 449 Rust-Workspace/All-Targettests mit zwei regulär
+ignorierten besonderen Einstiegen, darunter alle 109 Core-Fälle, Rustformatierung
+und vollständiges Workspace-Clippy mit `-D warnings`. Die ursprünglichen
+physischen Aufnahmeprobleme bleiben offen. Alle eingefrorenen Quellen und
+gesperrten Abhängigkeiten des echten lokalen Referenzlaufs mit Promptfassung 4
+sind byteunverändert; dieser Modelllauf wurde für den Tooltip und die reine
+synthetische Testkorrektur nicht wiederholt. Fehlgeschlagene CI- und Vorherläufe
+bleiben erhalten und werden nicht als bestandene neue Läufe ausgegeben.

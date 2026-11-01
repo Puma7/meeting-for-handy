@@ -116,9 +116,13 @@ export default function MeetingLabels({
           aria-pressed={meta.pinned}
           aria-describedby={pinHelpId}
           title={
-            de
-              ? "Oben in der Historie anheften und vor automatischem Aufräumen schützen. Manuelles Löschen bleibt möglich."
-              : "Pin to the top of history and protect from automatic cleanup. Manual deletion is still possible."
+            meta.pinned
+              ? de
+                ? "VIP lösen und Schutz vor automatischem Aufräumen aufheben."
+                : "Unpin VIP and remove protection from automatic cleanup."
+              : de
+                ? "Oben in der Historie anheften und vor automatischem Aufräumen schützen. Manuelles Löschen bleibt möglich."
+                : "Pin to the top of history and protect from automatic cleanup. Manual deletion is still possible."
           }
           disabled={busy || Boolean(meeting.metadataError)}
           onClick={() => void save(meta.title, !meta.pinned)}

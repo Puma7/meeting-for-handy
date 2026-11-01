@@ -534,7 +534,8 @@ mod tests {
 
     #[test]
     /// Exercises the real portable pump with an owned synthetic helper; its
-    /// observed padding plus helper zeros must match the durable track prefix.
+    /// observed padding plus helper zeros must match the durable track prefix;
+    /// a later deliberately idle interval stays separately declared zero padding.
     fn synthetic_helper_reports_the_origin_of_its_first_zero_samples() {
         let root = tempfile::tempdir().unwrap();
         let store = SessionStore::create(root.path(), "Synthetic startup", "m", "s", None).unwrap();
@@ -562,6 +563,19 @@ mod tests {
             )
         });
         let ready = started.recv_timeout(Duration::from_secs(30));
+        // Reproduce a delayed observer: the synthetic helper deliberately stays idle
+        // after its first payload, so normal receipt-clock gap padding can run.
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while !store.snapshot().unwrap().warnings.iter().any(|warning| {
+            warning
+                .starts_with("system: gaps without packets are represented as estimated silence;")
+        }) {
+            assert!(
+                Instant::now() < deadline,
+                "Synthetic idle gap was not observed"
+            );
+            thread::sleep(Duration::from_millis(10));
+        }
         stop.store(true, Ordering::Release);
         worker.join().unwrap().unwrap();
         ready.unwrap().unwrap();
@@ -587,7 +601,12 @@ mod tests {
             .collect();
         let prefix = observed.estimated_padding_samples as usize + 9;
         assert!(actual[..prefix].iter().all(|sample| *sample == 0));
-        assert_eq!(&actual[prefix..], &[71, -72]);
+        assert_eq!(&actual[prefix..prefix + 2], &[71, -72]);
+        let idle_tail = &actual[prefix + 2..];
+        assert!(!idle_tail.is_empty());
+        assert!(idle_tail.iter().all(|sample| *sample == 0));
+        assert!(data.warnings.iter().any(|warning| warning
+            .starts_with("system: gaps without packets are represented as estimated silence;")));
         let serialized = serde_json::to_value(observations).unwrap();
         let object = serialized[0].as_object().unwrap();
         assert_eq!(object.len(), 5);
