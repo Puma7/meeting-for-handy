@@ -136,8 +136,8 @@ export default function MeetingLabels({
       {!editing && (
         <p id={pinHelpId} className="muted">
           {de
-            ? "VIP hält das Meeting oben und schützt vor automatischem Aufräumen. Manuelles Löschen bleibt möglich."
-            : "VIP keeps the meeting at the top and protects it from automatic cleanup. Manual deletion is still possible."}
+            ? "VIP hält das Meeting oben in der Historie und schützt vor automatischem Aufräumen. Manuelles Löschen bleibt möglich."
+            : "VIP keeps the meeting at the top of history and protects it from automatic cleanup. Manual deletion is still possible."}
         </p>
       )}
       {(error || meeting.metadataError) && (

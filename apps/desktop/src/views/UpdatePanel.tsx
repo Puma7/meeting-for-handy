@@ -31,6 +31,9 @@ export default function UpdatePanel({
   const de = locale === "de";
   const [job, setJob] = useState<UpdateProgress | null>(null),
     [error, setError] = useState<string | null>(null),
+    [shortcutCommandError, setShortcutCommandError] = useState<string | null>(
+      null,
+    ),
     [request, setRequest] = useState(false),
     [jobsRunning, setJobsRunning] = useState(false),
     [dismissed, setDismissed] = useState<string | null>(null);
@@ -60,6 +63,11 @@ export default function UpdatePanel({
           setJob(value);
           setJobsRunning(othersRunning);
           setError(null);
+          // Once native status owns the same failure, the full panel remains authoritative.
+          if (shortcut)
+            setShortcutCommandError((previous) =>
+              previous === value.error ? null : previous,
+            );
         }
       } catch (e) {
         if (active) setError(errorMessage(e));
@@ -88,13 +96,15 @@ export default function UpdatePanel({
     requesting.current = true;
     setRequest(true);
     setError(null);
+    setShortcutCommandError(null);
     try {
       const pending = run();
       requestJobStatusRefresh();
       await pending;
       if (api.getUpdateProgress) setJob(await api.getUpdateProgress());
     } catch (e) {
-      setError(errorMessage(e));
+      if (shortcut) setShortcutCommandError(errorMessage(e));
+      else setError(errorMessage(e));
     } finally {
       requesting.current = false;
       setRequest(false);
@@ -153,6 +163,7 @@ export default function UpdatePanel({
         : "Check for updates";
   // A cancelled download was the user's own choice; a failure stays until dismissed.
   const failureKey = `${job?.attempt ?? ""}:${job?.version ?? ""}:${job?.error ?? ""}`;
+  const shortcutError = shortcutCommandError ?? error;
   if (shortcut)
     return (
       <div className="sidebar-update">
@@ -205,7 +216,9 @@ export default function UpdatePanel({
             )}
           </p>
         )}
-        {error && error !== job?.error && <p role="alert">{error}</p>}
+        {shortcutError && shortcutError !== job?.error && (
+          <p role="alert">{shortcutError}</p>
+        )}
       </div>
     );
   if (

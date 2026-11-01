@@ -710,20 +710,24 @@ it.each(["de", "en"] as const)(
 );
 
 it("retains a shortcut command failure when no native job reports it", async () => {
+  const idle = {
+    status: "idle",
+    receivedBytes: 0,
+    totalBytes: 0,
+    elapsedMs: 0,
+    error: null,
+  } as UpdateProgress;
+  const replies: ((value: UpdateProgress) => void)[] = [];
   const api = {
     checkForUpdate: vi
       .fn()
       .mockRejectedValue(new Error("Synthetic shortcut command failed")),
     getUpdateProgress: vi
       .fn()
-      .mockResolvedValueOnce({
-        status: "idle",
-        receivedBytes: 0,
-        totalBytes: 0,
-        elapsedMs: 0,
-        error: null,
-      })
-      .mockImplementation(() => new Promise(() => {})),
+      .mockResolvedValueOnce(idle)
+      .mockImplementation(
+        () => new Promise<UpdateProgress>((resolve) => replies.push(resolve)),
+      ),
   } as unknown as DesktopApi;
   render(<UpdatePanel api={api} locale="en" shortcut />);
   await waitFor(() => expect(api.getUpdateProgress).toHaveBeenCalledOnce());
@@ -734,6 +738,66 @@ it("retains a shortcut command failure when no native job reports it", async () 
     "textContent",
     "Synthetic shortcut command failed",
   );
+  await waitFor(() => expect(replies.length).toBeGreaterThan(0));
+  await act(async () => replies.splice(0).forEach((resolve) => resolve(idle)));
+  expect(screen.getByRole("alert").textContent).toBe(
+    "Synthetic shortcut command failed",
+  );
+  vi.mocked(api.checkForUpdate!).mockResolvedValue(idle);
+  vi.mocked(api.getUpdateProgress!).mockResolvedValue(idle);
+  await userEvent.click(
+    screen.getByRole("button", { name: "Check for updates" }),
+  );
+  expect(screen.queryByRole("alert")).toBeNull();
+  expect(api.checkForUpdate).toHaveBeenCalledTimes(2);
+});
+
+it("lets native status own a matching command failure without reviving it after recovery", async () => {
+  let nativeError: string | null = null;
+  const api = {
+    checkForUpdate: vi.fn().mockRejectedValue("Synthetic command failure"),
+    getUpdateProgress: vi.fn(async () => ({
+      status: nativeError ? "failed" : "idle",
+      receivedBytes: 0,
+      totalBytes: 0,
+      elapsedMs: 0,
+      error: nativeError,
+    })),
+  } as unknown as DesktopApi;
+  render(<UpdatePanel api={api} locale="en" shortcut />);
+  await userEvent.click(
+    screen.getByRole("button", { name: "Check for updates" }),
+  );
+  nativeError = "Synthetic command failure";
+  await act(async () => requestJobStatusRefresh());
+  await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
+  nativeError = null;
+  await act(async () => requestJobStatusRefresh());
+  expect(screen.queryByRole("alert")).toBeNull();
+});
+
+it("clears a recovered shortcut status-poll error without a new command", async () => {
+  const api = {
+    checkForUpdate: vi.fn(),
+    getUpdateProgress: vi
+      .fn()
+      .mockRejectedValueOnce("Synthetic poll unavailable")
+      .mockResolvedValue({
+        status: "idle",
+        receivedBytes: 0,
+        totalBytes: 0,
+        elapsedMs: 0,
+        error: null,
+      }),
+  } as unknown as DesktopApi;
+  render(<UpdatePanel api={api} locale="en" shortcut />);
+  expect(await screen.findByRole("alert")).toHaveProperty(
+    "textContent",
+    "Synthetic poll unavailable",
+  );
+  await act(async () => requestJobStatusRefresh());
+  await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
+  expect(api.checkForUpdate).not.toHaveBeenCalled();
 });
 
 it.each(["de", "en"] as const)(

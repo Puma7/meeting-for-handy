@@ -8,11 +8,11 @@ import type { DesktopApi, Meeting, SearchPage } from "./types";
 it.each([
   [
     "de",
-    "VIP hält das Meeting oben und schützt vor automatischem Aufräumen. Manuelles Löschen bleibt möglich.",
+    "VIP hält das Meeting oben in der Historie und schützt vor automatischem Aufräumen. Manuelles Löschen bleibt möglich.",
   ],
   [
     "en",
-    "VIP keeps the meeting at the top and protects it from automatic cleanup. Manual deletion is still possible.",
+    "VIP keeps the meeting at the top of history and protects it from automatic cleanup. Manual deletion is still possible.",
   ],
 ] as const)(
   "explains VIP protection visibly before activation and after pinning (%s)",

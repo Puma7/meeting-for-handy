@@ -352,3 +352,35 @@ Gesamtlaufzeitgrenze; die bestehenden Zeitlimits einzelner Anfragen können sich
 entsprechend addieren. Die vorhandenen Abbruchprüfungen bleiben erhalten.
 Dies ist eine ausdrücklich dokumentierte Betriebsgrenze, kein Nachweis einer
 kurzen Höchstlaufzeit oder einer abgeschwächten Schutzregel.
+
+## Sichtbare Befehlsfehler und eindeutige Historienposition
+
+Die sichtbare VIP-Erklärung nennt nun ausdrücklich die obere Position in der
+Historie. Der Schutz vor automatischem Aufräumen und die weiterhin mögliche
+manuelle Löschung bleiben in beiden Sprachen direkt lesbar und mit dem Schalter
+verbunden. Die bestehenden Sichtbarkeitsfälle wurden entsprechend präzisiert.
+
+Eine erfolgreiche Statusabfrage konnte einen zuvor fehlgeschlagenen kompakten
+Prüfbefehl sofort wieder ausblenden. Der frühere Test ließ alle späteren
+Statusantworten offen und erkannte diesen Ablauf deshalb nicht. Der verstärkte
+Vorherfall liefert tatsächlich wieder einen erfolgreichen Idle-Status und zeigte
+das Verschwinden der Meldung. Zwei zusätzliche Gegenfälle bestanden bereits.
+Die kompakte Aktion hält ihren Befehlsfehler jetzt getrennt vom vorübergehenden
+Abfragefehler. Ein neuer ausdrücklicher Versuch setzt ihn zurück. Meldet der
+native Status denselben Fehler, bleibt die vollständige native Ansicht
+maßgeblich; der kompakte Fehler wird übernommen und nach späterer Erholung
+nicht wieder eingeblendet. Ein behobener reiner Abfragefehler verschwindet
+weiterhin ohne neuen Prüfbefehl. Das Verhalten der übrigen Updateansichten bleibt
+erhalten.
+
+Danach bestehen alle 313 UI-Prüfungen, TypeScript, Produktionsbuild,
+Formatierung und die erneute Gesamtprüfung. Acht synthetische Browserfälle
+prüfen die präzisierte VIP-Erklärung in beiden Zuständen, vier weitere den
+erhaltenen Befehlsfehler nach erfolgreicher Statusabfrage und dessen Rücksetzung
+nach einem ausdrücklichen erfolgreichen neuen Versuch. Deutsch/Englisch,
+1280/390 Pixel, kein horizontaler Überlauf oder Konsolenfehler. Keine echte
+Updateabfrage, Installation oder Metadatenänderung wurde dafür ausgelöst.
+Native Quellen und Abhängigkeiten bleiben zum vorherigen tatsächlich geprüften
+Stand bytegleich; die 449 Rusttests und der echte lokale Modellreferenzlauf
+wurden für diese UI-Korrektur nicht wiederholt. Ganze TEST_REPORT.md und
+Prüf-/Schutz-/Reviewerregeln bleiben unverändert.
