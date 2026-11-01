@@ -13,12 +13,17 @@ export default function UpdatePanel({
   api,
   locale,
   footer = false,
+  shortcut = false,
+  onOpenSettings,
   blocked = false,
   hidden: suppressed = false,
 }: {
   api: DesktopApi;
   locale: Locale;
   footer?: boolean;
+  /** Explicit check in the sidebar; existing full settings and progress stay authoritative. */
+  shortcut?: boolean;
+  onOpenSettings?: () => void;
   blocked?: boolean;
   /** The full update panel is on screen; keep the dismissal but do not poll or render. */
   hidden?: boolean;
@@ -26,6 +31,9 @@ export default function UpdatePanel({
   const de = locale === "de";
   const [job, setJob] = useState<UpdateProgress | null>(null),
     [error, setError] = useState<string | null>(null),
+    [shortcutCommandError, setShortcutCommandError] = useState<string | null>(
+      null,
+    ),
     [request, setRequest] = useState(false),
     [jobsRunning, setJobsRunning] = useState(false),
     [dismissed, setDismissed] = useState<string | null>(null);
@@ -39,12 +47,13 @@ export default function UpdatePanel({
       try {
         const value = await api.getUpdateProgress!();
         // Archive maintenance and indexing also block installation in the backend.
-        const others = footer
-          ? []
-          : await Promise.all([
-              api.getMaintenanceProgress?.() ?? null,
-              api.getLibraryProgress?.() ?? null,
-            ]);
+        const others =
+          footer || shortcut
+            ? []
+            : await Promise.all([
+                api.getMaintenanceProgress?.() ?? null,
+                api.getLibraryProgress?.() ?? null,
+              ]);
         const othersRunning = others.some((p) => p?.status === "running");
         busy =
           value.status === "checking" ||
@@ -54,6 +63,11 @@ export default function UpdatePanel({
           setJob(value);
           setJobsRunning(othersRunning);
           setError(null);
+          // Once native status owns the same failure, the full panel remains authoritative.
+          if (shortcut)
+            setShortcutCommandError((previous) =>
+              previous === value.error ? null : previous,
+            );
         }
       } catch (e) {
         if (active) setError(errorMessage(e));
@@ -64,7 +78,7 @@ export default function UpdatePanel({
       active = false;
       stop();
     };
-  }, [api, footer, suppressed]);
+  }, [api, footer, shortcut, suppressed]);
   if (!api.checkForUpdate || suppressed) return null;
   const installBlocked = blocked || jobsRunning;
   const running = job?.status === "checking" || job?.status === "downloading";
@@ -78,16 +92,19 @@ export default function UpdatePanel({
    * command failures in the panel.
    */
   async function action(run: () => Promise<unknown>) {
+    if (requesting.current) return;
     requesting.current = true;
     setRequest(true);
     setError(null);
+    setShortcutCommandError(null);
     try {
       const pending = run();
       requestJobStatusRefresh();
       await pending;
       if (api.getUpdateProgress) setJob(await api.getUpdateProgress());
     } catch (e) {
-      setError(errorMessage(e));
+      if (shortcut) setShortcutCommandError(errorMessage(e));
+      else setError(errorMessage(e));
     } finally {
       requesting.current = false;
       setRequest(false);
@@ -132,8 +149,78 @@ export default function UpdatePanel({
         failed: "Update failed",
         cancelled: "Download cancelled",
       };
+  const activityLabel =
+    job?.status === "downloading"
+      ? labels.downloading
+      : de
+        ? "Update wird geprüft…"
+        : "Checking for updates…";
+  const shortcutLabel =
+    request || running
+      ? activityLabel
+      : de
+        ? "Update prüfen"
+        : "Check for updates";
   // A cancelled download was the user's own choice; a failure stays until dismissed.
   const failureKey = `${job?.attempt ?? ""}:${job?.version ?? ""}:${job?.error ?? ""}`;
+  const shortcutError = shortcutCommandError ?? error;
+  if (shortcut)
+    return (
+      <div className="sidebar-update">
+        {job?.status !== "ready" && (
+          <button
+            className="secondary"
+            title={shortcutLabel}
+            aria-label={shortcutLabel}
+            disabled={request || running}
+            onClick={() => void action(api.checkForUpdate!)}
+          >
+            <RefreshCw
+              size={16}
+              className={request || running ? "spinning" : undefined}
+            />
+            <span className="sidebar-update-label">{shortcutLabel}</span>
+          </button>
+        )}
+        <span className="sr-only" role="status" aria-live="polite">
+          {request || running
+            ? activityLabel
+            : job?.status === "ready"
+              ? labels.ready
+              : job?.status === "current"
+                ? de
+                  ? "App ist aktuell."
+                  : "App is up to date."
+                : job?.status === "available"
+                  ? de
+                    ? "Update verfügbar."
+                    : "Update available."
+                  : ""}
+        </span>
+        {job?.status === "current" && (
+          <p>{de ? "App ist aktuell." : "App is up to date."}</p>
+        )}
+        {(job?.status === "available" || job?.status === "ready") && (
+          <p>
+            {job?.status === "ready"
+              ? de
+                ? "Installer bereit."
+                : "Installer ready."
+              : de
+                ? "Update verfügbar."
+                : "Update available."}{" "}
+            {onOpenSettings && (
+              <button className="text-button" onClick={onOpenSettings}>
+                {de ? "Update öffnen" : "Open update"}
+              </button>
+            )}
+          </p>
+        )}
+        {shortcutError && shortcutError !== job?.error && (
+          <p role="alert">{shortcutError}</p>
+        )}
+      </div>
+    );
   if (
     footer &&
     !running &&

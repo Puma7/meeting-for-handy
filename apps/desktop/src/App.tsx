@@ -72,6 +72,13 @@ import type {
 } from "./types";
 
 const PREFS_KEY = "handymeeting.rust.beta.preferences.v1";
+type MeetingOpenRequest = {
+  id: string;
+  nextPage: Page;
+  source: string | null;
+  epoch: number;
+  selection: number;
+};
 /**
  * Reads only locale/theme preferences. Malformed saved data returns safe defaults with
  * persistence disabled so the original value is retained.
@@ -156,8 +163,10 @@ export default function App({ api = desktopApi }: { api?: DesktopApi }) {
     [app, setApp] = useState<AppState | null>(null),
     [connected, setConnected] = useState(false),
     [loading, setLoading] = useState(true);
+  const [updateSectionRequested, setUpdateSectionRequested] = useState(false);
   const [error, setError] = useState<string | null>(null),
     [busy, setBusy] = useState(false),
+    [openingMeeting, setOpeningMeeting] = useState(false),
     // A pending microphone reconnect blocks other controls but never Stop, which cancels it.
     [reconnecting, setReconnecting] = useState(false),
     [isStopping, setIsStopping] = useState(false),
@@ -358,6 +367,9 @@ export default function App({ api = desktopApi }: { api?: DesktopApi }) {
     mainRef = useRef<HTMLElement>(null),
     previousPage = useRef(page),
     selectedRef = useRef<string | null>(null),
+    openingMeetingRef = useRef<MeetingOpenRequest | null>(null),
+    pendingMeetingRef = useRef<MeetingOpenRequest | null>(null),
+    meetingSelectionEpoch = useRef(0),
     fullMeetingRef = useRef<string | null>(null),
     liveFullRef = useRef<string | null>(null),
     notesSelectionRef = useRef(""),
@@ -489,6 +501,19 @@ export default function App({ api = desktopApi }: { api?: DesktopApi }) {
     if (!erasureTarget)
       main.querySelector("h1")?.focus({ preventScroll: true });
   }, [page, erasureTarget]);
+
+  // Consume this explicit shortcut once, after ordinary page-heading focus. Background
+  // polling and later ordinary Settings navigation must not refocus the update controls.
+  useLayoutEffect(() => {
+    if (!updateSectionRequested || page !== "settings" || erasureTarget) return;
+    const target = mainRef.current?.querySelector<HTMLElement>(
+      "#app-update-settings",
+    );
+    if (!target) return;
+    target.scrollIntoView?.({ block: "start" });
+    target.focus({ preventScroll: true });
+    setUpdateSectionRequested(false);
+  }, [updateSectionRequested, page, erasureTarget]);
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
@@ -1180,6 +1205,7 @@ export default function App({ api = desktopApi }: { api?: DesktopApi }) {
   }
   /** Invalidate pending reads and discard only the explicitly selected meeting's cached content. */
   function beginMeetingErasure(id: string) {
+    invalidateMeetingSelection();
     notesJob.forget(id);
     erasureBlocked.current.add(id);
     ++erasureEpoch.current;
@@ -1259,9 +1285,19 @@ export default function App({ api = desktopApi }: { api?: DesktopApi }) {
       );
     window.dispatchEvent(new Event("library-index-updated"));
   }
+  /** Invalidates stale history and Notes replies when a newer foreground selection wins.
+   * Actual IPC reads still finish before another queued history read starts. */
+  function invalidateMeetingSelection() {
+    ++meetingSelectionEpoch.current;
+    ++notesLoadSequence.current;
+    pendingMeetingRef.current = null;
+    setOpeningMeeting(false);
+    setNotesMeetingLoading(false);
+  }
   /**
-   * Loads the exact requested meeting before switching its detail or analysis view; a
-   * search-source highlight stays bound to that meeting ID.
+   * Serializes history loads, retaining only the latest selection while one is pending.
+   * Duplicate requests coalesce; source highlights and erasure epochs stay bound to the
+   * requested meeting, and superseded replies never switch the current view.
    */
   async function openMeeting(
     id: string,
@@ -1272,20 +1308,75 @@ export default function App({ api = desktopApi }: { api?: DesktopApi }) {
       await openNotesFor(id);
       return;
     }
-    await action(async () => {
-      const epoch = erasureEpoch.current;
-      const item = await api.getMeeting(id);
-      if (epoch !== erasureEpoch.current || erasureBlocked.current.has(id))
-        return;
-      // A search hit applies only to the meeting it opened; other opens clear it.
-      setSearchSource(source ? { meetingId: item.id, file: source } : null);
-      selectedRef.current = item.id;
-      fullMeetingRef.current = item.id;
-      setMeeting(item);
-      setAnalyses([]);
-      setResultId("");
-      setPage(nextPage);
-    });
+    const active = openingMeetingRef.current;
+    if ((!active && busy) || erasureBlocked.current.has(id)) return;
+    if (!active || active.selection !== meetingSelectionEpoch.current)
+      invalidateMeetingSelection();
+    const request = {
+      id,
+      nextPage,
+      source,
+      epoch: erasureEpoch.current,
+      selection: meetingSelectionEpoch.current,
+    };
+    if (active) {
+      pendingMeetingRef.current =
+        active.id === id &&
+        active.nextPage === nextPage &&
+        active.source === source &&
+        active.epoch === request.epoch &&
+        active.selection === request.selection
+          ? null
+          : request;
+      setOpeningMeeting(true);
+      return;
+    }
+    openingMeetingRef.current = request;
+    setOpeningMeeting(true);
+    try {
+      let current: MeetingOpenRequest | null = request;
+      while (current && mounted.current) {
+        const requested: MeetingOpenRequest = current;
+        openingMeetingRef.current = requested;
+        pendingMeetingRef.current = null;
+        /** A reply or error may affect only its still-current view and erasure generation. */
+        const isCurrentSelection = () =>
+          mounted.current &&
+          requested.selection === meetingSelectionEpoch.current &&
+          requested.epoch === erasureEpoch.current &&
+          !erasureBlocked.current.has(requested.id);
+        if (isCurrentSelection()) {
+          await action(async () => {
+            let item: Meeting;
+            try {
+              item = await api.getMeeting(requested.id);
+            } catch (failure) {
+              if (isCurrentSelection() && !pendingMeetingRef.current)
+                throw failure;
+              return;
+            }
+            if (!isCurrentSelection() || pendingMeetingRef.current) return;
+            // A search hit applies only to the meeting it opened; other opens clear it.
+            setSearchSource(
+              requested.source
+                ? { meetingId: item.id, file: requested.source }
+                : null,
+            );
+            selectedRef.current = item.id;
+            fullMeetingRef.current = item.id;
+            setMeeting(item);
+            setAnalyses([]);
+            setResultId("");
+            setPage(requested.nextPage);
+          });
+        }
+        current = pendingMeetingRef.current;
+      }
+    } finally {
+      pendingMeetingRef.current = null;
+      openingMeetingRef.current = null;
+      if (mounted.current) setOpeningMeeting(false);
+    }
   }
   /**
    * Discovers finished and resumable analyses independently for one meeting. Generation
@@ -1293,6 +1384,7 @@ export default function App({ api = desktopApi }: { api?: DesktopApi }) {
    * sibling lookup.
    */
   async function selectNotesMeeting(id: string) {
+    invalidateMeetingSelection();
     const sequence = ++notesLoadSequence.current;
     /**
      * Checks mounted state, request generation and meeting ownership before a discovery
@@ -1384,6 +1476,7 @@ export default function App({ api = desktopApi }: { api?: DesktopApi }) {
    * analysis selection when needed.
    */
   async function navigate(next: Page) {
+    invalidateMeetingSelection();
     setPage(next);
     if (next === "history") void action(refreshHistory);
     if (next === "notes") {
@@ -1398,6 +1491,12 @@ export default function App({ api = desktopApi }: { api?: DesktopApi }) {
       void refreshHistory().catch((failure) => setError(errorMessage(failure)));
       void selectNotesMeeting(id);
     }
+  }
+  /** Opens the exact update controls, also when Settings is already the visible page. */
+  function openUpdateSettings() {
+    invalidateMeetingSelection();
+    setUpdateSectionRequested(true);
+    setPage("settings");
   }
   /**
    * Starts capture only after the synchronous catalogue, pending-choice and refresh gates
@@ -1853,7 +1952,7 @@ export default function App({ api = desktopApi }: { api?: DesktopApi }) {
           setManualTextModel(false);
         }}
         onOpenTextModelSettings={() => {
-          setPage("settings");
+          void navigate("settings");
           requestAnimationFrame(() => {
             const section = document.getElementById("text-model-settings");
             section?.scrollIntoView?.({ block: "start" });
@@ -1878,6 +1977,14 @@ export default function App({ api = desktopApi }: { api?: DesktopApi }) {
         navigate={navigate}
         setTheme={setTheme}
         setLocale={setLocale}
+        updateAction={
+          <UpdatePanel
+            api={api}
+            locale={locale}
+            shortcut
+            onOpenSettings={openUpdateSettings}
+          />
+        }
         recordingStatus={
           recording && app?.activeMeeting ? (
             <RecordingStatus
@@ -1902,7 +2009,7 @@ export default function App({ api = desktopApi }: { api?: DesktopApi }) {
               microphoneMuted={Boolean(app.captureControl?.microphoneMuted)}
               backlogMs={app.activeMeeting.pendingAudioMs ?? null}
               getSystemLoad={api.getSystemLoad}
-              onOpen={() => setPage("meeting")}
+              onOpen={() => void navigate("meeting")}
             />
           ) : undefined
         }
@@ -1926,17 +2033,28 @@ export default function App({ api = desktopApi }: { api?: DesktopApi }) {
             <h1 tabIndex={-1}>
               {page === "detail" ? t.meetingDetail : t[page]}
             </h1>
-            <p className={page === "meeting" ? "sr-only" : undefined}>
-              {page === "meeting"
-                ? t.preserve
-                : page === "notes"
-                  ? t.draft
+            {page !== "notes" && (
+              <p className={page === "meeting" ? "sr-only" : undefined}>
+                {page === "meeting"
+                  ? t.preserve
                   : page === "history" || page === "detail"
                     ? t.historyHelp
                     : t.compatibility}
-            </p>
+              </p>
+            )}
           </div>
         </header>
+        <p
+          role="status"
+          aria-live="polite"
+          className={openingMeeting ? undefined : "sr-only"}
+        >
+          {openingMeeting
+            ? locale === "de"
+              ? "Meeting wird geöffnet…"
+              : "Opening meeting…"
+            : ""}
+        </p>
         {(page === "meeting"
           ? liveMeeting
           : page === "detail"
@@ -2429,7 +2547,12 @@ export default function App({ api = desktopApi }: { api?: DesktopApi }) {
             aria-label={t.unfinishedAnalyses}
           >
             <h2>{t.unfinishedAnalyses}</h2>
-            <p>{t.resumeHelp}</p>
+            <details className="help-disclosure">
+              <summary>
+                {locale === "de" ? "Wie geht es weiter?" : "How do I resume?"}
+              </summary>
+              <p>{t.resumeHelp}</p>
+            </details>
             <div className="pending-analyses-list">
               {pendingAnalyses.map((run) => (
                 <div className="pending-analysis-row" key={run.id}>

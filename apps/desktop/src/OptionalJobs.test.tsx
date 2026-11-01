@@ -12,7 +12,95 @@ import {
   requestJobStatusRefresh,
 } from "./jobPolling";
 import { nameCandidates, SPEAKER_NAME_TEMPLATE } from "./speaker-proposals";
-import type { DesktopApi, Meeting, AnalysisResult } from "./types";
+import type {
+  DesktopApi,
+  Meeting,
+  AnalysisResult,
+  UpdateProgress,
+} from "./types";
+
+it.each([
+  ["de", "Update prüfen", "Update wird geprüft…"],
+  ["en", "Check for updates", "Checking for updates…"],
+] as const)(
+  "announces the sidebar check politely in %s while its request is pending",
+  async (locale, label, checking) => {
+    let finish!: (value: UpdateProgress) => void;
+    const idle: UpdateProgress = {
+      status: "idle",
+      version: null,
+      releaseUrl: null,
+      receivedBytes: 0,
+      totalBytes: 0,
+      elapsedMs: 0,
+      error: null,
+    };
+    const api = {
+      checkForUpdate: vi.fn(
+        () =>
+          new Promise<UpdateProgress>((resolve) => {
+            finish = resolve;
+          }),
+      ),
+      getUpdateProgress: vi.fn().mockResolvedValue(idle),
+    } as unknown as DesktopApi;
+    render(<UpdatePanel api={api} locale={locale} shortcut />);
+    await userEvent.click(screen.getByRole("button", { name: label }));
+    const live = screen.getByRole("status");
+    expect(live.getAttribute("aria-live")).toBe("polite");
+    expect(live.textContent).toBe(checking);
+    expect(
+      (screen.getByRole("button", { name: checking }) as HTMLButtonElement)
+        .disabled,
+    ).toBe(true);
+    expect(api.checkForUpdate).toHaveBeenCalledTimes(1);
+    await act(async () => finish(idle));
+    expect(live.isConnected).toBe(true);
+    expect(live.textContent).toBe("");
+  },
+);
+
+it.each([
+  ["de", "current", "App ist aktuell.", "Update prüfen"],
+  ["de", "available", "Update verfügbar.", "Update prüfen"],
+  ["en", "current", "App is up to date.", "Check for updates"],
+  ["en", "available", "Update available.", "Check for updates"],
+] as const)(
+  "announces a user-started check result in the original polite region (%s/%s)",
+  async (locale, result, text, label) => {
+    let finish!: () => void;
+    let progress: UpdateProgress["status"] = "idle";
+    const api = {
+      checkForUpdate: vi.fn(
+        () =>
+          new Promise<void>((resolve) => {
+            finish = () => {
+              progress = result;
+              resolve();
+            };
+          }),
+      ),
+      getUpdateProgress: vi.fn(async () => ({
+        status: progress,
+        version: "synthetic",
+        receivedBytes: 0,
+        totalBytes: 0,
+        elapsedMs: 0,
+        error: null,
+      })),
+    } as unknown as DesktopApi;
+    const { container } = render(
+      <UpdatePanel api={api} locale={locale} shortcut />,
+    );
+    const live = container.querySelector('[aria-live="polite"]')!;
+    await userEvent.click(screen.getByRole("button", { name: label }));
+    await act(async () => finish());
+    await waitFor(() => expect(live.textContent).toBe(text));
+    expect(container.querySelector('[aria-live="polite"]')).toBe(live);
+    expect(screen.getAllByRole("status")).toHaveLength(1);
+    expect(api.checkForUpdate).toHaveBeenCalledTimes(1);
+  },
+);
 
 it.each([true, false])(
   "requires an explicit successful speaker capability check (%s) before a job can start",
@@ -145,6 +233,38 @@ it("recovers a full speaker-check archive only through an explicit preserving ac
   await waitFor(() => expect(checked).toHaveBeenCalledWith("installed", true));
   expect(check).toHaveBeenCalledTimes(2);
 });
+
+it.each([
+  ["de", "Windows-Installer wird geladen"],
+  ["en", "Downloading the Windows installer"],
+] as const)(
+  "announces a sidebar download distinctly from a check in %s",
+  async (locale, downloading) => {
+    const api = {
+      checkForUpdate: vi.fn(),
+      getUpdateProgress: vi.fn().mockResolvedValue({
+        status: "downloading",
+        version: "9.9.9",
+        releaseUrl: null,
+        receivedBytes: 25,
+        totalBytes: 100,
+        elapsedMs: 1000,
+        error: null,
+      }),
+    } as unknown as DesktopApi;
+    render(<UpdatePanel api={api} locale={locale} shortcut />);
+    const live = screen.getByRole("status");
+    await waitFor(() => expect(live.textContent).toBe(downloading));
+    expect(live.getAttribute("aria-live")).toBe("polite");
+    expect(
+      (screen.getByRole("button", { name: downloading }) as HTMLButtonElement)
+        .disabled,
+    ).toBe(true);
+    expect(api.checkForUpdate).not.toHaveBeenCalled();
+    expect(screen.queryByText("Update wird geprüft…")).toBeNull();
+    expect(screen.queryByText("Checking for updates…")).toBeNull();
+  },
+);
 
 it.each(["recording", "checkingBlocked"] as const)(
   "blocks check-proof archival during %s",
@@ -477,6 +597,251 @@ it("blocks installation while archive maintenance is running", async () => {
   });
   expect((button as HTMLButtonElement).disabled).toBe(true);
 });
+it.each([
+  [
+    "de",
+    "Windows-Installer wird geladen",
+    "Installer vollständig geladen und geprüft",
+    "Installer bereit.",
+    "Update verfügbar.",
+  ],
+  [
+    "en",
+    "Downloading the Windows installer",
+    "Installer downloaded and verified",
+    "Installer ready.",
+    "Update available.",
+  ],
+] as const)(
+  "announces confirmed sidebar download completion once without losing the ready action (%s)",
+  async (locale, downloading, ready, visibleReady, available) => {
+    let status: UpdateProgress["status"] = "available";
+    const api = {
+      checkForUpdate: vi.fn(),
+      downloadUpdate: vi.fn(),
+      installUpdate: vi.fn(),
+      getUpdateProgress: vi.fn(async () => ({
+        status,
+        version: "synthetic",
+        receivedBytes: status === "ready" ? 10 : 1,
+        totalBytes: 10,
+        elapsedMs: 0,
+        error: null,
+      })),
+    } as unknown as DesktopApi;
+    const openSettings = vi.fn();
+    const { container } = render(
+      <UpdatePanel
+        api={api}
+        locale={locale}
+        shortcut
+        onOpenSettings={openSettings}
+      />,
+    );
+    await screen.findByText(available, { selector: "p" });
+    const live = container.querySelector('[aria-live="polite"]')!;
+    status = "downloading";
+    act(() => requestJobStatusRefresh());
+    await waitFor(() => expect(live.textContent).toBe(downloading));
+    status = "ready";
+    act(() => requestJobStatusRefresh());
+    await waitFor(() => expect(live.textContent).toBe(ready));
+    expect(container.querySelector('[aria-live="polite"]')).toBe(live);
+    expect(screen.getByText(visibleReady, { exact: false })).toBeTruthy();
+    expect(
+      screen.queryByText(available, { exact: false, selector: "p" }),
+    ).toBeNull();
+    expect(screen.getAllByRole("status")).toHaveLength(1);
+    await userEvent.click(
+      screen.getByRole("button", {
+        name: locale === "de" ? "Update öffnen" : "Open update",
+      }),
+    );
+    expect(openSettings).toHaveBeenCalledTimes(1);
+    expect(api.checkForUpdate).not.toHaveBeenCalled();
+    expect(api.downloadUpdate).not.toHaveBeenCalled();
+    expect(api.installUpdate).not.toHaveBeenCalled();
+  },
+);
+
+it.each(["de", "en"] as const)(
+  "announces a native update failure once and keeps it dismissed across refresh (%s)",
+  async (locale) => {
+    let attempt = 1;
+    const api = {
+      checkForUpdate: vi.fn(),
+      getUpdateProgress: vi.fn(async () => ({
+        status: "failed",
+        version: "synthetic",
+        receivedBytes: 0,
+        totalBytes: 0,
+        elapsedMs: 0,
+        error: "Synthetic native update failure",
+        attempt,
+      })),
+    } as unknown as DesktopApi;
+    render(
+      <>
+        <UpdatePanel api={api} locale={locale} shortcut />
+        <UpdatePanel api={api} locale={locale} footer />
+      </>,
+    );
+    await screen.findByRole("button", {
+      name: locale === "de" ? "Ausblenden" : "Dismiss",
+    });
+    expect(
+      screen.getAllByRole("alert").map((item) => item.textContent),
+    ).toEqual(["Synthetic native update failure"]);
+    await userEvent.click(
+      screen.getByRole("button", {
+        name: locale === "de" ? "Ausblenden" : "Dismiss",
+      }),
+    );
+    expect(screen.queryAllByRole("alert")).toHaveLength(0);
+    await act(async () => requestJobStatusRefresh());
+    expect(screen.queryAllByRole("alert")).toHaveLength(0);
+    attempt = 2;
+    act(() => requestJobStatusRefresh());
+    await screen.findByRole("button", {
+      name: locale === "de" ? "Ausblenden" : "Dismiss",
+    });
+    expect(screen.getAllByRole("alert")).toHaveLength(1);
+  },
+);
+
+it("retains a shortcut command failure when no native job reports it", async () => {
+  const idle = {
+    status: "idle",
+    receivedBytes: 0,
+    totalBytes: 0,
+    elapsedMs: 0,
+    error: null,
+  } as UpdateProgress;
+  const replies: ((value: UpdateProgress) => void)[] = [];
+  const api = {
+    checkForUpdate: vi
+      .fn()
+      .mockRejectedValue(new Error("Synthetic shortcut command failed")),
+    getUpdateProgress: vi
+      .fn()
+      .mockResolvedValueOnce(idle)
+      .mockImplementation(
+        () => new Promise<UpdateProgress>((resolve) => replies.push(resolve)),
+      ),
+  } as unknown as DesktopApi;
+  render(<UpdatePanel api={api} locale="en" shortcut />);
+  await waitFor(() => expect(api.getUpdateProgress).toHaveBeenCalledOnce());
+  await userEvent.click(
+    screen.getByRole("button", { name: "Check for updates" }),
+  );
+  expect(await screen.findByRole("alert")).toHaveProperty(
+    "textContent",
+    "Synthetic shortcut command failed",
+  );
+  await waitFor(() => expect(replies.length).toBeGreaterThan(0));
+  await act(async () => replies.splice(0).forEach((resolve) => resolve(idle)));
+  expect(screen.getByRole("alert").textContent).toBe(
+    "Synthetic shortcut command failed",
+  );
+  vi.mocked(api.checkForUpdate!).mockResolvedValue(idle);
+  vi.mocked(api.getUpdateProgress!).mockResolvedValue(idle);
+  await userEvent.click(
+    screen.getByRole("button", { name: "Check for updates" }),
+  );
+  expect(screen.queryByRole("alert")).toBeNull();
+  expect(api.checkForUpdate).toHaveBeenCalledTimes(2);
+});
+
+it("lets native status own a matching command failure without reviving it after recovery", async () => {
+  let nativeError: string | null = null;
+  const api = {
+    checkForUpdate: vi.fn().mockRejectedValue("Synthetic command failure"),
+    getUpdateProgress: vi.fn(async () => ({
+      status: nativeError ? "failed" : "idle",
+      receivedBytes: 0,
+      totalBytes: 0,
+      elapsedMs: 0,
+      error: nativeError,
+    })),
+  } as unknown as DesktopApi;
+  render(<UpdatePanel api={api} locale="en" shortcut />);
+  await userEvent.click(
+    screen.getByRole("button", { name: "Check for updates" }),
+  );
+  nativeError = "Synthetic command failure";
+  await act(async () => requestJobStatusRefresh());
+  await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
+  nativeError = null;
+  await act(async () => requestJobStatusRefresh());
+  expect(screen.queryByRole("alert")).toBeNull();
+});
+
+it("clears a recovered shortcut status-poll error without a new command", async () => {
+  const api = {
+    checkForUpdate: vi.fn(),
+    getUpdateProgress: vi
+      .fn()
+      .mockRejectedValueOnce("Synthetic poll unavailable")
+      .mockResolvedValue({
+        status: "idle",
+        receivedBytes: 0,
+        totalBytes: 0,
+        elapsedMs: 0,
+        error: null,
+      }),
+  } as unknown as DesktopApi;
+  render(<UpdatePanel api={api} locale="en" shortcut />);
+  expect(await screen.findByRole("alert")).toHaveProperty(
+    "textContent",
+    "Synthetic poll unavailable",
+  );
+  await act(async () => requestJobStatusRefresh());
+  await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
+  expect(api.checkForUpdate).not.toHaveBeenCalled();
+});
+
+it.each(["de", "en"] as const)(
+  "preserves an already verified installer when the compact update action is used (%s)",
+  async (locale) => {
+    let verified = true;
+    const openSettings = vi.fn();
+    const api = {
+      checkForUpdate: vi.fn(async () => {
+        verified = false;
+      }),
+      getUpdateProgress: vi.fn(async () => ({
+        status: verified ? "ready" : "available",
+        version: "synthetic",
+        receivedBytes: 10,
+        totalBytes: 10,
+        elapsedMs: 0,
+        error: null,
+      })),
+      downloadUpdate: vi.fn(),
+      installUpdate: vi.fn(),
+    } as unknown as DesktopApi;
+    const { container } = render(
+      <UpdatePanel
+        api={api}
+        locale={locale}
+        shortcut
+        onOpenSettings={openSettings}
+      />,
+    );
+    await screen.findByRole("button", {
+      name: locale === "de" ? "Update öffnen" : "Open update",
+    });
+    await userEvent.click(
+      container.querySelector(".sidebar-update button") as HTMLButtonElement,
+    );
+    expect(verified).toBe(true);
+    expect(api.checkForUpdate).not.toHaveBeenCalled();
+    expect(openSettings).toHaveBeenCalledOnce();
+    expect(api.downloadUpdate).not.toHaveBeenCalled();
+    expect(api.installUpdate).not.toHaveBeenCalled();
+  },
+);
+
 it("does not keep a cancelled download in the footer and lets a failure be dismissed", async () => {
   let status = "cancelled";
   const api = {

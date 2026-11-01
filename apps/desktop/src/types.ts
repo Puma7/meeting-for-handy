@@ -290,6 +290,7 @@ export interface LiveView {
       result:
         | "transport"
         | "http"
+        | "contextLimit"
         | "envelope"
         | "incomplete"
         | "validation"
@@ -325,6 +326,8 @@ export interface LiveView {
   damagedRuns: number;
 }
 export interface LiveNotesStatus {
+  /** Native worker has acknowledged a manual request, including while ASR has priority. */
+  refreshRequested?: boolean;
   waitingForTranscript?: boolean;
   meetingId: string;
   status:

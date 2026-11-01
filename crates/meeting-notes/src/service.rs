@@ -1,8 +1,8 @@
-use crate::validation::{read_checkpoint, validate_rejections, verify_facts};
+use crate::batch::{read_checkpoint_batch, validate_generated};
+use crate::validation::{validate_rejections, verify_facts};
 use crate::{
-    validate_answer, validate_template, Analysis, AnalysisControl, AnalysisProgress, Connection,
-    PendingAnalysis, Rejections, Section, Source, Template, TextClient, PROMPT_VERSION,
-    RESULT_SCHEMA,
+    validate_template, Analysis, AnalysisControl, AnalysisProgress, Connection, PendingAnalysis,
+    Rejections, Section, Source, Template, TextClient, PROMPT_VERSION, RESULT_SCHEMA,
 };
 use anyhow::{ensure, Context, Result};
 use serde::{Deserialize, Serialize};
@@ -181,7 +181,8 @@ pub fn read_pending_analysis(folder: &Path) -> Result<Option<PendingAnalysis>> {
                         && metadata.len() <= 4_000_000,
                     "Bestätigter Auswertungsabschnitt ist nicht sicher lesbar."
                 );
-                let parsed = read_checkpoint(&fs::read_to_string(&path)?, sources, &step.kind)?;
+                let parsed =
+                    read_checkpoint_batch(&fs::read_to_string(&path)?, sources, &step.kind)?;
                 // A rejected name batch is requested again on resume, so it is not confirmed work.
                 if crate::name_candidates::validate_items(&snapshot.template.id, &parsed.items)
                     .is_ok()
@@ -420,7 +421,8 @@ pub fn analyze_controlled_resident(
             if path.exists() {
                 progress.stage = "validating".into();
                 on_progress(progress.clone());
-                let parsed = read_checkpoint(&fs::read_to_string(&path)?, sources, &step.kind)?;
+                let parsed =
+                    read_checkpoint_batch(&fs::read_to_string(&path)?, sources, &step.kind)?;
                 if crate::name_candidates::validate_items(&analysis.template.id, &parsed.items)
                     .is_ok()
                 {
@@ -435,17 +437,18 @@ pub fn analyze_controlled_resident(
             } else {
                 progress.stage = "requesting".into();
                 on_progress(progress.clone());
-                let answer = client.generate_controlled(sources, step, control)?;
+                let answers = client.generate_parts_controlled(sources, step, control)?;
                 control.check()?;
                 progress.stage = "validating".into();
                 on_progress(progress.clone());
                 // Invalid statements are discarded and counted; only valid ones are saved.
-                let parsed = validate_answer(&answer, sources, &step.kind, &analysis.template.id)?;
+                let (checkpoint, parsed) =
+                    validate_generated(answers, sources, &step.kind, &analysis.template.id)?;
                 crate::name_candidates::validate_items(&analysis.template.id, &parsed.items)?;
                 control.check()?;
                 progress.stage = "saving".into();
                 on_progress(progress.clone());
-                create_json(&path, &parsed)?;
+                create_json(&path, &checkpoint)?;
                 parsed
             };
             progress.confirmed_tasks += 1;

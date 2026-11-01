@@ -11,6 +11,7 @@ import userEvent from "@testing-library/user-event";
 import App from "./App";
 import { testServices } from "./test-services";
 import { defaultTemplate, renderTranscript, validateLibrary } from "./domain";
+import { de, en } from "./i18n";
 import type { AnalysisResult, AppState, DesktopApi, Meeting } from "./types";
 // Full-App cases render the whole UI with its status polling. On slow CI runners
 // (macos-15-intel) they exceeded the 5 s default; focused component files keep it.
@@ -59,6 +60,347 @@ function state(active: Meeting | null = null): AppState {
     },
   };
 }
+it.each(["de", "en"] as const)(
+  "offers compact, activatable result and resume guidance (%s)",
+  async (locale) => {
+    localStorage.setItem(
+      "handymeeting.rust.beta.preferences.v1",
+      JSON.stringify({ locale }),
+    );
+    const t = locale === "de" ? de : en;
+    const api = fakeApi(meeting);
+    api.listUnfinishedAnalyses = vi.fn().mockResolvedValue({
+      items: [
+        {
+          id: "a".repeat(32),
+          meetingId: meeting.id,
+          sourceHash: "synthetic",
+          template: defaultTemplate(locale),
+          createdAt: meeting.startedAt,
+          model: "synthetic",
+          mode: "local",
+          endpoint: "http://127.0.0.1:9/v1/",
+          confirmedTasks: 1,
+          totalTasks: 2,
+          promptVersion: "synthetic",
+          resumable: true,
+        },
+      ],
+      skipped: [],
+    });
+    render(<App api={api} />);
+    await waitFor(() =>
+      expect(
+        (screen.getByRole("button", { name: t.start }) as HTMLButtonElement)
+          .disabled,
+      ).toBe(false),
+    );
+    await userEvent.click(screen.getByRole("button", { name: t.notes }));
+    await screen.findByRole("heading", { name: t.unfinishedAnalyses });
+    const draftHelp = screen.getByText(
+      locale === "de" ? "Hinweise zu KI-Ergebnissen" : "About AI results",
+    );
+    const resumeHelp = screen.getByText(
+      locale === "de" ? "Wie geht es weiter?" : "How do I resume?",
+    );
+    for (const [summary, text] of [
+      [draftHelp, t.draft],
+      [resumeHelp, t.resumeHelp],
+    ] as const) {
+      const disclosure = summary.closest("details")!;
+      expect(disclosure.open).toBe(false);
+      await userEvent.click(summary);
+      expect(disclosure.open).toBe(true);
+      expect(within(disclosure).getByText(text)).toBeTruthy();
+    }
+    expect(
+      screen
+        .getByRole("heading", { level: 1, name: t.notes })
+        .hasAttribute("title"),
+    ).toBe(false);
+  },
+);
+
+it("checks for updates from the sidebar without leaving the current page", async () => {
+  const api = fakeApi();
+  api.checkForUpdate = vi.fn().mockResolvedValue(undefined);
+  render(<App api={api} />);
+  const check = await screen.findByRole("button", { name: "Update prüfen" });
+  expect(check.closest("aside")).toBeTruthy();
+  await userEvent.click(check);
+  await waitFor(() => expect(api.checkForUpdate).toHaveBeenCalledTimes(1));
+  expect(
+    screen.getByRole("heading", { level: 1, name: "Meeting" }),
+  ).toBeTruthy();
+});
+
+it.each([false, true])(
+  "opens and focuses the exact update panel, including already-open Settings (%s)",
+  async (alreadyOpen) => {
+    const api = fakeApi();
+    api.checkForUpdate = vi.fn();
+    api.getUpdateProgress = vi.fn().mockResolvedValue({
+      status: "available",
+      version: "9.9.9",
+      releaseUrl: null,
+      receivedBytes: 0,
+      totalBytes: 0,
+      elapsedMs: 10,
+      error: null,
+    });
+    const previousScroll = Element.prototype.scrollIntoView;
+    const scroll = vi.fn();
+    Element.prototype.scrollIntoView = scroll;
+    try {
+      const user = userEvent.setup();
+      render(<App api={api} />);
+      await ready();
+      if (alreadyOpen)
+        await user.click(screen.getByRole("button", { name: "Einstellungen" }));
+      await user.click(
+        await screen.findByRole("button", { name: "Update öffnen" }),
+      );
+      const target = await screen.findByRole("region", {
+        name: "App aktualisieren",
+      });
+      await waitFor(() => expect(document.activeElement).toBe(target));
+      expect(scroll).toHaveBeenCalledOnce();
+      expect(scroll.mock.instances[0]).toBe(target);
+      expect(scroll).toHaveBeenCalledWith({ block: "start" });
+      // Ordinary navigation later retains the existing page-heading focus contract.
+      await user.click(screen.getByRole("button", { name: "Meeting" }));
+      await user.click(screen.getByRole("button", { name: "Einstellungen" }));
+      expect(document.activeElement).toBe(
+        screen.getByRole("heading", { level: 1, name: "Einstellungen" }),
+      );
+      expect(scroll).toHaveBeenCalledOnce();
+      expect(api.checkForUpdate).not.toHaveBeenCalled();
+    } finally {
+      Element.prototype.scrollIntoView = previousScroll;
+    }
+  },
+);
+
+it.each(["de", "en"] as const)(
+  "acknowledges a slow history open in a persistent polite region without submitting twice (%s)",
+  async (locale) => {
+    localStorage.setItem(
+      "handymeeting.rust.beta.preferences.v1",
+      JSON.stringify({ locale }),
+    );
+    const t = locale === "de" ? de : en;
+    const api = fakeApi();
+    let finish!: (item: Meeting) => void;
+    api.getMeeting = vi.fn(
+      () =>
+        new Promise<Meeting>((resolve) => {
+          finish = resolve;
+        }),
+    );
+    const { container } = render(<App api={api} />);
+    await screen.findByRole("button", { name: t.history });
+    await userEvent.click(screen.getByRole("button", { name: t.history }));
+    const persistent = container.querySelector('main > p[role="status"]');
+    expect(persistent).not.toBeNull();
+    expect(persistent!.textContent).toBe("");
+    expect(persistent!.getAttribute("aria-live")).toBe("polite");
+    const open = await screen.findByRole("button", {
+      name: locale === "de" ? "Öffnen" : "Open",
+    });
+    fireEvent.click(open);
+    fireEvent.click(open);
+    expect(api.getMeeting).toHaveBeenCalledTimes(1);
+    expect(container.querySelector('main > p[role="status"]')).toBe(persistent);
+    expect(persistent!.textContent).toBe(
+      locale === "de" ? "Meeting wird geöffnet…" : "Opening meeting…",
+    );
+    await act(async () => finish(meeting));
+    expect(api.getMeeting).toHaveBeenCalledTimes(1);
+    expect(container.querySelector('main > p[role="status"]')).toBe(persistent);
+    expect(persistent!.textContent).toBe("");
+  },
+);
+
+it.each([false, true])(
+  "keeps only the latest queued history selection after a pending request (failure=%s)",
+  async (failure) => {
+    const api = fakeApi();
+    const items = ["A", "B", "C"].map((name) => ({
+      ...meeting,
+      id: `synthetic-${name}`,
+      title: `Synthetic ${name}`,
+    }));
+    api.listMeetings = vi.fn().mockResolvedValue(items);
+    api.searchMeetings = vi.fn();
+    let finish!: (item: Meeting) => void;
+    let reject!: (reason: unknown) => void;
+    let finishLast!: (item: Meeting) => void;
+    api.getMeeting = vi.fn().mockImplementation((id: string) => {
+      if (id === items[0].id)
+        return new Promise<Meeting>((resolve, fail) => {
+          finish = resolve;
+          reject = fail;
+        });
+      if (id === items[2].id)
+        return new Promise<Meeting>((resolve) => {
+          finishLast = resolve;
+        });
+      return Promise.resolve(items[1]);
+    });
+    render(<App api={api} />);
+    await ready();
+    await userEvent.click(screen.getByRole("button", { name: "Historie" }));
+    const buttons = await screen.findAllByRole("button", { name: "Öffnen" });
+    const opener = (title: string) =>
+      buttons.find((button) =>
+        button.closest("article")?.textContent?.includes(title),
+      )!;
+    fireEvent.click(opener("Synthetic A"));
+    fireEvent.click(opener("Synthetic B"));
+    fireEvent.click(opener("Synthetic C"));
+    fireEvent.click(opener("Synthetic C"));
+    expect(api.getMeeting).toHaveBeenCalledExactlyOnceWith(items[0].id);
+    await act(async () => {
+      if (failure) reject(new Error("Synthetic first request failed"));
+      else finish(items[0]);
+    });
+    await waitFor(() => expect(api.getMeeting).toHaveBeenCalledTimes(2));
+    expect(api.getMeeting).toHaveBeenLastCalledWith(items[2].id);
+    expect(
+      screen.getByRole("heading", { level: 1, name: "Historie" }),
+    ).toBeTruthy();
+    expect(screen.getByText("Meeting wird geöffnet…")).toBeTruthy();
+    await act(async () => finishLast(items[2]));
+    await waitFor(() =>
+      expect(screen.queryByText("Meeting wird geöffnet…")).toBeNull(),
+    );
+    expect(screen.getByRole("heading", { name: "Synthetic C" })).toBeTruthy();
+    expect(api.getMeeting).toHaveBeenCalledTimes(2);
+  },
+);
+
+it.each([false, true])(
+  "keeps a newer Notes selection after an older history request settles (failure=%s)",
+  async (failure) => {
+    const api = fakeApi();
+    const other = {
+      ...meeting,
+      id: "synthetic-other",
+      title: "Other selected meeting",
+    };
+    api.listMeetings = vi.fn().mockResolvedValue([meeting, other]);
+    api.searchMeetings = vi.fn();
+    let finish!: (value: Meeting) => void;
+    let reject!: (reason: unknown) => void;
+    api.getMeeting = vi.fn().mockImplementation((id: string) =>
+      id === meeting.id
+        ? new Promise<Meeting>((resolve, fail) => {
+            finish = resolve;
+            reject = fail;
+          })
+        : Promise.resolve(other),
+    );
+    render(<App api={api} />);
+    await ready();
+    await userEvent.click(screen.getByRole("button", { name: "Historie" }));
+    const row = (await screen.findByText(meeting.title)).closest("article")!;
+    fireEvent.click(within(row).getByRole("button", { name: "Öffnen" }));
+    await userEvent.click(
+      screen.getByRole("button", { name: "Nachbearbeitung" }),
+    );
+    await userEvent.selectOptions(
+      screen.getByLabelText("Meeting für die Auswertung"),
+      other.id,
+    );
+    await waitFor(() =>
+      expect(api.listAnalyses).toHaveBeenCalledWith(other.id),
+    );
+    await act(async () => {
+      if (failure) reject(new Error("Outdated history failure"));
+      else finish(meeting);
+    });
+    expect(
+      screen.getByRole("heading", { level: 1, name: "Nachbearbeitung" }),
+    ).toBeTruthy();
+    expect(
+      (screen.getByLabelText("Meeting für die Auswertung") as HTMLSelectElement)
+        .value,
+    ).toBe(other.id);
+    expect(screen.queryByText("Outdated history failure")).toBeNull();
+    expect(screen.queryByText("Meeting wird geöffnet…")).toBeNull();
+  },
+);
+
+it("does not let an older Notes read replace a newer history detail", async () => {
+  const api = fakeApi();
+  const other = {
+    ...meeting,
+    id: "synthetic-other",
+    title: "Other selected meeting",
+  };
+  api.listMeetings = vi.fn().mockResolvedValue([meeting, other]);
+  api.searchMeetings = vi.fn();
+  let finish!: (value: Meeting) => void;
+  api.getMeeting = vi.fn().mockImplementation((id: string) =>
+    id === other.id
+      ? new Promise<Meeting>((resolve) => {
+          finish = resolve;
+        })
+      : Promise.resolve(meeting),
+  );
+  render(<App api={api} />);
+  await ready();
+  await userEvent.click(
+    screen.getByRole("button", { name: "Nachbearbeitung" }),
+  );
+  await userEvent.selectOptions(
+    screen.getByLabelText("Meeting für die Auswertung"),
+    other.id,
+  );
+  await userEvent.click(screen.getByRole("button", { name: "Historie" }));
+  const row = (await screen.findByText(meeting.title)).closest("article")!;
+  await userEvent.click(within(row).getByRole("button", { name: "Öffnen" }));
+  await screen.findByRole("heading", { name: meeting.title });
+  await act(async () => finish(other));
+  expect(screen.getByRole("heading", { name: meeting.title })).toBeTruthy();
+  expect(screen.queryByRole("heading", { name: other.title })).toBeNull();
+});
+
+it.each(["Einstellungen", "Meeting"])(
+  "does not replace newer %s navigation or fetch a stale queued history selection",
+  async (destination) => {
+    const api = fakeApi();
+    const other = {
+      ...meeting,
+      id: "synthetic-other",
+      title: "Other selected meeting",
+    };
+    api.listMeetings = vi.fn().mockResolvedValue([meeting, other]);
+    api.searchMeetings = vi.fn();
+    let finish!: (value: Meeting) => void;
+    api.getMeeting = vi.fn().mockImplementation(
+      () =>
+        new Promise<Meeting>((resolve) => {
+          finish = resolve;
+        }),
+    );
+    render(<App api={api} />);
+    await ready();
+    await userEvent.click(screen.getByRole("button", { name: "Historie" }));
+    for (const title of [meeting.title, other.title]) {
+      const row = (await screen.findByText(title)).closest("article")!;
+      fireEvent.click(within(row).getByRole("button", { name: "Öffnen" }));
+    }
+    await userEvent.click(screen.getByRole("button", { name: destination }));
+    await act(async () => finish(meeting));
+    expect(
+      screen.getByRole("heading", { level: 1, name: destination }),
+    ).toBeTruthy();
+    expect(api.getMeeting).toHaveBeenCalledTimes(1);
+    expect(screen.queryByText("Meeting wird geöffnet…")).toBeNull();
+  },
+);
+
 /**
  * Creates mocked desktop services with capture rejected by default. Tests override only
  * the IPC behavior under examination; no device, model or native dialog is opened.

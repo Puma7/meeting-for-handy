@@ -5,6 +5,73 @@ import MeetingLabels from "./views/MeetingLabels";
 import SpeakerLabels from "./views/SpeakerLabels";
 import HistorySearch from "./views/HistorySearch";
 import type { DesktopApi, Meeting, SearchPage } from "./types";
+it.each([
+  [
+    "de",
+    "VIP hält das Meeting oben in der Historie und schützt vor automatischem Aufräumen. Manuelles Löschen bleibt möglich.",
+    "Oben in der Historie anheften und vor automatischem Aufräumen schützen. Manuelles Löschen bleibt möglich.",
+    "VIP lösen und Schutz vor automatischem Aufräumen aufheben.",
+  ],
+  [
+    "en",
+    "VIP keeps the meeting at the top of history and protects it from automatic cleanup. Manual deletion is still possible.",
+    "Pin to the top of history and protect from automatic cleanup. Manual deletion is still possible.",
+    "Unpin VIP and remove protection from automatic cleanup.",
+  ],
+] as const)(
+  "explains VIP protection visibly before activation and after pinning (%s)",
+  async (locale, explanation, pinAction, unpinAction) => {
+    const unpinned = {
+      revision: 1,
+      title: null,
+      pinned: false,
+      audioRemoved: false,
+    };
+    const edit = vi.fn().mockResolvedValue(unpinned);
+    const changed = vi.fn();
+    const api = { editMeetingMetadata: edit } as unknown as DesktopApi;
+    const { rerender } = render(
+      <MeetingLabels
+        api={api}
+        meeting={meeting}
+        locale={locale}
+        onChanged={changed}
+      />,
+    );
+    for (const pinned of [false, true]) {
+      rerender(
+        <MeetingLabels
+          api={api}
+          meeting={{
+            ...meeting,
+            userMetadata: {
+              revision: 0,
+              title: null,
+              pinned,
+              audioRemoved: false,
+            },
+          }}
+          locale={locale}
+          onChanged={changed}
+        />,
+      );
+      const help = screen.getByText(explanation);
+      expect(help.hidden).toBe(false);
+      expect(help.closest("[hidden], details:not([open])")).toBeNull();
+      const button = screen.getByRole("button", { pressed: pinned });
+      expect(button.getAttribute("aria-describedby")).toBe(help.id);
+      expect(button.getAttribute("title")).toBe(
+        pinned ? unpinAction : pinAction,
+      );
+      button.focus();
+      expect(document.activeElement).toBe(button);
+      expect(edit).not.toHaveBeenCalled();
+    }
+    await userEvent.click(screen.getByRole("button", { pressed: true }));
+    expect(edit).toHaveBeenCalledExactlyOnceWith(meeting.id, 0, null, false);
+    expect(changed).toHaveBeenCalledExactlyOnceWith(unpinned);
+  },
+);
 const meeting: Meeting = {
   id: "0123456789abcdef0123456789abcdef",
   title: "Original name",

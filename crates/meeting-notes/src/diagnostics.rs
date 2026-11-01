@@ -9,6 +9,7 @@ pub enum RequestResult {
     #[default]
     Transport,
     Http,
+    ContextLimit,
     Envelope,
     Incomplete,
     Validation,
@@ -27,6 +28,37 @@ pub struct RequestDiagnostic {
     pub completion_tokens: Option<u64>,
     pub output_limit: u32,
     pub result: RequestResult,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub previous_attempts: Vec<RequestAttempt>,
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub omitted_attempts: u32,
+}
+fn is_zero(value: &u32) -> bool {
+    *value == 0
+}
+
+/// Scalar evidence of the discarded length-limited attempt, without server text.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct RequestAttempt {
+    pub http_status: Option<u16>,
+    pub finish: Option<Finish>,
+    pub prompt_tokens: Option<u64>,
+    pub completion_tokens: Option<u64>,
+    pub output_limit: u32,
+    pub result: RequestResult,
+}
+impl From<RequestDiagnostic> for RequestAttempt {
+    fn from(value: RequestDiagnostic) -> Self {
+        Self {
+            http_status: value.http_status,
+            finish: value.finish,
+            prompt_tokens: value.prompt_tokens,
+            completion_tokens: value.completion_tokens,
+            output_limit: value.output_limit,
+            result: value.result,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Serialize, Deserialize)]

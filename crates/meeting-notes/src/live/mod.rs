@@ -203,6 +203,7 @@ impl LiveRunner {
         trigger: Trigger,
         control: &AnalysisControl,
     ) -> Result<LiveWindow> {
+        self.client.reset_diagnostic();
         let result = self.summarize_window_inner(pending, trigger, control);
         let (accepted, rejected) = result
             .as_ref()
@@ -218,6 +219,7 @@ impl LiveRunner {
         result
     }
 
+    /// Saves bounded scalar request evidence; a diagnostic failure never discards results.
     fn record_diagnostic(
         &self,
         operation: Operation,
@@ -246,14 +248,14 @@ impl LiveRunner {
         }
     }
 
+    /// Reduces eligible local requests while retaining unsent sources, then validates and saves.
     fn summarize_window_inner(
         &self,
         pending: &[LiveSource],
         trigger: Trigger,
         control: &AnalysisControl,
     ) -> Result<LiveWindow> {
-        let window_sources = next_window(pending);
-        let sources: Vec<_> = window_sources.iter().map(LiveSource::as_source).collect();
+        let mut window_sources = next_window(pending);
         let known: Vec<&str> = self
             .state
             .windows
@@ -261,15 +263,44 @@ impl LiveRunner {
             .flat_map(|w| w.lists().into_iter().flat_map(|(_, _, items)| items.iter()))
             .map(|f| f.text.as_str())
             .collect();
-        let (system, user) = prompt::window_request(&self.state.run.language, &known, &sources)?;
-        let answer = self.client.chat_json(
-            &system,
-            &user,
-            "live_meeting_notes",
-            prompt::window_schema(),
-            4096,
-            control,
-        )?;
+        let mut known_limit = prompt::KNOWN_STATEMENTS.min(known.len());
+        let (answer, sources) = loop {
+            let sources: Vec<_> = window_sources.iter().map(LiveSource::as_source).collect();
+            let hints = &known[known.len().saturating_sub(known_limit)..];
+            let (system, user) = prompt::window_request(&self.state.run.language, hints, &sources)?;
+            let answer = self.client.chat_json(
+                &system,
+                &user,
+                "live_meeting_notes",
+                prompt::window_schema(),
+                4096,
+                control,
+            );
+            match answer {
+                Ok(answer) => break (answer, sources),
+                Err(error)
+                    if self.state.run.mode == "local"
+                        && crate::transport::is_budget_error(&error)
+                        && window_sources.len() > 1 =>
+                {
+                    // Only committed sources count as processed. The rest remains pending
+                    // under its unchanged source IDs for the worker's next window.
+                    window_sources.truncate(window_sources.len().div_ceil(2));
+                }
+                Err(error)
+                    if self.state.run.mode == "local"
+                        && known_limit > 0
+                        && matches!(
+                            error.downcast_ref::<crate::transport::BudgetError>(),
+                            Some(crate::transport::BudgetError::Context)
+                        ) =>
+                {
+                    // These are deduplication hints only, never new evidence or coverage.
+                    known_limit /= 2;
+                }
+                Err(error) => return Err(error),
+            }
+        };
         control.check()?;
         let answer: WindowAnswer = serde_json::from_str(&answer)
             .context("Ungültige oder doppelte Felder in der KI-Antwort.")?;
@@ -313,7 +344,9 @@ impl LiveRunner {
         Ok(window)
     }
 
+    /// Starts separate overview diagnostics and records the actual last attempted coverage.
     fn rebuild_overview(&mut self, control: &AnalysisControl) -> Result<Option<u32>> {
+        self.client.reset_diagnostic();
         self.overview_attempt
             .set((self.state.windows.len() as u32, 0, 0));
         let result = self.rebuild_overview_inner(control);
@@ -328,6 +361,7 @@ impl LiveRunner {
         result
     }
 
+    /// Folds complete window batches in order; only validated, durably saved input is covered.
     fn rebuild_overview_inner(&mut self, control: &AnalysisControl) -> Result<Option<u32>> {
         let previous = self.state.overviews.last();
         let covered = previous.map_or(0, |o| o.window as usize);
@@ -343,27 +377,42 @@ impl LiveRunner {
             batch_size += size;
             batch_end += 1;
         }
-        let statements: Vec<prompt::Statement<'_>> = self.state.windows[covered..batch_end]
-            .iter()
-            .flat_map(|w| {
-                w.lists()
-                    .into_iter()
-                    .flat_map(|(list, _, items)| items.iter().map(move |fact| (list, fact)))
-            })
-            .map(|(list, fact)| prompt::Statement { list, fact })
-            .collect();
-        let previous_items = previous.map_or(&[][..], |o| o.items.as_slice());
-        let (system, user) =
-            prompt::overview_request(&self.state.run.language, previous_items, &statements)?;
-        self.overview_attempt.set((batch_end as u32, 0, 0));
-        let answer = self.client.chat_json(
-            &system,
-            &user,
-            "live_meeting_overview",
-            prompt::overview_schema(),
-            2048,
-            control,
-        )?;
+        let answer = loop {
+            let statements: Vec<prompt::Statement<'_>> = self.state.windows[covered..batch_end]
+                .iter()
+                .flat_map(|w| {
+                    w.lists()
+                        .into_iter()
+                        .flat_map(|(list, _, items)| items.iter().map(move |fact| (list, fact)))
+                })
+                .map(|(list, fact)| prompt::Statement { list, fact })
+                .collect();
+            let previous_items = previous.map_or(&[][..], |o| o.items.as_slice());
+            let (system, user) =
+                prompt::overview_request(&self.state.run.language, previous_items, &statements)?;
+            self.overview_attempt.set((batch_end as u32, 0, 0));
+            let answer = self.client.chat_json(
+                &system,
+                &user,
+                "live_meeting_overview",
+                prompt::overview_schema(),
+                2048,
+                control,
+            );
+            match answer {
+                Ok(answer) => break answer,
+                Err(error)
+                    if self.state.run.mode == "local"
+                        && crate::transport::is_budget_error(&error)
+                        && batch_end > covered + 1 =>
+                {
+                    // Smaller whole-window batches retain exact coverage and all evidence.
+                    // The next update processes the remaining windows; none is marked covered.
+                    batch_end = covered + (batch_end - covered) / 2;
+                }
+                Err(error) => return Err(error),
+            }
+        };
         control.check()?;
         let answer: OverviewAnswer = serde_json::from_str(&answer)
             .context("Ungültige oder doppelte Felder in der KI-Antwort.")?;

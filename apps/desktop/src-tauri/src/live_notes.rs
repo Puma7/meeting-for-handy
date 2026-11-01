@@ -53,6 +53,7 @@ pub(crate) struct LiveNotesStatus {
     /// off | starting | waiting | updating | finished | partial | stopped | failed
     status: String,
     running: bool,
+    refresh_requested: bool,
     waiting_for_transcript: bool,
     error: Option<String>,
     pending_chars: usize,
@@ -112,6 +113,7 @@ impl Job {
             meeting_id: self.meeting_id.clone(),
             status: shared.status.clone(),
             running,
+            refresh_requested: running && self.manual.load(Ordering::Acquire),
             waiting_for_transcript: running && shared.waiting_for_transcript,
             error: shared.error.clone(),
             pending_chars: shared.pending_chars,
@@ -128,6 +130,7 @@ fn off(meeting_id: &str, view: Option<LiveView>, error: Option<String>) -> LiveN
         meeting_id: meeting_id.into(),
         status: "off".into(),
         running: false,
+        refresh_requested: false,
         waiting_for_transcript: false,
         error,
         pending_chars: 0,

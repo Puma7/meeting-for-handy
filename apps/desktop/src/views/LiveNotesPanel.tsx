@@ -68,6 +68,7 @@ const POLL_IDLE_MS = 5000;
 const AUTO_START_RETRY_MS = 15_000;
 const AUTO_START_ATTEMPTS = 40;
 
+/** Names an audio track without treating its device label as a speaker identity. */
 function trackLabel(track: string, de: boolean): string {
   if (track === "microphone") return de ? "Mikrofon" : "Microphone";
   return de ? "Computerton" : "Computer audio";
@@ -79,10 +80,12 @@ function normalizeEndpoint(endpoint: string): string {
   return trimmed.endsWith("/") ? trimmed : `${trimmed}/`;
 }
 
+/** Uses the earliest cited section boundary, never an inferred word timestamp. */
 function timeOf(item: LiveItem): number {
   return Math.min(...item.evidence.map((e) => e.startMs));
 }
 
+/** Formats a saved update time; absent or invalid values retain the unknown marker. */
 function time(iso: string | null, locale: Locale): string {
   if (!iso) return "—";
   const date = new Date(iso);
@@ -135,6 +138,7 @@ function overviewPending(view: LiveView): boolean {
   return view.overviewPending ?? view.overviewWindow < view.windows;
 }
 
+/** Displays retained facts and verbatim evidence; reverse order uses a copy of the list. */
 function Items({
   items,
   locale,
@@ -206,10 +210,12 @@ export default function LiveNotesPanel({
   const [loaded, setStatus] = useState<LiveNotesStatus | null>(null),
     [error, setError] = useState<string | null>(null),
     [busy, setBusy] = useState(false),
+    [refreshPending, setRefreshPending] = useState(false),
     [cloudConsent, setCloudConsent] = useState(false),
     [setupOpen, setSetupOpen] = useState(false),
     [copied, setCopied] = useState(false);
   const sequence = useRef(0),
+    refreshing = useRef(false),
     mounted = useRef(true),
     // Counts meeting and connection changes; an answer to a call made before a change is
     // ignored, so a late answer for one meeting never shows up under another.
@@ -237,6 +243,8 @@ export default function LiveNotesPanel({
     setStatus(null);
     setError(null);
     setBusy(false);
+    setRefreshPending(false);
+    refreshing.current = false;
   }, [meetingId, connection.mode, connection.endpoint]);
   // Whether the answer to a call made in `call` may still change what this panel shows.
   const current = useCallback(
@@ -354,13 +362,14 @@ export default function LiveNotesPanel({
     autoRetry,
   ]);
 
+  /** Stops only the live-summary worker and refreshes this panel without stopping capture. */
   async function stop() {
     if (!api.stopLiveNotes) return;
     const call = generation.current;
     setBusy(true);
     try {
       await api.stopLiveNotes();
-      await poll();
+      if (current(call)) await poll();
     } catch (e) {
       if (current(call)) setError(errorMessage(e));
     } finally {
@@ -368,16 +377,33 @@ export default function LiveNotesPanel({
     }
   }
 
+  /** Acknowledges one manual request immediately and ignores replies for a stale meeting. */
   async function refresh() {
+    if (refreshing.current || !api.refreshLiveNotes) return;
     const call = generation.current;
+    refreshing.current = true;
+    setRefreshPending(true);
+    setError(null);
     try {
-      await api.refreshLiveNotes?.();
-      await poll();
+      const accepted = await api.refreshLiveNotes();
+      if (!accepted && current(call))
+        setError(
+          de
+            ? "Die Live-Aktualisierung wurde nicht angenommen. Prüfe den aktuellen Status und versuche es erneut."
+            : "The live update request was not accepted. Check the current status and try again.",
+        );
+      if (current(call)) await poll();
     } catch (e) {
       if (current(call)) setError(errorMessage(e));
+    } finally {
+      if (current(call)) {
+        refreshing.current = false;
+        setRefreshPending(false);
+      }
     }
   }
 
+  /** Persists the chosen interval and forwards it only to an existing live worker. */
   async function changeInterval(minutes: number) {
     setPreferences({ ...preferences, intervalMinutes: minutes });
     if (status?.running) {
@@ -390,6 +416,7 @@ export default function LiveNotesPanel({
     }
   }
 
+  /** Copies only the displayed meeting's source-linked text and rejects stale feedback. */
   async function copy() {
     // Only a summary of the meeting shown now gets this meeting's title.
     if (!status?.view || status.meetingId !== meetingId) return;
@@ -407,6 +434,13 @@ export default function LiveNotesPanel({
 
   if (!available || headless) return null;
   const view = status?.view ?? null;
+  // The native typed budget failure and the retained diagnostic must agree;
+  // an older context diagnostic must not replace a newer unrelated error.
+  const matchingContextFailure =
+    view?.lastRequest?.request.result === "contextLimit" &&
+    Boolean(
+      status?.error?.startsWith("Der Text passt nicht in den Modellkontext."),
+    );
   const running = status?.running ?? false;
   const staleOverview = view !== null && overviewPending(view);
   const hasContent = Boolean(
@@ -627,11 +661,26 @@ export default function LiveNotesPanel({
             </button>
             <button
               className="secondary"
-              disabled={busy || status?.status === "updating"}
+              disabled={
+                busy ||
+                refreshPending ||
+                status?.refreshRequested ||
+                status?.status === "updating"
+              }
               onClick={() => void refresh()}
             >
               <RefreshCw size={14} />
-              {de ? "Jetzt aktualisieren" : "Update now"}
+              {refreshPending || status?.refreshRequested
+                ? de
+                  ? "Aktualisierung angefordert…"
+                  : "Update requested…"
+                : status?.status === "updating"
+                  ? de
+                    ? "Wird aktualisiert…"
+                    : "Updating…"
+                  : de
+                    ? "Jetzt aktualisieren"
+                    : "Update now"}
             </button>
           </>
         ) : (
@@ -696,42 +745,49 @@ export default function LiveNotesPanel({
           </button>
         )}
       </details>
-      {(error || status?.error) && (
+      {(error || (status?.error && !matchingContextFailure)) && (
         <p className="notice warning" role="alert">
           {error ?? status?.error}
         </p>
       )}
-      {view?.lastRequest && view.lastRequest.request.result !== "stored" && (
-        <p className="notice warning" role="status">
-          {de
-            ? "Der letzte Modellversuch wurde nicht gespeichert: "
-            : "The last model attempt was not saved: "}
-          {view.lastRequest.request.result === "incomplete"
-            ? de
-              ? "Antwort unvollständig. "
-              : "Incomplete response. "
-            : view.lastRequest.request.result === "persistence"
+      {view?.lastRequest &&
+        !error &&
+        (!status?.error || matchingContextFailure) &&
+        view.lastRequest.request.result !== "stored" && (
+          <p className="notice warning" role="status">
+            {de
+              ? "Der letzte Modellversuch wurde nicht gespeichert: "
+              : "The last model attempt was not saved: "}
+            {view.lastRequest.request.result === "contextLimit"
               ? de
-                ? "Ergebnis konnte nicht gespeichert werden. "
-                : "Result could not be saved. "
-              : view.lastRequest.request.result === "validation"
+                ? "Modellkontext zu klein. "
+                : "Model context is too small. "
+              : view.lastRequest.request.result === "incomplete"
                 ? de
-                  ? "Antwort oder Quellenprüfung fehlgeschlagen. "
-                  : "Response or evidence validation failed. "
-                : view.lastRequest.request.result === "cancelled"
+                  ? "Antwort unvollständig. "
+                  : "Incomplete response. "
+                : view.lastRequest.request.result === "persistence"
                   ? de
-                    ? "Abgebrochen. "
-                    : "Cancelled. "
-                  : de
-                    ? "Verbindung oder Dienstantwort fehlgeschlagen. "
-                    : "Connection or service response failed. "}
-          {view.lastRequest.request.httpStatus &&
-            `HTTP ${view.lastRequest.request.httpStatus}. `}
-          {de
-            ? "Vorhandene Einzelergebnisse und Kurzfassungen bleiben erhalten."
-            : "Existing notes and overviews are retained."}
-        </p>
-      )}
+                    ? "Ergebnis konnte nicht gespeichert werden. "
+                    : "Result could not be saved. "
+                  : view.lastRequest.request.result === "validation"
+                    ? de
+                      ? "Antwort oder Quellenprüfung fehlgeschlagen. "
+                      : "Response or evidence validation failed. "
+                    : view.lastRequest.request.result === "cancelled"
+                      ? de
+                        ? "Abgebrochen. "
+                        : "Cancelled. "
+                      : de
+                        ? "Verbindung oder Dienstantwort fehlgeschlagen. "
+                        : "Connection or service response failed. "}
+            {view.lastRequest.request.httpStatus &&
+              `HTTP ${view.lastRequest.request.httpStatus}. `}
+            {de
+              ? "Vorhandene Einzelergebnisse und Kurzfassungen bleiben erhalten."
+              : "Existing notes and overviews are retained."}
+          </p>
+        )}
       {view && view.damagedRuns > 0 && (
         <p className="notice warning" role="status">
           {de

@@ -99,6 +99,50 @@ const local: LiveConnection = {
   useSavedKey: false,
 };
 
+it.each([true, false])(
+  "shows a localized matching context failure without reviving an unrelated old diagnostic (%s)",
+  async (matching) => {
+    const message = matching
+      ? "Der Text passt nicht in den Modellkontext. Kleinere Abschnitte oder mehr Kontext im lokalen Dienst verwenden; gesicherte Ergebnisse bleiben erhalten."
+      : "KI-Dienst meldet HTTP 500. Es wird kein anderer Anbieter verwendet.";
+    setup(
+      {
+        startLiveNotes: vi.fn(),
+        getLiveNotes: vi.fn().mockResolvedValue(
+          status({
+            status: "failed",
+            error: message,
+            view: {
+              ...view,
+              lastRequest: {
+                operation: "window",
+                window: 3,
+                request: {
+                  result: "contextLimit",
+                  httpStatus: 400,
+                  finish: null,
+                  elapsedMs: 1000,
+                  outputLimit: 2048,
+                },
+              },
+            },
+          }),
+        ),
+      },
+      { locale: "en" },
+    );
+    await screen.findByText("Stopped after errors");
+    if (matching)
+      expect(
+        await screen.findByText(/Model context is too small/),
+      ).toBeTruthy();
+    else {
+      expect(screen.queryByText(/Model context is too small/)).toBeNull();
+      expect(screen.getByText(message)).toBeTruthy();
+    }
+  },
+);
+
 it("does not call a finished run complete while its overview still covers only the first window", async () => {
   const start = vi
     .fn()
@@ -135,6 +179,74 @@ it("exports the incomplete overview coverage instead of presenting a newer windo
   );
   expect(text).toContain("Kurzfassung: 1 von 10 Textfenstern");
   expect(text).toContain("Zweiter Punkt");
+});
+
+it.each([
+  [
+    "de",
+    "Jetzt aktualisieren",
+    "Die Live-Aktualisierung wurde nicht angenommen. Prüfe den aktuellen Status und versuche es erneut.",
+  ],
+  [
+    "en",
+    "Update now",
+    "The live update request was not accepted. Check the current status and try again.",
+  ],
+] as const)(
+  "reports a rejected refresh and still polls the actual status (%s)",
+  async (locale, label, message) => {
+    const api = {
+      getLiveNotes: vi
+        .fn()
+        .mockResolvedValueOnce(status({ status: "waiting", running: true }))
+        .mockResolvedValue(status()),
+      startLiveNotes: vi.fn(),
+      refreshLiveNotes: vi.fn().mockResolvedValue(false),
+    };
+    setup(api, { locale });
+    await userEvent.click(await screen.findByRole("button", { name: label }));
+    expect(await screen.findByRole("alert")).toHaveProperty(
+      "textContent",
+      message,
+    );
+    expect(api.getLiveNotes).toHaveBeenCalledTimes(2);
+    expect(api.refreshLiveNotes).toHaveBeenCalledTimes(1);
+    expect(api.startLiveNotes).not.toHaveBeenCalled();
+    expect(
+      screen.queryByRole("button", {
+        name:
+          locale === "de" ? "Aktualisierung angefordert…" : "Update requested…",
+      }),
+    ).toBeNull();
+  },
+);
+
+it("acknowledges a manual refresh immediately and queues it only once while IPC is pending", async () => {
+  let finish!: (value: boolean) => void;
+  const refresh = vi.fn(
+    () =>
+      new Promise<boolean>((resolve) => {
+        finish = resolve;
+      }),
+  );
+  setup({
+    getLiveNotes: vi
+      .fn()
+      .mockResolvedValue(status({ status: "waiting", running: true })),
+    startLiveNotes: vi.fn(),
+    refreshLiveNotes: refresh,
+  });
+  const button = await screen.findByRole("button", {
+    name: "Jetzt aktualisieren",
+  });
+  fireEvent.click(button);
+  fireEvent.click(button);
+  expect(refresh).toHaveBeenCalledTimes(1);
+  expect(button.hasAttribute("disabled")).toBe(true);
+  expect(
+    screen.getByRole("button", { name: "Aktualisierung angefordert…" }),
+  ).toBeTruthy();
+  await act(async () => finish(true));
 });
 
 function setup(
@@ -986,6 +1098,73 @@ it("reports a failed download-state lookup instead of leaving an unhandled rejec
     await screen.findByText("Synthetic: download state unavailable"),
   ).toBeTruthy();
 });
+
+it.each([
+  ["refresh", true],
+  ["refresh", false],
+  ["stop", true],
+] as const)(
+  "does not poll the old meeting after a late %s (accepted=%s) but still polls a current action",
+  async (operation, accepted) => {
+    const a = "a".repeat(32),
+      b = "b".repeat(32);
+    let finish!: (value: boolean) => void;
+    let changed = false;
+    const pending = new Promise<boolean>((resolve) => {
+      finish = resolve;
+    });
+    const command = vi.fn(() => pending);
+    const getLiveNotes = vi.fn(async (id: string) => {
+      if (changed && id === a) throw "Synthetic stale meeting A poll failure";
+      return status({ meetingId: id, status: "waiting", running: true });
+    });
+    const api = {
+      getLiveNotes,
+      startLiveNotes: vi.fn(),
+      refreshLiveNotes: command,
+      stopLiveNotes: command,
+    } as unknown as DesktopApi;
+    const panel = (meetingId: string) => (
+      <LiveNotesPanel
+        api={api}
+        locale="de"
+        connected
+        meetingId={meetingId}
+        meetingTitle={meetingId === a ? "A" : "B"}
+        meetingActive
+        connection={local}
+        preferences={{ auto: false, intervalMinutes: 3 }}
+        setPreferences={vi.fn()}
+        onUseLocalModel={vi.fn()}
+        onOpenTextModelSettings={vi.fn()}
+        focus={false}
+        setFocus={vi.fn()}
+      />
+    );
+    const { rerender } = render(panel(a));
+    const label = operation === "refresh" ? "Jetzt aktualisieren" : "Beenden";
+    await userEvent.click(await screen.findByRole("button", { name: label }));
+    rerender(panel(b));
+    await waitFor(() => expect(getLiveNotes).toHaveBeenCalledWith(b));
+    await screen.findByRole("button", { name: label });
+    changed = true;
+    const previousA = getLiveNotes.mock.calls.filter(([id]) => id === a).length;
+    await act(async () => finish(accepted));
+    expect(
+      screen.queryByText("Synthetic stale meeting A poll failure"),
+    ).toBeNull();
+    expect(getLiveNotes.mock.calls.filter(([id]) => id === a)).toHaveLength(
+      previousA,
+    );
+    const previousB = getLiveNotes.mock.calls.filter(([id]) => id === b).length;
+    await userEvent.click(screen.getByRole("button", { name: label }));
+    await waitFor(() =>
+      expect(
+        getLiveNotes.mock.calls.filter(([id]) => id === b).length,
+      ).toBeGreaterThan(previousB),
+    );
+  },
+);
 
 it("ignores start answers and errors that arrive after the meeting was switched", async () => {
   // Review 6474935681 (P2): only the mount was checked, so a late answer for meeting A
