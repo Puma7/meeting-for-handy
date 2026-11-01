@@ -298,3 +298,24 @@ Rustformatierung und die Gesamtprüfung mit 47 PCM-, 35 Notizen-, 28 Vorlagen-
 und acht Agentenprüfungen samt Monitor. Nutzermeetings, Modelldownloads,
 Instanzübernahme und Entladung waren nicht beteiligt. Vollständiger Prüfbericht,
 gesperrte Abhängigkeiten, Aufnahme-/CI-Verifier und Schutzregeln bleiben unverändert.
+
+## VIP-Schutz ohne Maus-Hinweis
+
+Eine weitere vollständige Runde fand eine nur per Hover erreichbare Erklärung
+des VIP-Schalters. Ein kurzer sichtbarer Hinweis erklärt jetzt vor dem Anheften,
+dass VIP das Meeting oben hält und vor automatischem Aufräumen schützt,
+manuelles Löschen aber möglich bleibt. Der Schalter ist über eine eindeutige
+Beschreibung mit diesem Hinweis verbunden; der bisherige Titel bleibt ergänzend.
+Beim Umbenennen werden Schalter und zugehörige Erklärung gemeinsam ausgeblendet.
+Es wurde keine Aufbewahrungs-, Metadaten- oder Löschregel geändert.
+
+Zwei neue DE/EN-Regressionsfälle scheiterten vorher. Danach bestehen sämtliche
+305 UI-Prüfungen, TypeScript, Produktionsbuild, Formatierung und die erneute
+Gesamtprüfung. Acht synthetische Browserfälle in Edge 156.0.4314.58 prüfen
+Deutsch/Englisch, 1280/390 Pixel und beide VIP-Zustände: Erklärung ohne Hover
+sichtbar, Schalter per Tastatur erreichbar und damit beschrieben, kein horizontaler
+Überlauf oder Konsolenfehler. Es erfolgten keine echten Metadatenänderungen oder
+Löschungen; tatsächliche Screenreader-Sprachausgabe ist kein Teil dieses Nachweises.
+Alle nativen Quellen und Abhängigkeiten bleiben bytegleich zum zuvor geprüften
+Stand mit 449 Rusttests und dem echten Referenzlauf von 173,5037189 Sekunden.
+Diese nativen Prüfungen wurden für den reinen Bedienhinweis nicht erneut ausgeführt.

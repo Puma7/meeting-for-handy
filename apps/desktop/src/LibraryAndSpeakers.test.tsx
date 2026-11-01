@@ -5,6 +5,56 @@ import MeetingLabels from "./views/MeetingLabels";
 import SpeakerLabels from "./views/SpeakerLabels";
 import HistorySearch from "./views/HistorySearch";
 import type { DesktopApi, Meeting, SearchPage } from "./types";
+it.each([
+  [
+    "de",
+    "VIP hält das Meeting oben und schützt vor automatischem Aufräumen. Manuelles Löschen bleibt möglich.",
+  ],
+  [
+    "en",
+    "VIP keeps the meeting at the top and protects it from automatic cleanup. Manual deletion is still possible.",
+  ],
+] as const)(
+  "explains VIP protection visibly before activation and after pinning (%s)",
+  async (locale, explanation) => {
+    const edit = vi.fn();
+    const api = { editMeetingMetadata: edit } as unknown as DesktopApi;
+    const { rerender } = render(
+      <MeetingLabels
+        api={api}
+        meeting={meeting}
+        locale={locale}
+        onChanged={vi.fn()}
+      />,
+    );
+    for (const pinned of [false, true]) {
+      rerender(
+        <MeetingLabels
+          api={api}
+          meeting={{
+            ...meeting,
+            userMetadata: {
+              revision: 0,
+              title: null,
+              pinned,
+              audioRemoved: false,
+            },
+          }}
+          locale={locale}
+          onChanged={vi.fn()}
+        />,
+      );
+      const help = screen.getByText(explanation);
+      expect(help.hidden).toBe(false);
+      expect(help.closest("[hidden], details:not([open])")).toBeNull();
+      const button = screen.getByRole("button", { pressed: pinned });
+      expect(button.getAttribute("aria-describedby")).toBe(help.id);
+      button.focus();
+      expect(document.activeElement).toBe(button);
+      expect(edit).not.toHaveBeenCalled();
+    }
+  },
+);
 const meeting: Meeting = {
   id: "0123456789abcdef0123456789abcdef",
   title: "Original name",

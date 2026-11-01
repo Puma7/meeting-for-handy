@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import { Pencil, Pin, Save, X } from "lucide-react";
 import type { DesktopApi, Meeting, MeetingMetadata, Locale } from "../types";
 import { errorMessage } from "../api";
@@ -17,6 +17,7 @@ export default function MeetingLabels({
   locale: Locale;
   onChanged: (metadata: MeetingMetadata) => void;
 }) {
+  const pinHelpId = useId();
   const [editing, setEditing] = useState(false),
     [title, setTitle] = useState(meeting.title),
     [busy, setBusy] = useState(false),
@@ -113,6 +114,7 @@ export default function MeetingLabels({
         <button
           className={meta.pinned ? "secondary pinned" : "text-button"}
           aria-pressed={meta.pinned}
+          aria-describedby={pinHelpId}
           title={
             de
               ? "Oben in der Historie anheften und vor automatischem Aufräumen schützen. Manuelles Löschen bleibt möglich."
@@ -130,6 +132,13 @@ export default function MeetingLabels({
               ? "Als VIP anheften"
               : "Pin as VIP"}
         </button>
+      )}
+      {!editing && (
+        <p id={pinHelpId} className="muted">
+          {de
+            ? "VIP hält das Meeting oben und schützt vor automatischem Aufräumen. Manuelles Löschen bleibt möglich."
+            : "VIP keeps the meeting at the top and protects it from automatic cleanup. Manual deletion is still possible."}
+        </p>
       )}
       {(error || meeting.metadataError) && (
         <p role="alert" className="inline-error">
