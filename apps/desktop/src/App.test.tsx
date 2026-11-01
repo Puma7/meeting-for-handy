@@ -198,6 +198,128 @@ it.each([false, true])(
   },
 );
 
+it.each([false, true])(
+  "keeps a newer Notes selection after an older history request settles (failure=%s)",
+  async (failure) => {
+    const api = fakeApi();
+    const other = {
+      ...meeting,
+      id: "synthetic-other",
+      title: "Other selected meeting",
+    };
+    api.listMeetings = vi.fn().mockResolvedValue([meeting, other]);
+    api.searchMeetings = vi.fn();
+    let finish!: (value: Meeting) => void;
+    let reject!: (reason: unknown) => void;
+    api.getMeeting = vi.fn().mockImplementation((id: string) =>
+      id === meeting.id
+        ? new Promise<Meeting>((resolve, fail) => {
+            finish = resolve;
+            reject = fail;
+          })
+        : Promise.resolve(other),
+    );
+    render(<App api={api} />);
+    await ready();
+    await userEvent.click(screen.getByRole("button", { name: "Historie" }));
+    const row = (await screen.findByText(meeting.title)).closest("article")!;
+    fireEvent.click(within(row).getByRole("button", { name: "Öffnen" }));
+    await userEvent.click(
+      screen.getByRole("button", { name: "Nachbearbeitung" }),
+    );
+    await userEvent.selectOptions(
+      screen.getByLabelText("Meeting für die Auswertung"),
+      other.id,
+    );
+    await waitFor(() =>
+      expect(api.listAnalyses).toHaveBeenCalledWith(other.id),
+    );
+    await act(async () => {
+      if (failure) reject(new Error("Outdated history failure"));
+      else finish(meeting);
+    });
+    expect(
+      screen.getByRole("heading", { level: 1, name: "Nachbearbeitung" }),
+    ).toBeTruthy();
+    expect(
+      (screen.getByLabelText("Meeting für die Auswertung") as HTMLSelectElement)
+        .value,
+    ).toBe(other.id);
+    expect(screen.queryByText("Outdated history failure")).toBeNull();
+    expect(screen.queryByText("Meeting wird geöffnet…")).toBeNull();
+  },
+);
+
+it("does not let an older Notes read replace a newer history detail", async () => {
+  const api = fakeApi();
+  const other = {
+    ...meeting,
+    id: "synthetic-other",
+    title: "Other selected meeting",
+  };
+  api.listMeetings = vi.fn().mockResolvedValue([meeting, other]);
+  api.searchMeetings = vi.fn();
+  let finish!: (value: Meeting) => void;
+  api.getMeeting = vi.fn().mockImplementation((id: string) =>
+    id === other.id
+      ? new Promise<Meeting>((resolve) => {
+          finish = resolve;
+        })
+      : Promise.resolve(meeting),
+  );
+  render(<App api={api} />);
+  await ready();
+  await userEvent.click(
+    screen.getByRole("button", { name: "Nachbearbeitung" }),
+  );
+  await userEvent.selectOptions(
+    screen.getByLabelText("Meeting für die Auswertung"),
+    other.id,
+  );
+  await userEvent.click(screen.getByRole("button", { name: "Historie" }));
+  const row = (await screen.findByText(meeting.title)).closest("article")!;
+  await userEvent.click(within(row).getByRole("button", { name: "Öffnen" }));
+  await screen.findByRole("heading", { name: meeting.title });
+  await act(async () => finish(other));
+  expect(screen.getByRole("heading", { name: meeting.title })).toBeTruthy();
+  expect(screen.queryByRole("heading", { name: other.title })).toBeNull();
+});
+
+it.each(["Einstellungen", "Meeting"])(
+  "does not replace newer %s navigation or fetch a stale queued history selection",
+  async (destination) => {
+    const api = fakeApi();
+    const other = {
+      ...meeting,
+      id: "synthetic-other",
+      title: "Other selected meeting",
+    };
+    api.listMeetings = vi.fn().mockResolvedValue([meeting, other]);
+    api.searchMeetings = vi.fn();
+    let finish!: (value: Meeting) => void;
+    api.getMeeting = vi.fn().mockImplementation(
+      () =>
+        new Promise<Meeting>((resolve) => {
+          finish = resolve;
+        }),
+    );
+    render(<App api={api} />);
+    await ready();
+    await userEvent.click(screen.getByRole("button", { name: "Historie" }));
+    for (const title of [meeting.title, other.title]) {
+      const row = (await screen.findByText(title)).closest("article")!;
+      fireEvent.click(within(row).getByRole("button", { name: "Öffnen" }));
+    }
+    await userEvent.click(screen.getByRole("button", { name: destination }));
+    await act(async () => finish(meeting));
+    expect(
+      screen.getByRole("heading", { level: 1, name: destination }),
+    ).toBeTruthy();
+    expect(api.getMeeting).toHaveBeenCalledTimes(1);
+    expect(screen.queryByText("Meeting wird geöffnet…")).toBeNull();
+  },
+);
+
 /**
  * Creates mocked desktop services with capture rejected by default. Tests override only
  * the IPC behavior under examination; no device, model or native dialog is opened.

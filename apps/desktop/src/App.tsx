@@ -77,6 +77,7 @@ type MeetingOpenRequest = {
   nextPage: Page;
   source: string | null;
   epoch: number;
+  selection: number;
 };
 /**
  * Reads only locale/theme preferences. Malformed saved data returns safe defaults with
@@ -368,6 +369,7 @@ export default function App({ api = desktopApi }: { api?: DesktopApi }) {
     selectedRef = useRef<string | null>(null),
     openingMeetingRef = useRef<MeetingOpenRequest | null>(null),
     pendingMeetingRef = useRef<MeetingOpenRequest | null>(null),
+    meetingSelectionEpoch = useRef(0),
     fullMeetingRef = useRef<string | null>(null),
     liveFullRef = useRef<string | null>(null),
     notesSelectionRef = useRef(""),
@@ -1203,6 +1205,7 @@ export default function App({ api = desktopApi }: { api?: DesktopApi }) {
   }
   /** Invalidate pending reads and discard only the explicitly selected meeting's cached content. */
   function beginMeetingErasure(id: string) {
+    invalidateMeetingSelection();
     notesJob.forget(id);
     erasureBlocked.current.add(id);
     ++erasureEpoch.current;
@@ -1282,6 +1285,15 @@ export default function App({ api = desktopApi }: { api?: DesktopApi }) {
       );
     window.dispatchEvent(new Event("library-index-updated"));
   }
+  /** Invalidates stale history and Notes replies when a newer foreground selection wins.
+   * Actual IPC reads still finish before another queued history read starts. */
+  function invalidateMeetingSelection() {
+    ++meetingSelectionEpoch.current;
+    ++notesLoadSequence.current;
+    pendingMeetingRef.current = null;
+    setOpeningMeeting(false);
+    setNotesMeetingLoading(false);
+  }
   /**
    * Serializes history loads, retaining only the latest selection while one is pending.
    * Duplicate requests coalesce; source highlights and erasure epochs stay bound to the
@@ -1296,19 +1308,29 @@ export default function App({ api = desktopApi }: { api?: DesktopApi }) {
       await openNotesFor(id);
       return;
     }
-    const request = { id, nextPage, source, epoch: erasureEpoch.current };
     const active = openingMeetingRef.current;
+    if ((!active && busy) || erasureBlocked.current.has(id)) return;
+    if (!active || active.selection !== meetingSelectionEpoch.current)
+      invalidateMeetingSelection();
+    const request = {
+      id,
+      nextPage,
+      source,
+      epoch: erasureEpoch.current,
+      selection: meetingSelectionEpoch.current,
+    };
     if (active) {
       pendingMeetingRef.current =
         active.id === id &&
         active.nextPage === nextPage &&
         active.source === source &&
-        active.epoch === request.epoch
+        active.epoch === request.epoch &&
+        active.selection === request.selection
           ? null
           : request;
+      setOpeningMeeting(true);
       return;
     }
-    if (busy || erasureBlocked.current.has(id)) return;
     openingMeetingRef.current = request;
     setOpeningMeeting(true);
     try {
@@ -1317,19 +1339,23 @@ export default function App({ api = desktopApi }: { api?: DesktopApi }) {
         const requested: MeetingOpenRequest = current;
         openingMeetingRef.current = requested;
         pendingMeetingRef.current = null;
-        if (
+        /** A reply or error may affect only its still-current view and erasure generation. */
+        const isCurrentSelection = () =>
+          mounted.current &&
+          requested.selection === meetingSelectionEpoch.current &&
           requested.epoch === erasureEpoch.current &&
-          !erasureBlocked.current.has(requested.id)
-        ) {
+          !erasureBlocked.current.has(requested.id);
+        if (isCurrentSelection()) {
           await action(async () => {
-            const item = await api.getMeeting(requested.id);
-            if (
-              !mounted.current ||
-              requested.epoch !== erasureEpoch.current ||
-              erasureBlocked.current.has(requested.id) ||
-              pendingMeetingRef.current
-            )
+            let item: Meeting;
+            try {
+              item = await api.getMeeting(requested.id);
+            } catch (failure) {
+              if (isCurrentSelection() && !pendingMeetingRef.current)
+                throw failure;
               return;
+            }
+            if (!isCurrentSelection() || pendingMeetingRef.current) return;
             // A search hit applies only to the meeting it opened; other opens clear it.
             setSearchSource(
               requested.source
@@ -1358,6 +1384,7 @@ export default function App({ api = desktopApi }: { api?: DesktopApi }) {
    * sibling lookup.
    */
   async function selectNotesMeeting(id: string) {
+    invalidateMeetingSelection();
     const sequence = ++notesLoadSequence.current;
     /**
      * Checks mounted state, request generation and meeting ownership before a discovery
@@ -1449,6 +1476,7 @@ export default function App({ api = desktopApi }: { api?: DesktopApi }) {
    * analysis selection when needed.
    */
   async function navigate(next: Page) {
+    invalidateMeetingSelection();
     setPage(next);
     if (next === "history") void action(refreshHistory);
     if (next === "notes") {
@@ -1466,6 +1494,7 @@ export default function App({ api = desktopApi }: { api?: DesktopApi }) {
   }
   /** Opens the exact update controls, also when Settings is already the visible page. */
   function openUpdateSettings() {
+    invalidateMeetingSelection();
     setUpdateSectionRequested(true);
     setPage("settings");
   }
@@ -1923,7 +1952,7 @@ export default function App({ api = desktopApi }: { api?: DesktopApi }) {
           setManualTextModel(false);
         }}
         onOpenTextModelSettings={() => {
-          setPage("settings");
+          void navigate("settings");
           requestAnimationFrame(() => {
             const section = document.getElementById("text-model-settings");
             section?.scrollIntoView?.({ block: "start" });
@@ -1980,7 +2009,7 @@ export default function App({ api = desktopApi }: { api?: DesktopApi }) {
               microphoneMuted={Boolean(app.captureControl?.microphoneMuted)}
               backlogMs={app.activeMeeting.pendingAudioMs ?? null}
               getSystemLoad={api.getSystemLoad}
-              onOpen={() => setPage("meeting")}
+              onOpen={() => void navigate("meeting")}
             />
           ) : undefined
         }

@@ -169,3 +169,24 @@ Sitzungs-, Geräte- oder Löschprüfung. Sämtliche nativen Quellen, Abhängigke
 und der vollständige Prüfbericht bleiben zur vorigen Kernkorrektur bytegleich;
 deren 448 Rusttests, Clippy und echter Modellreferenztest wurden für diese reine
 UI-Korrektur nicht wiederholt.
+
+Eine weitere Reviewrunde fand einen Konflikt zwischen Historie und Nachbearbeitung:
+Eine verspätete Historienantwort konnte die inzwischen gewählte Nachbearbeitung
+wieder durch die alte Detailansicht ersetzen. Eine gemeinsame Auswahlgeneration
+entwertet nun überholte Leseantworten beider Ansichten und verwirft vorgemerkte
+Historienauswahlen beim Seitenwechsel. Auch alte Fehlermeldungen verdrängen den
+neueren Zustand nicht. Tatsächlich laufende native Historienabrufe enden weiterhin
+vor dem nächsten vorgemerkten Abruf; die Generation ist keine Abbruchzusage für IPC.
+Löschgeneration, gesperrte IDs und Quellenanker bleiben geprüft.
+
+Vier Vorherfälle scheiterten: alte Historienantwort nach neuer Nachbearbeitung,
+alte Fehlermeldung nach neuer Nachbearbeitung und veraltete Warteschlange nach
+Wechsel zu Einstellungen oder Meeting. Nach der Korrektur bestehen alle 292
+UI-Prüfungen, einschließlich der zusätzlich geprüften Gegenrichtung einer alten
+Nachbearbeitungsantwort nach neuer Historienauswahl. TypeScript, Produktionsbuild,
+Formatierung und Gesamtprüfung bestehen erneut. Native Quellen sind weiterhin
+bytegleich zur Kernkorrektur; deren tatsächliche Rust- und Modellbelege werden
+nicht als neu ausgeführte Prüfungen dieser UI-Nacharbeit bezeichnet.
+Die erneute synthetische Browserprüfung bei 1280 und 390 Pixeln bestätigt außerdem
+die neu gewählte Nachbearbeitung und die Einstellungen nach verspäteter
+Historienantwort; eine veraltete vorgemerkte Aufnahme wird nicht mehr abgerufen.
