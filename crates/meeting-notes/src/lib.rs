@@ -1,4 +1,5 @@
 //! Source-linked text analysis, separated into data, validation, transport and orchestration.
+mod batch;
 mod control;
 pub mod diagnostics;
 mod listing;

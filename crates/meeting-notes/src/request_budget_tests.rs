@@ -147,6 +147,186 @@ fn item(source: &Source) -> Value {
     json!({"text":source.text,"owner":null,"due":null,"evidence":[{"sourceId":source.id,"quote":source.text}]})
 }
 
+/// Forty distinct literal statements fit one original source batch and two limited replies.
+fn forty_sources() -> Vec<Source> {
+    (0..40)
+        .map(|i| Source {
+            id: format!("S{i}"),
+            source: "microphone".into(),
+            start_ms: i * 1000,
+            end_ms: (i + 1) * 1000,
+            text: format!("Der Bericht {i} bleibt lokal gespeichert."),
+        })
+        .collect()
+}
+
+#[test]
+fn split_children_keep_all_forty_items_across_checkpoint_resume_and_reopen() {
+    let inputs = forty_sources();
+    let mut later = step();
+    later.id = "later".into();
+    let template = Template {
+        id: "synthetic-split".into(),
+        name: "Synthetic".into(),
+        steps: vec![step(), later],
+    };
+    let server = Server::new(
+        vec![
+            (400, json!({"error":{"code":"context_length_exceeded"}})),
+            reply(
+                "stop",
+                &json!({"items":inputs[..20].iter().map(item).collect::<Vec<_>>()} ).to_string(),
+            ),
+            reply(
+                "stop",
+                &json!({"items":inputs[20..].iter().map(item).collect::<Vec<_>>()} ).to_string(),
+            ),
+            (503, json!({"error":"synthetic unavailable"})),
+            reply("stop", "{\"items\":[]}"),
+        ],
+        None,
+    );
+    let root = tempfile::tempdir().unwrap();
+    let meeting_id = "11111111111111111111111111111111";
+    assert!(analyze(
+        root.path(),
+        meeting_id,
+        inputs.clone(),
+        template.clone(),
+        server.connection(),
+        None
+    )
+    .is_err());
+    let run = std::fs::read_dir(root.path())
+        .unwrap()
+        .next()
+        .unwrap()
+        .unwrap()
+        .path();
+    let checkpoint = run.join("step-0000-000000.json");
+    let before = std::fs::read(&checkpoint).unwrap();
+    assert_eq!(
+        read_pending_analysis(&run)
+            .unwrap()
+            .unwrap()
+            .confirmed_tasks,
+        1
+    );
+    let id = run.file_name().unwrap().to_str().unwrap();
+    let result = analyze(
+        root.path(),
+        meeting_id,
+        inputs,
+        template,
+        server.connection(),
+        Some(id),
+    )
+    .unwrap();
+    assert_eq!(
+        result.sections[0].items.len(),
+        40,
+        "both independently bounded child answers must survive"
+    );
+    assert!(result.sections[0].rejected.is_empty());
+    assert_eq!(std::fs::read(&checkpoint).unwrap(), before);
+    assert_eq!(
+        read_analysis(&run.join("result.json")).unwrap().sections[0]
+            .items
+            .len(),
+        40
+    );
+    assert_eq!(
+        server.requests.lock().unwrap().len(),
+        5,
+        "confirmed split work must not be requested again"
+    );
+}
+
+#[test]
+fn split_children_keep_their_own_item_limit_and_reject_sibling_evidence() {
+    let inputs = forty_sources();
+    let mut left = inputs[..20].iter().map(item).collect::<Vec<_>>();
+    left.push(item(&inputs[0])); // valid but beyond this answer's unchanged limit
+    left.push(item(&inputs[20])); // exists globally, but was never sent to this child
+    let server = Server::new(
+        vec![
+            (400, json!({"error":{"code":"context_length_exceeded"}})),
+            reply("stop", &json!({"items":left}).to_string()),
+            reply(
+                "stop",
+                &json!({"items":inputs[20..].iter().map(item).collect::<Vec<_>>()} ).to_string(),
+            ),
+        ],
+        None,
+    );
+    let root = tempfile::tempdir().unwrap();
+    let template = Template {
+        id: "synthetic-split".into(),
+        name: "Synthetic".into(),
+        steps: vec![step()],
+    };
+    let result = analyze(
+        root.path(),
+        "11111111111111111111111111111111",
+        inputs,
+        template,
+        server.connection(),
+        None,
+    )
+    .unwrap();
+    assert_eq!(result.sections[0].items.len(), 40);
+    assert_eq!(
+        result.sections[0].rejected.get(&RejectionReason::ItemLimit),
+        Some(&1)
+    );
+    assert_eq!(
+        result.sections[0]
+            .rejected
+            .get(&RejectionReason::QuoteNotLiteral),
+        Some(&1)
+    );
+}
+
+#[test]
+fn combined_recovery_reply_bytes_remain_bounded_before_any_parent_checkpoint() {
+    let padded = format!("{}{{\"items\":[]}}", " ".repeat(1_050_000));
+    let server = Server::new(
+        vec![
+            (400, json!({"error":{"code":"context_length_exceeded"}})),
+            reply("stop", &padded),
+            reply("stop", &padded),
+        ],
+        None,
+    );
+    let root = tempfile::tempdir().unwrap();
+    let template = Template {
+        id: "synthetic-bound".into(),
+        name: "Synthetic".into(),
+        steps: vec![step()],
+    };
+    let error = analyze(
+        root.path(),
+        "11111111111111111111111111111111",
+        sources(),
+        template,
+        server.connection(),
+        None,
+    )
+    .unwrap_err();
+    assert!(error
+        .to_string()
+        .contains("überschreitet die erlaubte Größe"));
+    let run = std::fs::read_dir(root.path())
+        .unwrap()
+        .next()
+        .unwrap()
+        .unwrap()
+        .path();
+    assert!(!run.join("step-0000-000000.json").exists());
+    assert!(!run.join("result.json").exists());
+    assert_eq!(server.requests.lock().unwrap().len(), 3);
+}
+
 #[test]
 fn length_retry_keeps_messages_schema_and_only_accepts_the_complete_answer() {
     let answer = json!({"items":[item(&sources()[0])]}).to_string();

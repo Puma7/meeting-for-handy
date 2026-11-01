@@ -1,3 +1,4 @@
+use crate::batch::{GeneratedPart, MAX_COMBINED_ANSWER_BYTES, MAX_SPLIT_DEPTH};
 use crate::{AnalysisControl, Connection, Kind, Source, Step};
 use anyhow::{bail, ensure, Context, Result};
 use reqwest::Client;
@@ -351,8 +352,34 @@ impl TextClient {
         step: &Step,
         control: &AnalysisControl,
     ) -> Result<String> {
+        let mut parts = self.generate_parts_controlled(sources, step, control)?;
+        if parts.len() == 1 {
+            return Ok(parts.remove(0).answer);
+        }
+        // Legacy raw callers receive the same merged JSON. Durable orchestration instead
+        // retains the parts below so each answer is validated and checkpointed in scope.
+        let mut combined = crate::models::Answer { items: Vec::new() };
+        for part in parts {
+            let answer: crate::models::Answer = serde_json::from_str(&part.answer)?;
+            combined.items.extend(answer.items);
+        }
+        let json = serde_json::to_string(&combined)?;
+        ensure!(
+            json.len() <= MAX_COMBINED_ANSWER_BYTES,
+            "KI-Antwort überschreitet die erlaubte Größe."
+        );
+        Ok(json)
+    }
+
+    /// Retains each actual recovery leaf for per-answer validation by orchestration.
+    pub(crate) fn generate_parts_controlled(
+        &self,
+        sources: &[Source],
+        step: &Step,
+        control: &AnalysisControl,
+    ) -> Result<Vec<GeneratedPart>> {
         self.reset_diagnostic();
-        self.generate_batch(sources, step, control, 0)
+        self.generate_batch(sources, step, control, "")
     }
 
     /// At most four bisections of the same original batch; no unbounded retry tree.
@@ -361,8 +388,8 @@ impl TextClient {
         sources: &[Source],
         step: &Step,
         control: &AnalysisControl,
-        depth: u8,
-    ) -> Result<String> {
+        path: &str,
+    ) -> Result<Vec<GeneratedPart>> {
         control.check()?;
         let extra = match step.kind {
             Kind::Decisions => "Extrahiere ausschließlich ausdrücklich getroffene Entscheidungen: eine klar beschlossene Auswahl oder Änderung. Das Originalzitat muss selbst eine ausdrückliche Entscheidungsformulierung enthalten. Aufgabenübernahmen gehören in den Aufgabenbereich und sind für sich keine Entscheidung. Die Beschreibung eines bestehenden oder fortbestehenden Zustands ist keine Entscheidung. Beispiel: 'Wir entscheiden uns für Option B' ist eine Entscheidung; 'Ich schreibe den Bericht' ist eine Aufgabe; 'Die Dateien liegen lokal' und 'Die Audiodateien bleiben lokal' sind Zustandsbeschreibungen, keine Beschlüsse. Formuliere Zustandsbeschreibungen niemals als 'Es wurde entschieden' um. Lasse solche Einträge weg, selbst wenn die Aussage wichtig ist. owner und due bleiben null.",
@@ -382,34 +409,39 @@ impl TextClient {
             control,
         );
         if self.local
-            && depth < 4
+            && path.len() < MAX_SPLIT_DEPTH
             && sources.len() > 1
             && result.as_ref().is_err_and(is_budget_error)
         {
             // Keep the saved snapshot and original checkpoint boundary. No partial parent
             // is confirmed; retries use the same sources, prompt, provider and cancellation.
             let middle = sources.len() / 2;
-            let mut left: crate::models::Answer = serde_json::from_str(&self.generate_batch(
-                &sources[..middle],
-                step,
-                control,
-                depth + 1,
-            )?)?;
-            let right: crate::models::Answer = serde_json::from_str(&self.generate_batch(
+            let mut parts =
+                self.generate_batch(&sources[..middle], step, control, &format!("{path}L"))?;
+            parts.extend(self.generate_batch(
                 &sources[middle..],
                 step,
                 control,
-                depth + 1,
-            )?)?;
-            left.items.extend(right.items);
-            let joined = serde_json::to_string(&left)?;
+                &format!("{path}R"),
+            )?);
             ensure!(
-                joined.len() <= 2_000_000,
+                parts.iter().map(|part| part.answer.len()).sum::<usize>()
+                    <= MAX_COMBINED_ANSWER_BYTES,
                 "KI-Antwort überschreitet die erlaubte Größe."
             );
-            return Ok(joined);
+            return Ok(parts);
         }
-        result
+        let answer = result?;
+        if !path.is_empty() {
+            // A malformed child fails before requesting its sibling, as in the original
+            // split path. Statement validation remains in the validation layer.
+            let _: crate::models::Answer = serde_json::from_str(&answer)
+                .context("Ungültige oder doppelte Felder in der KI-Antwort.")?;
+        }
+        Ok(vec![GeneratedPart {
+            path: path.into(),
+            answer,
+        }])
     }
 
     /// Sends one text-only chat request that must answer with JSON matching `schema` and

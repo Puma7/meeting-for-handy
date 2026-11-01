@@ -103,3 +103,46 @@ Freigabezusage für fremde Instanzen. Physische Aufnahmeunterbrechungen,
 Gerätetests, GPU-Auslastung und ein gemeinsamer Zweistundenlauf sind damit
 nicht nachgewiesen oder behoben. `TEST_REPORT.md`, Paketversionen,
 Abhängigkeitssperren und Schutzkonfigurationen bleiben unverändert.
+
+## Nacharbeit aus dem vollständigen Review
+
+Der vollständige Review fand einen Verlust gültiger Aussagen nach einer
+Kontextaufteilung: Zwei einzeln zulässige Antworten mit je 20 Aussagen wurden
+zusammen erneut auf 20 begrenzt. Zwei Regressionen zeigten vorher tatsächlich
+20 statt 40 Aussagen. Die Ablaufsteuerung prüft jetzt jeden tatsächlich gesendeten
+Teilblock getrennt gegen genau seine Quellen und die unveränderte Grenze von
+20 Aussagen je Modellantwort. Erst danach werden die geprüften Aussagen vereinigt.
+Ein 21. Eintrag im selben Teilblock und Belege aus einem anderen Teilblock werden
+weiterhin verworfen und gezählt. Auch die kombinierte Antwortgröße bleibt begrenzt.
+
+Nur für solche aufgeteilten Antworten erhält der bestätigte Schreibpunkt ein
+ausdrücklich versioniertes Teilblockformat. Fortsetzung und Wiederöffnung prüfen
+die ursprüngliche binäre Quellenaufteilung erneut; überlappende, fehlende,
+vertauschte oder zu tiefe Teilblöcke, unbekannte Formate und fremde Belege werden
+abgewiesen. Alle Teilblöcke müssen vor dem ersten Schreibpunkt erfolgreich sein.
+Die Regression erhält alle 40 Aussagen über einen späteren Fehler, Fortsetzung
+und Wiederöffnung hinweg und bewahrt den bestätigten Schreibpunkt bytegleich.
+Normale und vorhandene Schreibpunkte behalten ihre bisherigen Bytes und Grenzen.
+Sitzungs-, Snapshot- und fertiges Ergebnisformat bleiben unverändert. Ältere
+Programme können einen neuen geteilten Schreibpunkt nicht fortsetzen; sie weisen
+ihn ab und lassen die gespeicherten Bytes bestehen.
+
+Der erneute echte lokale Referenztest mit denselben ausschließlich künstlichen
+Aussagen besteht auf dem bereits geladenen ausgewählten Modell
+`google/gemma-4-e4b` (Q4_K_M, 8192 Kontexttoken) in LM Studio 0.4.26.0:
+eine ausdrücklich übernommene Aufgabe, eine ausdrückliche Entscheidung, keine
+Aufgabe oder Entscheidung aus unverbindlichen Aussagen, drei Live-Fenster mit
+vollständiger Übersicht und bytegleiche Wiederöffnung. Die Gesamtlaufzeit beträgt
+211,9731276 Sekunden auf demselben i7-13700 mit ungefähr 64 GiB RAM. Parallel lief
+ein eigener Abhängigkeitsbuild mit zwei Arbeitern; dies ist kein Leistungs- oder
+Speicherbenchmark. Modell-Download, Instanzladen oder Entladen und Nutzermeetings
+waren nicht beteiligt. Die oben genannten früheren Laufzeiten bleiben historische
+Belege; dieser Lauf prüft den neuen Kernablauf.
+
+Die vollständige erneute Windows-Rust-Suite besteht mit 448 Tests und zwei
+regulär ignorierten besonderen Einstiegen. Die 285 UI-Prüfungen, TypeScript,
+Produktionsbuild und Browserbelege stammen aus der vorigen Reviewkorrektur;
+sämtliche Oberflächenquellen sind dazu byteunverändert. Rustformatierung und
+`verify.ps1` mit 47 PCM-, 35 Notizen-, 28 Vorlagen- und acht Agentenprüfungen
+sowie dem Monitor sind erneut bestanden.
+Workspace-Clippy besteht erneut mit `-D warnings` und gesperrten Abhängigkeiten.
