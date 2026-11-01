@@ -156,6 +156,7 @@ export default function App({ api = desktopApi }: { api?: DesktopApi }) {
     [app, setApp] = useState<AppState | null>(null),
     [connected, setConnected] = useState(false),
     [loading, setLoading] = useState(true);
+  const [updateSectionRequested, setUpdateSectionRequested] = useState(false);
   const [error, setError] = useState<string | null>(null),
     [busy, setBusy] = useState(false),
     [openingMeeting, setOpeningMeeting] = useState(false),
@@ -491,6 +492,19 @@ export default function App({ api = desktopApi }: { api?: DesktopApi }) {
     if (!erasureTarget)
       main.querySelector("h1")?.focus({ preventScroll: true });
   }, [page, erasureTarget]);
+
+  // Consume this explicit shortcut once, after ordinary page-heading focus. Background
+  // polling and later ordinary Settings navigation must not refocus the update controls.
+  useLayoutEffect(() => {
+    if (!updateSectionRequested || page !== "settings" || erasureTarget) return;
+    const target = mainRef.current?.querySelector<HTMLElement>(
+      "#app-update-settings",
+    );
+    if (!target) return;
+    target.scrollIntoView?.({ block: "start" });
+    target.focus({ preventScroll: true });
+    setUpdateSectionRequested(false);
+  }, [updateSectionRequested, page, erasureTarget]);
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
@@ -1409,6 +1423,11 @@ export default function App({ api = desktopApi }: { api?: DesktopApi }) {
       void selectNotesMeeting(id);
     }
   }
+  /** Opens the exact update controls, also when Settings is already the visible page. */
+  function openUpdateSettings() {
+    setUpdateSectionRequested(true);
+    setPage("settings");
+  }
   /**
    * Starts capture only after the synchronous catalogue, pending-choice and refresh gates
    * pass. It sends the selected model and separate track IDs to the native service.
@@ -1893,7 +1912,7 @@ export default function App({ api = desktopApi }: { api?: DesktopApi }) {
             api={api}
             locale={locale}
             shortcut
-            onOpenSettings={() => void navigate("settings")}
+            onOpenSettings={openUpdateSettings}
           />
         }
         recordingStatus={

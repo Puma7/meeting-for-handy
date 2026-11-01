@@ -173,6 +173,13 @@ export default function UpdatePanel({
                 : "Check for updates"}
           </span>
         </button>
+        <span className="sr-only" role="status" aria-live="polite">
+          {request || running
+            ? de
+              ? "Update wird geprüft…"
+              : "Checking for updates…"
+            : ""}
+        </span>
         {job?.status === "current" && (
           <p role="status">{de ? "App ist aktuell." : "App is up to date."}</p>
         )}

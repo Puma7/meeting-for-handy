@@ -40,6 +40,7 @@ pub(crate) enum BudgetError {
     Output,
 }
 impl std::fmt::Display for BudgetError {
+    /// Explains the recoverable limit without exposing provider text or discarded content.
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(match self {
             Self::Context => "Der Text passt nicht in den Modellkontext. Kleinere Abschnitte oder mehr Kontext im lokalen Dienst verwenden; gesicherte Ergebnisse bleiben erhalten.",
@@ -49,6 +50,7 @@ impl std::fmt::Display for BudgetError {
 }
 impl std::error::Error for BudgetError {}
 
+/// Identifies only typed budget failures; arbitrary HTTP or validation errors stay terminal.
 pub(crate) fn is_budget_error(error: &anyhow::Error) -> bool {
     error.downcast_ref::<BudgetError>().is_some()
 }
@@ -466,6 +468,7 @@ impl TextClient {
     pub(crate) fn reset_diagnostic(&self) {
         *self.diagnostic.borrow_mut() = Default::default();
     }
+    /// Starts an attempt while retaining the first and seven latest scalar predecessors.
     fn next_diagnostic(&self, output_limit: u32) {
         let previous = self.diagnostic.borrow().clone();
         let mut history = previous.previous_attempts.clone();
@@ -773,6 +776,7 @@ mod tests {
         })
     }
 
+    /// Uses an ephemeral IPv6 loopback listener or explicitly reports host unavailability.
     fn ipv6_loopback() -> Option<TcpListener> {
         let listener = TcpListener::bind("[::1]:0");
         if listener.is_err() {
@@ -781,6 +785,7 @@ mod tests {
         listener.ok()
     }
 
+    /// Checks one synthetic localhost discovery request against the supplied loopback listener.
     fn assert_localhost_reaches(listener: TcpListener) {
         let port = listener.local_addr().unwrap().port();
         let server = serve_models_once(listener);
@@ -794,6 +799,7 @@ mod tests {
     }
 
     #[test]
+    /// Proves the fixed localhost resolver can reach an IPv6-only synthetic server.
     fn localhost_reaches_a_server_listening_only_on_ipv6_loopback() {
         if let Some(listener) = ipv6_loopback() {
             assert_localhost_reaches(listener);
@@ -801,11 +807,13 @@ mod tests {
     }
 
     #[test]
+    /// Proves the fixed localhost resolver can reach an IPv4-only synthetic server.
     fn localhost_reaches_a_server_listening_only_on_ipv4_loopback() {
         assert_localhost_reaches(TcpListener::bind("127.0.0.1:0").unwrap());
     }
 
     #[test]
+    /// Checks direct bracketed IPv6 discovery without DNS or another destination.
     fn bracketed_ipv6_loopback_is_requested_directly() {
         if let Some(listener) = ipv6_loopback() {
             let port = listener.local_addr().unwrap().port();
@@ -817,6 +825,7 @@ mod tests {
     }
 
     #[test]
+    /// Retains canonical credential/resume identity separately from the connection target.
     fn localhost_keeps_its_canonical_identity_for_stored_keys_and_resume() {
         let connection = |endpoint: &str| Connection {
             endpoint: endpoint.into(),
@@ -834,6 +843,7 @@ mod tests {
     }
 
     #[test]
+    /// Rejects non-loopback names, address aliases and unsupported local URL schemes.
     fn local_mode_still_rejects_names_and_addresses_outside_loopback() {
         for endpoint in [
             "http://localhost.:1234/v1/",
@@ -849,6 +859,7 @@ mod tests {
     }
 
     #[test]
+    /// Rejects a synthetic redirect without issuing a second network request.
     fn local_mode_does_not_follow_a_redirect_from_localhost() {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let port = listener.local_addr().unwrap().port();

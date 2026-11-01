@@ -49,7 +49,7 @@ Update-Ansicht. Umbenennen und VIP-Schutz haben erklärende Tooltips.
 - Die vollständige Windows-Rust-Suite umfasst 442 bestandene Tests und zwei
   regulär ignorierte spezielle Einstiege. Formatierung und Workspace-Clippy
   mit `-D warnings` bestehen; Abhängigkeiten bleiben gesperrt.
-- 279 Oberflächenprüfungen, TypeScript und Produktionsbuild bestehen.
+- 283 Oberflächenprüfungen, TypeScript und Produktionsbuild bestehen.
   Synthetische Browserprüfungen mit Edge 156.0.4314.50 bei 1280 und 390 Pixeln
   bestätigen Update-Prüfung, knappe Überschrift, Ladezustand, Tooltips und
   unterdrückte Mehrfachanforderungen ohne horizontalen Seitenüberlauf oder
@@ -66,6 +66,26 @@ Update-Ansicht. Umbenennen und VIP-Schutz haben erklärende Tooltips.
   weitere lokale Prüfprogramme liefen. Das ist ein Funktionsnachweis, kein
   Leistungs- oder Speicherbenchmark. Working Set, Private Bytes und
   Grafikspeicher werden daraus nicht als Spitzenwerte abgeleitet.
+
+## Nacharbeit aus der ersten Reviewrunde
+
+Der Update-Verweis öffnet und fokussiert jetzt den konkreten Update-Bereich,
+auch wenn die Einstellungen schon geöffnet sind. Die Fokusanforderung wird
+einmal verbraucht; spätere normale Navigation behält den Seitenüberschriftenfokus.
+Ein dauerhaft vorhandener höflicher Statusbereich meldet die laufende Update-Prüfung
+auf Deutsch und Englisch und leert sich nach deren Ende. Dafür scheiterten vier
+neue UI-Fälle vor der Korrektur; danach bestehen alle 283 UI-Prüfungen, TypeScript,
+Produktionsbuild und die erneute Gesamtprüfung. Browserprüfungen bei 1280 und
+390 Pixeln prüfen Fokus, Sichtbarkeit, wiederholten Verweis und normalen Seitenwechsel
+mit synthetischen Schnittstellen. Eine tatsächliche Screenreader-Sprachausgabe
+wurde nicht geprüft.
+
+Fehlende Funktionskommentare wurden ergänzt, ohne Prüfkonfiguration oder
+Dokumentationsschwelle zu ändern. Die Rust-Änderungen dieser Nacharbeit bestehen
+ausschließlich aus Dokumentationszeilen. Der ausführbare Modellablauf ist unverändert;
+die oben genannten 442 Rusttests, Clippy und der echte lokale Referenzlauf stammen
+aus dem ursprünglichen Kandidaten und wurden für diese reine Dokumentationsänderung
+nicht erneut ausgeführt. Rustformatierung und Gesamtprüfung sind erneut bestanden.
 
 Der Referenzlauf lädt oder entlädt keine Modellinstanz, lädt kein Modell herunter
 und verwendet keine Nutzermeetings. Er belegt keine neue Residenz- oder

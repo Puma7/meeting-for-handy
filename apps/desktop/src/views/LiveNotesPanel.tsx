@@ -68,6 +68,7 @@ const POLL_IDLE_MS = 5000;
 const AUTO_START_RETRY_MS = 15_000;
 const AUTO_START_ATTEMPTS = 40;
 
+/** Names an audio track without treating its device label as a speaker identity. */
 function trackLabel(track: string, de: boolean): string {
   if (track === "microphone") return de ? "Mikrofon" : "Microphone";
   return de ? "Computerton" : "Computer audio";
@@ -79,10 +80,12 @@ function normalizeEndpoint(endpoint: string): string {
   return trimmed.endsWith("/") ? trimmed : `${trimmed}/`;
 }
 
+/** Uses the earliest cited section boundary, never an inferred word timestamp. */
 function timeOf(item: LiveItem): number {
   return Math.min(...item.evidence.map((e) => e.startMs));
 }
 
+/** Formats a saved update time; absent or invalid values retain the unknown marker. */
 function time(iso: string | null, locale: Locale): string {
   if (!iso) return "—";
   const date = new Date(iso);
@@ -135,6 +138,7 @@ function overviewPending(view: LiveView): boolean {
   return view.overviewPending ?? view.overviewWindow < view.windows;
 }
 
+/** Displays retained facts and verbatim evidence; reverse order uses a copy of the list. */
 function Items({
   items,
   locale,
@@ -358,6 +362,7 @@ export default function LiveNotesPanel({
     autoRetry,
   ]);
 
+  /** Stops only the live-summary worker and refreshes this panel without stopping capture. */
   async function stop() {
     if (!api.stopLiveNotes) return;
     const call = generation.current;
@@ -372,6 +377,7 @@ export default function LiveNotesPanel({
     }
   }
 
+  /** Acknowledges one manual request immediately and ignores replies for a stale meeting. */
   async function refresh() {
     if (refreshing.current || !api.refreshLiveNotes) return;
     const call = generation.current;
@@ -391,6 +397,7 @@ export default function LiveNotesPanel({
     }
   }
 
+  /** Persists the chosen interval and forwards it only to an existing live worker. */
   async function changeInterval(minutes: number) {
     setPreferences({ ...preferences, intervalMinutes: minutes });
     if (status?.running) {
@@ -403,6 +410,7 @@ export default function LiveNotesPanel({
     }
   }
 
+  /** Copies only the displayed meeting's source-linked text and rejects stale feedback. */
   async function copy() {
     // Only a summary of the meeting shown now gets this meeting's title.
     if (!status?.view || status.meetingId !== meetingId) return;

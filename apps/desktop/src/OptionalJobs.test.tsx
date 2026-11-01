@@ -12,7 +12,53 @@ import {
   requestJobStatusRefresh,
 } from "./jobPolling";
 import { nameCandidates, SPEAKER_NAME_TEMPLATE } from "./speaker-proposals";
-import type { DesktopApi, Meeting, AnalysisResult } from "./types";
+import type {
+  DesktopApi,
+  Meeting,
+  AnalysisResult,
+  UpdateProgress,
+} from "./types";
+
+it.each([
+  ["de", "Update prüfen", "Update wird geprüft…"],
+  ["en", "Check for updates", "Checking for updates…"],
+] as const)(
+  "announces the sidebar check politely in %s while its request is pending",
+  async (locale, label, checking) => {
+    let finish!: (value: UpdateProgress) => void;
+    const idle: UpdateProgress = {
+      status: "idle",
+      version: null,
+      releaseUrl: null,
+      receivedBytes: 0,
+      totalBytes: 0,
+      elapsedMs: 0,
+      error: null,
+    };
+    const api = {
+      checkForUpdate: vi.fn(
+        () =>
+          new Promise<UpdateProgress>((resolve) => {
+            finish = resolve;
+          }),
+      ),
+      getUpdateProgress: vi.fn().mockResolvedValue(idle),
+    } as unknown as DesktopApi;
+    render(<UpdatePanel api={api} locale={locale} shortcut />);
+    await userEvent.click(screen.getByRole("button", { name: label }));
+    const live = screen.getByRole("status");
+    expect(live.getAttribute("aria-live")).toBe("polite");
+    expect(live.textContent).toBe(checking);
+    expect(
+      (screen.getByRole("button", { name: checking }) as HTMLButtonElement)
+        .disabled,
+    ).toBe(true);
+    expect(api.checkForUpdate).toHaveBeenCalledTimes(1);
+    await act(async () => finish(idle));
+    expect(live.isConnected).toBe(true);
+    expect(live.textContent).toBe("");
+  },
+);
 
 it.each([true, false])(
   "requires an explicit successful speaker capability check (%s) before a job can start",

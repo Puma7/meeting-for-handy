@@ -219,6 +219,7 @@ impl LiveRunner {
         result
     }
 
+    /// Saves bounded scalar request evidence; a diagnostic failure never discards results.
     fn record_diagnostic(
         &self,
         operation: Operation,
@@ -247,6 +248,7 @@ impl LiveRunner {
         }
     }
 
+    /// Reduces eligible local requests while retaining unsent sources, then validates and saves.
     fn summarize_window_inner(
         &self,
         pending: &[LiveSource],
@@ -342,6 +344,7 @@ impl LiveRunner {
         Ok(window)
     }
 
+    /// Starts separate overview diagnostics and records the actual last attempted coverage.
     fn rebuild_overview(&mut self, control: &AnalysisControl) -> Result<Option<u32>> {
         self.client.reset_diagnostic();
         self.overview_attempt
@@ -358,6 +361,7 @@ impl LiveRunner {
         result
     }
 
+    /// Folds complete window batches in order; only validated, durably saved input is covered.
     fn rebuild_overview_inner(&mut self, control: &AnalysisControl) -> Result<Option<u32>> {
         let previous = self.state.overviews.last();
         let covered = previous.map_or(0, |o| o.window as usize);

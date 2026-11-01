@@ -171,11 +171,17 @@ export default function SettingsView({
           )}
         </details>
       </div>
-      <UpdatePanel
-        api={api}
-        locale={locale}
-        blocked={blocked || Boolean(app?.notesRunning)}
-      />
+      <section
+        id="app-update-settings"
+        tabIndex={-1}
+        aria-label={de ? "App aktualisieren" : "Update app"}
+      >
+        <UpdatePanel
+          api={api}
+          locale={locale}
+          blocked={blocked || Boolean(app?.notesRunning)}
+        />
+      </section>
       <div ref={setMaintenanceStatusRoot} />
       <details className="settings-disclosure">
         <summary>{de ? "Daten und Wartung" : "Data and maintenance"}</summary>

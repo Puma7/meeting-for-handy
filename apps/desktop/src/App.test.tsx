@@ -59,10 +59,6 @@ function state(active: Meeting | null = null): AppState {
     },
   };
 }
-/**
- * Creates mocked desktop services with capture rejected by default. Tests override only
- * the IPC behavior under examination; no device, model or native dialog is opened.
- */
 it("checks for updates from the sidebar without leaving the current page", async () => {
   const api = fakeApi();
   api.checkForUpdate = vi.fn().mockResolvedValue(undefined);
@@ -75,6 +71,53 @@ it("checks for updates from the sidebar without leaving the current page", async
     screen.getByRole("heading", { level: 1, name: "Meeting" }),
   ).toBeTruthy();
 });
+
+it.each([false, true])(
+  "opens and focuses the exact update panel, including already-open Settings (%s)",
+  async (alreadyOpen) => {
+    const api = fakeApi();
+    api.checkForUpdate = vi.fn();
+    api.getUpdateProgress = vi.fn().mockResolvedValue({
+      status: "available",
+      version: "9.9.9",
+      releaseUrl: null,
+      receivedBytes: 0,
+      totalBytes: 0,
+      elapsedMs: 10,
+      error: null,
+    });
+    const previousScroll = Element.prototype.scrollIntoView;
+    const scroll = vi.fn();
+    Element.prototype.scrollIntoView = scroll;
+    try {
+      const user = userEvent.setup();
+      render(<App api={api} />);
+      await ready();
+      if (alreadyOpen)
+        await user.click(screen.getByRole("button", { name: "Einstellungen" }));
+      await user.click(
+        await screen.findByRole("button", { name: "Update öffnen" }),
+      );
+      const target = await screen.findByRole("region", {
+        name: "App aktualisieren",
+      });
+      await waitFor(() => expect(document.activeElement).toBe(target));
+      expect(scroll).toHaveBeenCalledOnce();
+      expect(scroll.mock.instances[0]).toBe(target);
+      expect(scroll).toHaveBeenCalledWith({ block: "start" });
+      // Ordinary navigation later retains the existing page-heading focus contract.
+      await user.click(screen.getByRole("button", { name: "Meeting" }));
+      await user.click(screen.getByRole("button", { name: "Einstellungen" }));
+      expect(document.activeElement).toBe(
+        screen.getByRole("heading", { level: 1, name: "Einstellungen" }),
+      );
+      expect(scroll).toHaveBeenCalledOnce();
+      expect(api.checkForUpdate).not.toHaveBeenCalled();
+    } finally {
+      Element.prototype.scrollIntoView = previousScroll;
+    }
+  },
+);
 
 it("acknowledges a slow history open and does not submit it twice", async () => {
   const api = fakeApi();
@@ -96,6 +139,10 @@ it("acknowledges a slow history open and does not submit it twice", async () => 
   await act(async () => finish(meeting));
 });
 
+/**
+ * Creates mocked desktop services with capture rejected by default. Tests override only
+ * the IPC behavior under examination; no device, model or native dialog is opened.
+ */
 function fakeApi(active: Meeting | null = null): DesktopApi {
   return {
     ...testServices(),
