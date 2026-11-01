@@ -146,3 +146,26 @@ sämtliche Oberflächenquellen sind dazu byteunverändert. Rustformatierung und
 `verify.ps1` mit 47 PCM-, 35 Notizen-, 28 Vorlagen- und acht Agentenprüfungen
 sowie dem Monitor sind erneut bestanden.
 Workspace-Clippy besteht erneut mit `-D warnings` und gesperrten Abhängigkeiten.
+
+## Weitere Historienauswahl während des Ladens
+
+Ein zusätzlicher Befund außerhalb der Diffzeilen zeigte verlorene Auswahlen:
+Die Suchhistorie ließ weitere Öffnen-Klicks zu, während ein früherer Leseaufruf
+noch lief; die Sperre verwarf diese Auswahl. Jetzt bleibt ausschließlich die
+neueste gewünschte Aufnahme samt Zielansicht und Quellenanker vorgemerkt.
+Die Aufrufe laufen nacheinander. Überholte Antworten wechseln die Ansicht nicht;
+ein fehlgeschlagener erster Aufruf verhindert die neueste Auswahl ebenfalls nicht.
+Identische Doppelklicks werden zusammengefasst. Löschgeneration und Sperren werden
+vor dem nächsten Abruf und vor der Übernahme erneut geprüft.
+
+Zwei neue Fälle scheiterten vorher; danach bestehen alle 287 Oberflächenprüfungen,
+TypeScript, Produktionsbuild, Formatprüfung und die erneute Gesamtprüfung.
+Der bestehende Doppelklickfall prüft nun auch nach Abschluss, dass kein zweiter
+Abruf erfolgt. Eine frische synthetische Browserprüfung mit Edge 156.0.4314.58
+bei 1280 und 390 Pixeln klickt A, B, C und nochmals C: ausschließlich A und C
+werden nacheinander abgefragt, C wird angezeigt und der Ladestatus endet.
+Es gibt keinen horizontalen Überlauf oder Konsolenfehler. Dies ist keine native
+Sitzungs-, Geräte- oder Löschprüfung. Sämtliche nativen Quellen, Abhängigkeiten
+und der vollständige Prüfbericht bleiben zur vorigen Kernkorrektur bytegleich;
+deren 448 Rusttests, Clippy und echter Modellreferenztest wurden für diese reine
+UI-Korrektur nicht wiederholt.

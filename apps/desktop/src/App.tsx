@@ -72,6 +72,12 @@ import type {
 } from "./types";
 
 const PREFS_KEY = "handymeeting.rust.beta.preferences.v1";
+type MeetingOpenRequest = {
+  id: string;
+  nextPage: Page;
+  source: string | null;
+  epoch: number;
+};
 /**
  * Reads only locale/theme preferences. Malformed saved data returns safe defaults with
  * persistence disabled so the original value is retained.
@@ -360,7 +366,8 @@ export default function App({ api = desktopApi }: { api?: DesktopApi }) {
     mainRef = useRef<HTMLElement>(null),
     previousPage = useRef(page),
     selectedRef = useRef<string | null>(null),
-    openingMeetingRef = useRef(false),
+    openingMeetingRef = useRef<MeetingOpenRequest | null>(null),
+    pendingMeetingRef = useRef<MeetingOpenRequest | null>(null),
     fullMeetingRef = useRef<string | null>(null),
     liveFullRef = useRef<string | null>(null),
     notesSelectionRef = useRef(""),
@@ -1276,8 +1283,9 @@ export default function App({ api = desktopApi }: { api?: DesktopApi }) {
     window.dispatchEvent(new Event("library-index-updated"));
   }
   /**
-   * Loads the exact requested meeting before switching its detail or analysis view; a
-   * search-source highlight stays bound to that meeting ID.
+   * Serializes history loads, retaining only the latest selection while one is pending.
+   * Duplicate requests coalesce; source highlights and erasure epochs stay bound to the
+   * requested meeting, and superseded replies never switch the current view.
    */
   async function openMeeting(
     id: string,
@@ -1288,27 +1296,60 @@ export default function App({ api = desktopApi }: { api?: DesktopApi }) {
       await openNotesFor(id);
       return;
     }
-    if (openingMeetingRef.current) return;
-    openingMeetingRef.current = true;
+    const request = { id, nextPage, source, epoch: erasureEpoch.current };
+    const active = openingMeetingRef.current;
+    if (active) {
+      pendingMeetingRef.current =
+        active.id === id &&
+        active.nextPage === nextPage &&
+        active.source === source &&
+        active.epoch === request.epoch
+          ? null
+          : request;
+      return;
+    }
+    if (busy || erasureBlocked.current.has(id)) return;
+    openingMeetingRef.current = request;
     setOpeningMeeting(true);
     try {
-      await action(async () => {
-        const epoch = erasureEpoch.current;
-        const item = await api.getMeeting(id);
-        if (epoch !== erasureEpoch.current || erasureBlocked.current.has(id))
-          return;
-        // A search hit applies only to the meeting it opened; other opens clear it.
-        setSearchSource(source ? { meetingId: item.id, file: source } : null);
-        selectedRef.current = item.id;
-        fullMeetingRef.current = item.id;
-        setMeeting(item);
-        setAnalyses([]);
-        setResultId("");
-        setPage(nextPage);
-      });
+      let current: MeetingOpenRequest | null = request;
+      while (current && mounted.current) {
+        const requested: MeetingOpenRequest = current;
+        openingMeetingRef.current = requested;
+        pendingMeetingRef.current = null;
+        if (
+          requested.epoch === erasureEpoch.current &&
+          !erasureBlocked.current.has(requested.id)
+        ) {
+          await action(async () => {
+            const item = await api.getMeeting(requested.id);
+            if (
+              !mounted.current ||
+              requested.epoch !== erasureEpoch.current ||
+              erasureBlocked.current.has(requested.id) ||
+              pendingMeetingRef.current
+            )
+              return;
+            // A search hit applies only to the meeting it opened; other opens clear it.
+            setSearchSource(
+              requested.source
+                ? { meetingId: item.id, file: requested.source }
+                : null,
+            );
+            selectedRef.current = item.id;
+            fullMeetingRef.current = item.id;
+            setMeeting(item);
+            setAnalyses([]);
+            setResultId("");
+            setPage(requested.nextPage);
+          });
+        }
+        current = pendingMeetingRef.current;
+      }
     } finally {
-      openingMeetingRef.current = false;
-      setOpeningMeeting(false);
+      pendingMeetingRef.current = null;
+      openingMeetingRef.current = null;
+      if (mounted.current) setOpeningMeeting(false);
     }
   }
   /**

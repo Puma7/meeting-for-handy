@@ -137,7 +137,66 @@ it("acknowledges a slow history open and does not submit it twice", async () => 
   expect(api.getMeeting).toHaveBeenCalledTimes(1);
   expect(screen.getByText("Meeting wird geöffnet…")).toBeTruthy();
   await act(async () => finish(meeting));
+  expect(api.getMeeting).toHaveBeenCalledTimes(1);
 });
+
+it.each([false, true])(
+  "keeps only the latest queued history selection after a pending request (failure=%s)",
+  async (failure) => {
+    const api = fakeApi();
+    const items = ["A", "B", "C"].map((name) => ({
+      ...meeting,
+      id: `synthetic-${name}`,
+      title: `Synthetic ${name}`,
+    }));
+    api.listMeetings = vi.fn().mockResolvedValue(items);
+    api.searchMeetings = vi.fn();
+    let finish!: (item: Meeting) => void;
+    let reject!: (reason: unknown) => void;
+    let finishLast!: (item: Meeting) => void;
+    api.getMeeting = vi.fn().mockImplementation((id: string) => {
+      if (id === items[0].id)
+        return new Promise<Meeting>((resolve, fail) => {
+          finish = resolve;
+          reject = fail;
+        });
+      if (id === items[2].id)
+        return new Promise<Meeting>((resolve) => {
+          finishLast = resolve;
+        });
+      return Promise.resolve(items[1]);
+    });
+    render(<App api={api} />);
+    await ready();
+    await userEvent.click(screen.getByRole("button", { name: "Historie" }));
+    const buttons = await screen.findAllByRole("button", { name: "Öffnen" });
+    const opener = (title: string) =>
+      buttons.find((button) =>
+        button.closest("article")?.textContent?.includes(title),
+      )!;
+    fireEvent.click(opener("Synthetic A"));
+    fireEvent.click(opener("Synthetic B"));
+    fireEvent.click(opener("Synthetic C"));
+    fireEvent.click(opener("Synthetic C"));
+    expect(api.getMeeting).toHaveBeenCalledExactlyOnceWith(items[0].id);
+    await act(async () => {
+      if (failure) reject(new Error("Synthetic first request failed"));
+      else finish(items[0]);
+    });
+    await waitFor(() => expect(api.getMeeting).toHaveBeenCalledTimes(2));
+    expect(api.getMeeting).toHaveBeenLastCalledWith(items[2].id);
+    expect(
+      screen.getByRole("heading", { level: 1, name: "Historie" }),
+    ).toBeTruthy();
+    expect(screen.getByText("Meeting wird geöffnet…")).toBeTruthy();
+    await act(async () => finishLast(items[2]));
+    await waitFor(() =>
+      expect(screen.queryByText("Meeting wird geöffnet…")).toBeNull(),
+    );
+    expect(screen.getByRole("heading", { name: "Synthetic C" })).toBeTruthy();
+    expect(api.getMeeting).toHaveBeenCalledTimes(2);
+  },
+);
 
 /**
  * Creates mocked desktop services with capture rejected by default. Tests override only
