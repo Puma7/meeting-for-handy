@@ -369,7 +369,7 @@ export default function LiveNotesPanel({
     setBusy(true);
     try {
       await api.stopLiveNotes();
-      await poll();
+      if (current(call)) await poll();
     } catch (e) {
       if (current(call)) setError(errorMessage(e));
     } finally {
@@ -386,7 +386,7 @@ export default function LiveNotesPanel({
     setError(null);
     try {
       await api.refreshLiveNotes();
-      await poll();
+      if (current(call)) await poll();
     } catch (e) {
       if (current(call)) setError(errorMessage(e));
     } finally {

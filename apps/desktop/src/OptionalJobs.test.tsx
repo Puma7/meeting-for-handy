@@ -60,6 +60,48 @@ it.each([
   },
 );
 
+it.each([
+  ["de", "current", "App ist aktuell.", "Update prüfen"],
+  ["de", "available", "Update verfügbar.", "Update prüfen"],
+  ["en", "current", "App is up to date.", "Check for updates"],
+  ["en", "available", "Update available.", "Check for updates"],
+] as const)(
+  "announces a user-started check result in the original polite region (%s/%s)",
+  async (locale, result, text, label) => {
+    let finish!: () => void;
+    let progress: UpdateProgress["status"] = "idle";
+    const api = {
+      checkForUpdate: vi.fn(
+        () =>
+          new Promise<void>((resolve) => {
+            finish = () => {
+              progress = result;
+              resolve();
+            };
+          }),
+      ),
+      getUpdateProgress: vi.fn(async () => ({
+        status: progress,
+        version: "synthetic",
+        receivedBytes: 0,
+        totalBytes: 0,
+        elapsedMs: 0,
+        error: null,
+      })),
+    } as unknown as DesktopApi;
+    const { container } = render(
+      <UpdatePanel api={api} locale={locale} shortcut />,
+    );
+    const live = container.querySelector('[aria-live="polite"]')!;
+    await userEvent.click(screen.getByRole("button", { name: label }));
+    await act(async () => finish());
+    await waitFor(() => expect(live.textContent).toBe(text));
+    expect(container.querySelector('[aria-live="polite"]')).toBe(live);
+    expect(screen.getAllByRole("status")).toHaveLength(1);
+    expect(api.checkForUpdate).toHaveBeenCalledTimes(1);
+  },
+);
+
 it.each([true, false])(
   "requires an explicit successful speaker capability check (%s) before a job can start",
   async (supported) => {
@@ -596,7 +638,7 @@ it.each([
         onOpenSettings={openSettings}
       />,
     );
-    await screen.findByText(available);
+    await screen.findByText(available, { selector: "p" });
     const live = container.querySelector('[aria-live="polite"]')!;
     status = "downloading";
     act(() => requestJobStatusRefresh());
@@ -606,7 +648,9 @@ it.each([
     await waitFor(() => expect(live.textContent).toBe(ready));
     expect(container.querySelector('[aria-live="polite"]')).toBe(live);
     expect(screen.getByText(visibleReady, { exact: false })).toBeTruthy();
-    expect(screen.queryByText(available, { exact: false })).toBeNull();
+    expect(
+      screen.queryByText(available, { exact: false, selector: "p" }),
+    ).toBeNull();
     expect(screen.getAllByRole("status")).toHaveLength(1);
     await userEvent.click(
       screen.getByRole("button", {

@@ -176,13 +176,21 @@ export default function UpdatePanel({
             ? activityLabel
             : job?.status === "ready"
               ? labels.ready
-              : ""}
+              : job?.status === "current"
+                ? de
+                  ? "App ist aktuell."
+                  : "App is up to date."
+                : job?.status === "available"
+                  ? de
+                    ? "Update verfügbar."
+                    : "Update available."
+                  : ""}
         </span>
         {job?.status === "current" && (
-          <p role="status">{de ? "App ist aktuell." : "App is up to date."}</p>
+          <p>{de ? "App ist aktuell." : "App is up to date."}</p>
         )}
         {(job?.status === "available" || job?.status === "ready") && (
-          <p role={job?.status === "ready" ? undefined : "status"}>
+          <p>
             {job?.status === "ready"
               ? de
                 ? "Installer bereit."

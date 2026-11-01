@@ -319,3 +319,36 @@ Löschungen; tatsächliche Screenreader-Sprachausgabe ist kein Teil dieses Nachw
 Alle nativen Quellen und Abhängigkeiten bleiben bytegleich zum zuvor geprüften
 Stand mit 449 Rusttests und dem echten Referenzlauf von 173,5037189 Sekunden.
 Diese nativen Prüfungen wurden für den reinen Bedienhinweis nicht erneut ausgeführt.
+
+## Verspätete Live-Aktionen und abgeschlossene Updateprüfungen
+
+Eine verspätete manuelle Live-Aktualisierung konnte nach einem Meetingwechsel
+noch den Status des früheren Meetings abfragen und dessen Fehler im neuen Meeting
+anzeigen. Eine echte Vorherregression bestätigte das; die gleichartige Folgeabfrage
+nach dem Beenden hatte denselben Fehler und ist ebenfalls reproduziert. Beide
+Aktionen prüfen jetzt ihre ursprüngliche Auswahlgeneration vor der Folgeabfrage.
+Bereits laufende native Befehle werden dadurch nicht nachträglich abgebrochen;
+die Oberfläche beginnt keine veraltete Folgeabfrage. Aktuelle Aktionen fragen
+weiterhin ihren aktuellen Status ab. Native Worker- und Aufnahmeabläufe bleiben gleich.
+
+Auch die Ergebnisse „App ist aktuell“ und „Update verfügbar“ nutzen jetzt den
+dauerhaft vorhandenen höflichen Statusbereich. Sichtbare Ergebnisabsätze tragen
+keine zweite Live-Rolle. Vier zusätzliche Vorherfälle auf Deutsch und Englisch
+zeigten zuvor einen leeren ursprünglichen Statusbereich nach der Prüfung.
+Danach bestehen alle sechs neuen Fälle und sämtliche 311 UI-Prüfungen,
+TypeScript, Produktionsbuild, Formatierung und die erneute Gesamtprüfung.
+Zwölf synthetische Browserfälle bei 1280 und 390 Pixeln bestätigen beide
+Updateergebnisse in beiden Sprachen und die verspätete Live-Aktualisierung bzw.
+Beendigung nach Auswahl eines anderen Meetings. Kein veralteter Statusabruf,
+keine alte Fehlermeldung im neuen Meeting, kein horizontaler Überlauf oder
+Seitenfehler; keine echte native Aktion oder tatsächliche Screenreader-Ausgabe.
+Die nativen Quellen bleiben bytegleich zu den 449 Rusttests und dem echten
+Referenzlauf mit Promptfassung 4; diese Prüfungen wurden nicht erneut ausgeführt.
+
+Die Wiederholungsgrenze beschränkt die Anzahl der Anfragen, nicht die gesamte
+verstrichene Auswertungsdauer: Vier Teilungsebenen erlauben höchstens 31 Knoten
+und 62 HTTP-Versuche je Quellenblock. Es gibt keine zusätzliche gemeinsame
+Gesamtlaufzeitgrenze; die bestehenden Zeitlimits einzelner Anfragen können sich
+entsprechend addieren. Die vorhandenen Abbruchprüfungen bleiben erhalten.
+Dies ist eine ausdrücklich dokumentierte Betriebsgrenze, kein Nachweis einer
+kurzen Höchstlaufzeit oder einer abgeschwächten Schutzregel.

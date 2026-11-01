@@ -1059,6 +1059,69 @@ it("reports a failed download-state lookup instead of leaving an unhandled rejec
   ).toBeTruthy();
 });
 
+it.each(["refresh", "stop"] as const)(
+  "does not poll the old meeting after a late %s but still polls a current action",
+  async (operation) => {
+    const a = "a".repeat(32),
+      b = "b".repeat(32);
+    let finish!: (value: boolean) => void;
+    let changed = false;
+    const pending = new Promise<boolean>((resolve) => {
+      finish = resolve;
+    });
+    const command = vi.fn(() => pending);
+    const getLiveNotes = vi.fn(async (id: string) => {
+      if (changed && id === a) throw "Synthetic stale meeting A poll failure";
+      return status({ meetingId: id, status: "waiting", running: true });
+    });
+    const api = {
+      getLiveNotes,
+      startLiveNotes: vi.fn(),
+      refreshLiveNotes: command,
+      stopLiveNotes: command,
+    } as unknown as DesktopApi;
+    const panel = (meetingId: string) => (
+      <LiveNotesPanel
+        api={api}
+        locale="de"
+        connected
+        meetingId={meetingId}
+        meetingTitle={meetingId === a ? "A" : "B"}
+        meetingActive
+        connection={local}
+        preferences={{ auto: false, intervalMinutes: 3 }}
+        setPreferences={vi.fn()}
+        onUseLocalModel={vi.fn()}
+        onOpenTextModelSettings={vi.fn()}
+        focus={false}
+        setFocus={vi.fn()}
+      />
+    );
+    const { rerender } = render(panel(a));
+    const label = operation === "refresh" ? "Jetzt aktualisieren" : "Beenden";
+    await userEvent.click(await screen.findByRole("button", { name: label }));
+    rerender(panel(b));
+    await waitFor(() => expect(getLiveNotes).toHaveBeenCalledWith(b));
+    await screen.findByRole("button", { name: label });
+    changed = true;
+    const previousA = getLiveNotes.mock.calls.filter(([id]) => id === a).length;
+    await act(async () => finish(true));
+    expect(
+      screen.queryByText("Synthetic stale meeting A poll failure"),
+    ).toBeNull();
+    expect(getLiveNotes.mock.calls.filter(([id]) => id === a)).toHaveLength(
+      previousA,
+    );
+    const previousB = getLiveNotes.mock.calls.filter(([id]) => id === b).length;
+    await userEvent.click(screen.getByRole("button", { name: label }));
+    await waitFor(() =>
+      expect(
+        getLiveNotes.mock.calls.filter(([id]) => id === b).length,
+      ).toBeGreaterThan(previousB),
+    );
+  },
+);
+
 it("ignores start answers and errors that arrive after the meeting was switched", async () => {
   // Review 6474935681 (P2): only the mount was checked, so a late answer for meeting A
   // replaced meeting B's state, error and busy flag, and Copy used B's title for A's notes.
