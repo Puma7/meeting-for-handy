@@ -627,6 +627,48 @@ it("retains a shortcut command failure when no native job reports it", async () 
   );
 });
 
+it.each(["de", "en"] as const)(
+  "preserves an already verified installer when the compact update action is used (%s)",
+  async (locale) => {
+    let verified = true;
+    const openSettings = vi.fn();
+    const api = {
+      checkForUpdate: vi.fn(async () => {
+        verified = false;
+      }),
+      getUpdateProgress: vi.fn(async () => ({
+        status: verified ? "ready" : "available",
+        version: "synthetic",
+        receivedBytes: 10,
+        totalBytes: 10,
+        elapsedMs: 0,
+        error: null,
+      })),
+      downloadUpdate: vi.fn(),
+      installUpdate: vi.fn(),
+    } as unknown as DesktopApi;
+    const { container } = render(
+      <UpdatePanel
+        api={api}
+        locale={locale}
+        shortcut
+        onOpenSettings={openSettings}
+      />,
+    );
+    await screen.findByRole("button", {
+      name: locale === "de" ? "Update öffnen" : "Open update",
+    });
+    await userEvent.click(
+      container.querySelector(".sidebar-update button") as HTMLButtonElement,
+    );
+    expect(verified).toBe(true);
+    expect(api.checkForUpdate).not.toHaveBeenCalled();
+    expect(openSettings).toHaveBeenCalledOnce();
+    expect(api.downloadUpdate).not.toHaveBeenCalled();
+    expect(api.installUpdate).not.toHaveBeenCalled();
+  },
+);
+
 it("does not keep a cancelled download in the footer and lets a failure be dismissed", async () => {
   let status = "cancelled";
   const api = {

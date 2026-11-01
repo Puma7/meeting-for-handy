@@ -227,3 +227,17 @@ Aufnahme war unvollständig; die Ursache der Überschreitung ist damit nicht bew
 Aufnahmecode, virtuelle Fixture, Verifier und Workflow sind zur Basis bytegleich.
 Der fehlgeschlagene Lauf bleibt erhalten. Die Grenze wird nicht angehoben; aktuelle
 Ziel-CI-Ergebnisse müssen dem tatsächlichen neuen Head zugeordnet werden.
+
+Die nächste vollständige Runde fand außerdem eine Zustandsänderung durch die
+neue Update-Aktion: Bei bereits als `ready` bestätigtem Installer hätte ein
+erneuter Prüflauf die native Referenz auf den geprüften Installer verworfen.
+Die kompakte Aktion bietet in diesem bestätigten Zustand jetzt ausschließlich
+den Zugang zur bestehenden Update-Ansicht; sie startet keine weitere Prüfung.
+Der native Updater und seine Installationsprüfungen bleiben unverändert.
+Zwei zustandsbehaftete UI-Regressionsfälle auf Deutsch und Englisch zeigten
+vorher tatsächlich den Verlust des simulierten geprüften Zustands. Danach
+bleibt er erhalten; weder Prüfung noch Download oder Installation wird gerufen.
+Alle 301 UI-Prüfungen, TypeScript, Produktionsbuild, Formatierung und Gesamtprüfung
+bestehen. Eine synthetische Browserprüfung bei 1280 und 390 Pixeln öffnet nur
+den vorhandenen Update-Bereich und weist null neue Updateprüfungen nach.
+Es wurde dafür kein realer Installer heruntergeladen, gestartet oder verändert.

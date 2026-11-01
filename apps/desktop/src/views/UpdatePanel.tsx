@@ -156,19 +156,21 @@ export default function UpdatePanel({
   if (shortcut)
     return (
       <div className="sidebar-update">
-        <button
-          className="secondary"
-          title={shortcutLabel}
-          aria-label={shortcutLabel}
-          disabled={request || running}
-          onClick={() => void action(api.checkForUpdate!)}
-        >
-          <RefreshCw
-            size={16}
-            className={request || running ? "spinning" : undefined}
-          />
-          <span className="sidebar-update-label">{shortcutLabel}</span>
-        </button>
+        {job?.status !== "ready" && (
+          <button
+            className="secondary"
+            title={shortcutLabel}
+            aria-label={shortcutLabel}
+            disabled={request || running}
+            onClick={() => void action(api.checkForUpdate!)}
+          >
+            <RefreshCw
+              size={16}
+              className={request || running ? "spinning" : undefined}
+            />
+            <span className="sidebar-update-label">{shortcutLabel}</span>
+          </button>
+        )}
         <span className="sr-only" role="status" aria-live="polite">
           {request || running ? activityLabel : ""}
         </span>
