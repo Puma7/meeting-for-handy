@@ -13,12 +13,17 @@ export default function UpdatePanel({
   api,
   locale,
   footer = false,
+  shortcut = false,
+  onOpenSettings,
   blocked = false,
   hidden: suppressed = false,
 }: {
   api: DesktopApi;
   locale: Locale;
   footer?: boolean;
+  /** Explicit check in the sidebar; existing full settings and progress stay authoritative. */
+  shortcut?: boolean;
+  onOpenSettings?: () => void;
   blocked?: boolean;
   /** The full update panel is on screen; keep the dismissal but do not poll or render. */
   hidden?: boolean;
@@ -39,12 +44,13 @@ export default function UpdatePanel({
       try {
         const value = await api.getUpdateProgress!();
         // Archive maintenance and indexing also block installation in the backend.
-        const others = footer
-          ? []
-          : await Promise.all([
-              api.getMaintenanceProgress?.() ?? null,
-              api.getLibraryProgress?.() ?? null,
-            ]);
+        const others =
+          footer || shortcut
+            ? []
+            : await Promise.all([
+                api.getMaintenanceProgress?.() ?? null,
+                api.getLibraryProgress?.() ?? null,
+              ]);
         const othersRunning = others.some((p) => p?.status === "running");
         busy =
           value.status === "checking" ||
@@ -64,7 +70,7 @@ export default function UpdatePanel({
       active = false;
       stop();
     };
-  }, [api, footer, suppressed]);
+  }, [api, footer, shortcut, suppressed]);
   if (!api.checkForUpdate || suppressed) return null;
   const installBlocked = blocked || jobsRunning;
   const running = job?.status === "checking" || job?.status === "downloading";
@@ -78,6 +84,7 @@ export default function UpdatePanel({
    * command failures in the panel.
    */
   async function action(run: () => Promise<unknown>) {
+    if (requesting.current) return;
     requesting.current = true;
     setRequest(true);
     setError(null);
@@ -134,6 +141,54 @@ export default function UpdatePanel({
       };
   // A cancelled download was the user's own choice; a failure stays until dismissed.
   const failureKey = `${job?.attempt ?? ""}:${job?.version ?? ""}:${job?.error ?? ""}`;
+  if (shortcut)
+    return (
+      <div className="sidebar-update">
+        <button
+          className="secondary"
+          title={de ? "Update prüfen" : "Check for updates"}
+          aria-label={
+            request || running
+              ? de
+                ? "Update wird geprüft…"
+                : "Checking for updates…"
+              : de
+                ? "Update prüfen"
+                : "Check for updates"
+          }
+          disabled={request || running}
+          onClick={() => void action(api.checkForUpdate!)}
+        >
+          <RefreshCw
+            size={16}
+            className={request || running ? "spinning" : undefined}
+          />
+          <span className="sidebar-update-label">
+            {request || running
+              ? de
+                ? "Update wird geprüft…"
+                : "Checking for updates…"
+              : de
+                ? "Update prüfen"
+                : "Check for updates"}
+          </span>
+        </button>
+        {job?.status === "current" && (
+          <p role="status">{de ? "App ist aktuell." : "App is up to date."}</p>
+        )}
+        {(job?.status === "available" || job?.status === "ready") && (
+          <p role="status">
+            {de ? "Update verfügbar." : "Update available."}{" "}
+            {onOpenSettings && (
+              <button className="text-button" onClick={onOpenSettings}>
+                {de ? "Update öffnen" : "Open update"}
+              </button>
+            )}
+          </p>
+        )}
+        {(error || job?.error) && <p role="alert">{error ?? job?.error}</p>}
+      </div>
+    );
   if (
     footer &&
     !running &&

@@ -94,6 +94,11 @@ export default function MeetingLabels({
       ) : (
         <button
           className="text-button"
+          title={
+            de
+              ? "Anzeigenamen ändern; Aufnahme und Transkript bleiben erhalten."
+              : "Change the display name; recording and transcript are kept."
+          }
           disabled={busy}
           onClick={() => {
             setTitle(meeting.title);
@@ -108,6 +113,11 @@ export default function MeetingLabels({
         <button
           className={meta.pinned ? "secondary pinned" : "text-button"}
           aria-pressed={meta.pinned}
+          title={
+            de
+              ? "Oben in der Historie anheften und vor automatischem Aufräumen schützen. Manuelles Löschen bleibt möglich."
+              : "Pin to the top of history and protect from automatic cleanup. Manual deletion is still possible."
+          }
           disabled={busy || Boolean(meeting.metadataError)}
           onClick={() => void save(meta.title, !meta.pinned)}
         >

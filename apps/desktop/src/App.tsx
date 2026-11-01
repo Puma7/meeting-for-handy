@@ -158,6 +158,7 @@ export default function App({ api = desktopApi }: { api?: DesktopApi }) {
     [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null),
     [busy, setBusy] = useState(false),
+    [openingMeeting, setOpeningMeeting] = useState(false),
     // A pending microphone reconnect blocks other controls but never Stop, which cancels it.
     [reconnecting, setReconnecting] = useState(false),
     [isStopping, setIsStopping] = useState(false),
@@ -358,6 +359,7 @@ export default function App({ api = desktopApi }: { api?: DesktopApi }) {
     mainRef = useRef<HTMLElement>(null),
     previousPage = useRef(page),
     selectedRef = useRef<string | null>(null),
+    openingMeetingRef = useRef(false),
     fullMeetingRef = useRef<string | null>(null),
     liveFullRef = useRef<string | null>(null),
     notesSelectionRef = useRef(""),
@@ -1272,20 +1274,28 @@ export default function App({ api = desktopApi }: { api?: DesktopApi }) {
       await openNotesFor(id);
       return;
     }
-    await action(async () => {
-      const epoch = erasureEpoch.current;
-      const item = await api.getMeeting(id);
-      if (epoch !== erasureEpoch.current || erasureBlocked.current.has(id))
-        return;
-      // A search hit applies only to the meeting it opened; other opens clear it.
-      setSearchSource(source ? { meetingId: item.id, file: source } : null);
-      selectedRef.current = item.id;
-      fullMeetingRef.current = item.id;
-      setMeeting(item);
-      setAnalyses([]);
-      setResultId("");
-      setPage(nextPage);
-    });
+    if (openingMeetingRef.current) return;
+    openingMeetingRef.current = true;
+    setOpeningMeeting(true);
+    try {
+      await action(async () => {
+        const epoch = erasureEpoch.current;
+        const item = await api.getMeeting(id);
+        if (epoch !== erasureEpoch.current || erasureBlocked.current.has(id))
+          return;
+        // A search hit applies only to the meeting it opened; other opens clear it.
+        setSearchSource(source ? { meetingId: item.id, file: source } : null);
+        selectedRef.current = item.id;
+        fullMeetingRef.current = item.id;
+        setMeeting(item);
+        setAnalyses([]);
+        setResultId("");
+        setPage(nextPage);
+      });
+    } finally {
+      openingMeetingRef.current = false;
+      setOpeningMeeting(false);
+    }
   }
   /**
    * Discovers finished and resumable analyses independently for one meeting. Generation
@@ -1878,6 +1888,14 @@ export default function App({ api = desktopApi }: { api?: DesktopApi }) {
         navigate={navigate}
         setTheme={setTheme}
         setLocale={setLocale}
+        updateAction={
+          <UpdatePanel
+            api={api}
+            locale={locale}
+            shortcut
+            onOpenSettings={() => void navigate("settings")}
+          />
+        }
         recordingStatus={
           recording && app?.activeMeeting ? (
             <RecordingStatus
@@ -1923,20 +1941,25 @@ export default function App({ api = desktopApi }: { api?: DesktopApi }) {
         )}
         <header className="page-header">
           <div>
-            <h1 tabIndex={-1}>
+            <h1 tabIndex={-1} title={page === "notes" ? t.draft : undefined}>
               {page === "detail" ? t.meetingDetail : t[page]}
             </h1>
-            <p className={page === "meeting" ? "sr-only" : undefined}>
-              {page === "meeting"
-                ? t.preserve
-                : page === "notes"
-                  ? t.draft
+            {page !== "notes" && (
+              <p className={page === "meeting" ? "sr-only" : undefined}>
+                {page === "meeting"
+                  ? t.preserve
                   : page === "history" || page === "detail"
                     ? t.historyHelp
                     : t.compatibility}
-            </p>
+              </p>
+            )}
           </div>
         </header>
+        {openingMeeting && (
+          <p role="status">
+            {locale === "de" ? "Meeting wird geöffnet…" : "Opening meeting…"}
+          </p>
+        )}
         {(page === "meeting"
           ? liveMeeting
           : page === "detail"
@@ -2428,8 +2451,7 @@ export default function App({ api = desktopApi }: { api?: DesktopApi }) {
             className="pending-analyses"
             aria-label={t.unfinishedAnalyses}
           >
-            <h2>{t.unfinishedAnalyses}</h2>
-            <p>{t.resumeHelp}</p>
+            <h2 title={t.resumeHelp}>{t.unfinishedAnalyses}</h2>
             <div className="pending-analyses-list">
               {pendingAnalyses.map((run) => (
                 <div className="pending-analysis-row" key={run.id}>

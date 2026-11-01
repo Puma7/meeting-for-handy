@@ -63,6 +63,39 @@ function state(active: Meeting | null = null): AppState {
  * Creates mocked desktop services with capture rejected by default. Tests override only
  * the IPC behavior under examination; no device, model or native dialog is opened.
  */
+it("checks for updates from the sidebar without leaving the current page", async () => {
+  const api = fakeApi();
+  api.checkForUpdate = vi.fn().mockResolvedValue(undefined);
+  render(<App api={api} />);
+  const check = await screen.findByRole("button", { name: "Update prüfen" });
+  expect(check.closest("aside")).toBeTruthy();
+  await userEvent.click(check);
+  await waitFor(() => expect(api.checkForUpdate).toHaveBeenCalledTimes(1));
+  expect(
+    screen.getByRole("heading", { level: 1, name: "Meeting" }),
+  ).toBeTruthy();
+});
+
+it("acknowledges a slow history open and does not submit it twice", async () => {
+  const api = fakeApi();
+  let finish!: (item: Meeting) => void;
+  api.getMeeting = vi.fn(
+    () =>
+      new Promise<Meeting>((resolve) => {
+        finish = resolve;
+      }),
+  );
+  render(<App api={api} />);
+  await screen.findByRole("button", { name: "Historie" });
+  await userEvent.click(screen.getByRole("button", { name: "Historie" }));
+  const open = await screen.findByRole("button", { name: "Öffnen" });
+  fireEvent.click(open);
+  fireEvent.click(open);
+  expect(api.getMeeting).toHaveBeenCalledTimes(1);
+  expect(screen.getByText("Meeting wird geöffnet…")).toBeTruthy();
+  await act(async () => finish(meeting));
+});
+
 function fakeApi(active: Meeting | null = null): DesktopApi {
   return {
     ...testServices(),

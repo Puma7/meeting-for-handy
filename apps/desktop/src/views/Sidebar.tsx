@@ -3,7 +3,6 @@ import {
   FolderClock,
   Moon,
   Settings,
-  ShieldCheck,
   Sparkles,
   Sun,
 } from "lucide-react";
@@ -22,6 +21,7 @@ type Props = {
   setLocale: (locale: Locale) => void;
   /** Recording health, shown on every page while a recording runs. */
   recordingStatus?: ReactNode;
+  updateAction?: ReactNode;
 };
 /**
  * Renders page navigation and locale/theme controls; the parent retains ownership of
@@ -37,6 +37,7 @@ export default function Sidebar({
   setTheme,
   setLocale,
   recordingStatus,
+  updateAction,
 }: Props) {
   const dark =
     theme === "dark" ||
@@ -82,10 +83,7 @@ export default function Sidebar({
       </nav>
       <div className="sidebar-bottom">
         {recordingStatus}
-        <div className="privacy-mark">
-          <ShieldCheck size={17} />
-          <span>{t.companion}</span>
-        </div>
+        {updateAction}
         <div className="appearance-row">
           <button
             className="icon-button"

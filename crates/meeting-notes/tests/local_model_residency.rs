@@ -710,9 +710,20 @@ fn failure_keeps_warm_reservation_for_retry_and_rejects_truncated_native_answers
     assert!(generate(&client)
         .unwrap_err()
         .to_string()
-        .contains("nicht vollständig"));
+        .contains("Antwortlimit"));
     drop(client);
-    assert_eq!(server.seen().len(), 3);
+    assert_eq!(server.seen().len(), 4);
+    let limits: Vec<_> = server
+        .seen()
+        .iter()
+        .filter(|(p, _)| p == "/api/chat")
+        .map(|(_, body)| body["options"]["num_predict"].as_u64().unwrap())
+        .collect();
+    assert_eq!(
+        limits,
+        vec![2048, 4096],
+        "Only one bounded output retry; the same warm reservation stays owned"
+    );
     failed.store(false, Ordering::Release);
     let client = TextClient::new(&conn)
         .unwrap()

@@ -189,6 +189,28 @@ label {
   margin-top: auto;
   padding: 28px 8px 0;
 }
+.sidebar-update > button {
+  width: 100%;
+  justify-content: flex-start;
+}
+.sidebar-update p {
+  font-size: 12px;
+  margin: 6px 0;
+  overflow-wrap: anywhere;
+}
+@media (max-width: 740px) {
+  .sidebar-update > button {
+    justify-content: center;
+    padding: 8px;
+  }
+  .sidebar-update-label {
+    display: none;
+  }
+  .sidebar-update p {
+    font-size: 10px;
+    line-height: 1.3;
+  }
+}
 .privacy-mark {
   display: flex;
   align-items: flex-start;

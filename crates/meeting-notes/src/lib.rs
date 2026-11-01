@@ -31,6 +31,9 @@ pub use validation::{validate_answer, validate_template, MAX_ITEMS_PER_ANSWER};
 pub const PROMPT_VERSION: &str = "handymeeting-rust-notes-3";
 
 #[cfg(test)]
+mod request_budget_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use std::io::{Read, Write};

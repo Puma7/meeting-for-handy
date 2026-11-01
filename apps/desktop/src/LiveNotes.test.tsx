@@ -137,6 +137,34 @@ it("exports the incomplete overview coverage instead of presenting a newer windo
   expect(text).toContain("Zweiter Punkt");
 });
 
+it("acknowledges a manual refresh immediately and queues it only once while IPC is pending", async () => {
+  let finish!: (value: boolean) => void;
+  const refresh = vi.fn(
+    () =>
+      new Promise<boolean>((resolve) => {
+        finish = resolve;
+      }),
+  );
+  setup({
+    getLiveNotes: vi
+      .fn()
+      .mockResolvedValue(status({ status: "waiting", running: true })),
+    startLiveNotes: vi.fn(),
+    refreshLiveNotes: refresh,
+  });
+  const button = await screen.findByRole("button", {
+    name: "Jetzt aktualisieren",
+  });
+  fireEvent.click(button);
+  fireEvent.click(button);
+  expect(refresh).toHaveBeenCalledTimes(1);
+  expect(button.hasAttribute("disabled")).toBe(true);
+  expect(
+    screen.getByRole("button", { name: "Aktualisierung angefordert…" }),
+  ).toBeTruthy();
+  await act(async () => finish(true));
+});
+
 function setup(
   api: Partial<DesktopApi>,
   props: Partial<Parameters<typeof LiveNotesPanel>[0]> = {},

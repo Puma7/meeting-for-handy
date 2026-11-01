@@ -32,6 +32,52 @@ impl reqwest::dns::Resolve for NoDns {
     }
 }
 
+/// Only an explicit provider context rejection or a complete length-limited envelope
+/// permits a smaller text batch. Other HTTP errors never trigger speculative retries.
+#[derive(Debug)]
+pub(crate) enum BudgetError {
+    Context,
+    Output,
+}
+impl std::fmt::Display for BudgetError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::Context => "Der Text passt nicht in den Modellkontext. Kleinere Abschnitte oder mehr Kontext im lokalen Dienst verwenden; gesicherte Ergebnisse bleiben erhalten.",
+            Self::Output => "Das Modell hat sein Antwortlimit erreicht. Die unvollständige Antwort wurde nicht übernommen; gesicherte Ergebnisse bleiben erhalten.",
+        })
+    }
+}
+impl std::error::Error for BudgetError {}
+
+pub(crate) fn is_budget_error(error: &anyhow::Error) -> bool {
+    error.downcast_ref::<BudgetError>().is_some()
+}
+
+/// Inspect a bounded JSON error only for known context-limit forms. Free-form server
+/// bodies, credentials and model content are never copied into errors or diagnostics.
+fn context_limit(bytes: &[u8]) -> bool {
+    let Ok(value) = serde_json::from_slice::<serde_json::Value>(bytes) else {
+        return false;
+    };
+    let error = &value["error"];
+    let code = error["code"]
+        .as_str()
+        .or_else(|| error["type"].as_str())
+        .unwrap_or("");
+    if matches!(code, "context_length_exceeded" | "context_window_exceeded") {
+        return true;
+    }
+    let message = error["message"]
+        .as_str()
+        .or_else(|| error.as_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    message.contains("context size has been exceeded")
+        || message.contains("context length exceeded")
+        || message.contains("exceeds the available context size")
+        || message.contains("maximum context length")
+}
+
 pub struct TextClient {
     diagnostic: RefCell<crate::diagnostics::RequestDiagnostic>,
     client: Client,
@@ -221,11 +267,24 @@ impl TextClient {
                     diagnostic.result = crate::diagnostics::RequestResult::Http;
                 }
             }
-            ensure!(
-                response.status().is_success(),
-                "KI-Dienst meldet HTTP {}. Es wird kein anderer Anbieter verwendet.",
-                response.status().as_u16()
-            );
+            if !response.status().is_success() {
+                let status = response.status().as_u16();
+                if self.local && matches!(status, 400 | 413) && path == "chat/completions" {
+                    let mut error_bytes = Vec::new();
+                    while let Some(chunk) = await_cancellable(response.chunk(), control).await? {
+                        if error_bytes.len() + chunk.len() > 16_384 {
+                            break;
+                        }
+                        error_bytes.extend_from_slice(&chunk);
+                    }
+                    if context_limit(&error_bytes) {
+                        self.diagnostic.borrow_mut().result =
+                            crate::diagnostics::RequestResult::ContextLimit;
+                        return Err(BudgetError::Context.into());
+                    }
+                }
+                bail!("KI-Dienst meldet HTTP {status}. Es wird kein anderer Anbieter verwendet.");
+            }
             ensure!(
                 response.content_length().is_none_or(|n| n <= 2_000_000),
                 "KI-Antwort überschreitet die erlaubte Größe."
@@ -290,6 +349,18 @@ impl TextClient {
         step: &Step,
         control: &AnalysisControl,
     ) -> Result<String> {
+        self.reset_diagnostic();
+        self.generate_batch(sources, step, control, 0)
+    }
+
+    /// At most four bisections of the same original batch; no unbounded retry tree.
+    fn generate_batch(
+        &self,
+        sources: &[Source],
+        step: &Step,
+        control: &AnalysisControl,
+        depth: u8,
+    ) -> Result<String> {
         control.check()?;
         let extra = match step.kind {
             Kind::Decisions => "Extrahiere ausschließlich ausdrücklich getroffene Entscheidungen: eine klar beschlossene Auswahl oder Änderung. Das Originalzitat muss selbst eine ausdrückliche Entscheidungsformulierung enthalten. Aufgabenübernahmen gehören in den Aufgabenbereich und sind für sich keine Entscheidung. Die Beschreibung eines bestehenden oder fortbestehenden Zustands ist keine Entscheidung. Beispiel: 'Wir entscheiden uns für Option B' ist eine Entscheidung; 'Ich schreibe den Bericht' ist eine Aufgabe; 'Die Dateien liegen lokal' und 'Die Audiodateien bleiben lokal' sind Zustandsbeschreibungen, keine Beschlüsse. Formuliere Zustandsbeschreibungen niemals als 'Es wurde entschieden' um. Lasse solche Einträge weg, selbst wenn die Aussage wichtig ist. owner und due bleiben null.",
@@ -297,7 +368,7 @@ impl TextClient {
             _ => "owner und due bleiben null.",
         };
         let schema = serde_json::json!({"type":"object","additionalProperties":false,"required":["items"],"properties":{"items":item_list_schema()}});
-        self.chat_json(
+        let result = self.chat_json(
             &format!(
                 "{INSTRUCTION}\n{extra}\nAnalyseauftrag als JSON-Zeichenfolge: {}",
                 serde_json::to_string(&step.prompt)?
@@ -307,7 +378,36 @@ impl TextClient {
             schema,
             2048,
             control,
-        )
+        );
+        if self.local
+            && depth < 4
+            && sources.len() > 1
+            && result.as_ref().is_err_and(is_budget_error)
+        {
+            // Keep the saved snapshot and original checkpoint boundary. No partial parent
+            // is confirmed; retries use the same sources, prompt, provider and cancellation.
+            let middle = sources.len() / 2;
+            let mut left: crate::models::Answer = serde_json::from_str(&self.generate_batch(
+                &sources[..middle],
+                step,
+                control,
+                depth + 1,
+            )?)?;
+            let right: crate::models::Answer = serde_json::from_str(&self.generate_batch(
+                &sources[middle..],
+                step,
+                control,
+                depth + 1,
+            )?)?;
+            left.items.extend(right.items);
+            let joined = serde_json::to_string(&left)?;
+            ensure!(
+                joined.len() <= 2_000_000,
+                "KI-Antwort überschreitet die erlaubte Größe."
+            );
+            return Ok(joined);
+        }
+        result
     }
 
     /// Sends one text-only chat request that must answer with JSON matching `schema` and
@@ -322,17 +422,68 @@ impl TextClient {
         control: &AnalysisControl,
     ) -> Result<String> {
         let started = Instant::now();
-        *self.diagnostic.borrow_mut() = crate::diagnostics::RequestDiagnostic {
-            output_limit: max_tokens,
-            ..Default::default()
-        };
-        let result = self.chat_json_inner(system, user, schema_name, schema, max_tokens, control);
+        let previous_elapsed = self.diagnostic.borrow().elapsed_ms;
+        self.next_diagnostic(max_tokens);
+        let mut result = self.chat_json_inner(
+            system,
+            user,
+            schema_name,
+            schema.clone(),
+            max_tokens,
+            control,
+        );
+        if self.local
+            && max_tokens < 4096
+            && matches!(
+                result
+                    .as_ref()
+                    .err()
+                    .and_then(|e| e.downcast_ref::<BudgetError>()),
+                Some(BudgetError::Output)
+            )
+        {
+            match control.check() {
+                Err(error) => result = Err(error),
+                Ok(()) => {
+                    self.next_diagnostic(4096);
+                    // One bounded retry of the identical request, only with more output space.
+                    // A truncated answer never reaches validation or a durable checkpoint.
+                    result = self.chat_json_inner(system, user, schema_name, schema, 4096, control);
+                }
+            }
+        }
         let mut diagnostic = self.diagnostic.borrow_mut();
-        diagnostic.elapsed_ms = started.elapsed().as_millis().min(u128::from(u64::MAX)) as u64;
+        diagnostic.elapsed_ms = previous_elapsed
+            .saturating_add(started.elapsed().as_millis().min(u128::from(u64::MAX)) as u64);
         if result.as_ref().is_err_and(crate::is_cancelled) {
             diagnostic.result = crate::diagnostics::RequestResult::Cancelled;
         }
         result
+    }
+
+    /// Each logical generation starts its own bounded scalar history. Preserve the first
+    /// failure and the seven most recent attempts; explicitly count anything omitted.
+    pub(crate) fn reset_diagnostic(&self) {
+        *self.diagnostic.borrow_mut() = Default::default();
+    }
+    fn next_diagnostic(&self, output_limit: u32) {
+        let previous = self.diagnostic.borrow().clone();
+        let mut history = previous.previous_attempts.clone();
+        let mut omitted = previous.omitted_attempts;
+        if previous.output_limit > 0 {
+            history.push(previous.into());
+        }
+        if history.len() > 8 {
+            let count = history.len() - 8;
+            history.drain(1..1 + count);
+            omitted = omitted.saturating_add(count as u32);
+        }
+        *self.diagnostic.borrow_mut() = crate::diagnostics::RequestDiagnostic {
+            output_limit,
+            previous_attempts: history,
+            omitted_attempts: omitted,
+            ..Default::default()
+        };
     }
 
     /// Returns scalar request diagnostics, never transcript content or bearer credentials.
@@ -424,6 +575,9 @@ impl TextClient {
             } else {
                 RequestResult::Incomplete
             };
+        }
+        if choice["finish_reason"] == "length" {
+            return Err(BudgetError::Output.into());
         }
         ensure!(
             choice["finish_reason"] == "stop",

@@ -206,10 +206,12 @@ export default function LiveNotesPanel({
   const [loaded, setStatus] = useState<LiveNotesStatus | null>(null),
     [error, setError] = useState<string | null>(null),
     [busy, setBusy] = useState(false),
+    [refreshPending, setRefreshPending] = useState(false),
     [cloudConsent, setCloudConsent] = useState(false),
     [setupOpen, setSetupOpen] = useState(false),
     [copied, setCopied] = useState(false);
   const sequence = useRef(0),
+    refreshing = useRef(false),
     mounted = useRef(true),
     // Counts meeting and connection changes; an answer to a call made before a change is
     // ignored, so a late answer for one meeting never shows up under another.
@@ -237,6 +239,8 @@ export default function LiveNotesPanel({
     setStatus(null);
     setError(null);
     setBusy(false);
+    setRefreshPending(false);
+    refreshing.current = false;
   }, [meetingId, connection.mode, connection.endpoint]);
   // Whether the answer to a call made in `call` may still change what this panel shows.
   const current = useCallback(
@@ -369,12 +373,21 @@ export default function LiveNotesPanel({
   }
 
   async function refresh() {
+    if (refreshing.current || !api.refreshLiveNotes) return;
     const call = generation.current;
+    refreshing.current = true;
+    setRefreshPending(true);
+    setError(null);
     try {
-      await api.refreshLiveNotes?.();
+      await api.refreshLiveNotes();
       await poll();
     } catch (e) {
       if (current(call)) setError(errorMessage(e));
+    } finally {
+      if (current(call)) {
+        refreshing.current = false;
+        setRefreshPending(false);
+      }
     }
   }
 
@@ -627,11 +640,26 @@ export default function LiveNotesPanel({
             </button>
             <button
               className="secondary"
-              disabled={busy || status?.status === "updating"}
+              disabled={
+                busy ||
+                refreshPending ||
+                status?.refreshRequested ||
+                status?.status === "updating"
+              }
               onClick={() => void refresh()}
             >
               <RefreshCw size={14} />
-              {de ? "Jetzt aktualisieren" : "Update now"}
+              {refreshPending || status?.refreshRequested
+                ? de
+                  ? "Aktualisierung angefordert…"
+                  : "Update requested…"
+                : status?.status === "updating"
+                  ? de
+                    ? "Wird aktualisiert…"
+                    : "Updating…"
+                  : de
+                    ? "Jetzt aktualisieren"
+                    : "Update now"}
             </button>
           </>
         ) : (
@@ -701,37 +729,44 @@ export default function LiveNotesPanel({
           {error ?? status?.error}
         </p>
       )}
-      {view?.lastRequest && view.lastRequest.request.result !== "stored" && (
-        <p className="notice warning" role="status">
-          {de
-            ? "Der letzte Modellversuch wurde nicht gespeichert: "
-            : "The last model attempt was not saved: "}
-          {view.lastRequest.request.result === "incomplete"
-            ? de
-              ? "Antwort unvollständig. "
-              : "Incomplete response. "
-            : view.lastRequest.request.result === "persistence"
+      {view?.lastRequest &&
+        !error &&
+        !status?.error &&
+        view.lastRequest.request.result !== "stored" && (
+          <p className="notice warning" role="status">
+            {de
+              ? "Der letzte Modellversuch wurde nicht gespeichert: "
+              : "The last model attempt was not saved: "}
+            {view.lastRequest.request.result === "contextLimit"
               ? de
-                ? "Ergebnis konnte nicht gespeichert werden. "
-                : "Result could not be saved. "
-              : view.lastRequest.request.result === "validation"
+                ? "Modellkontext zu klein. "
+                : "Model context is too small. "
+              : view.lastRequest.request.result === "incomplete"
                 ? de
-                  ? "Antwort oder Quellenprüfung fehlgeschlagen. "
-                  : "Response or evidence validation failed. "
-                : view.lastRequest.request.result === "cancelled"
+                  ? "Antwort unvollständig. "
+                  : "Incomplete response. "
+                : view.lastRequest.request.result === "persistence"
                   ? de
-                    ? "Abgebrochen. "
-                    : "Cancelled. "
-                  : de
-                    ? "Verbindung oder Dienstantwort fehlgeschlagen. "
-                    : "Connection or service response failed. "}
-          {view.lastRequest.request.httpStatus &&
-            `HTTP ${view.lastRequest.request.httpStatus}. `}
-          {de
-            ? "Vorhandene Einzelergebnisse und Kurzfassungen bleiben erhalten."
-            : "Existing notes and overviews are retained."}
-        </p>
-      )}
+                    ? "Ergebnis konnte nicht gespeichert werden. "
+                    : "Result could not be saved. "
+                  : view.lastRequest.request.result === "validation"
+                    ? de
+                      ? "Antwort oder Quellenprüfung fehlgeschlagen. "
+                      : "Response or evidence validation failed. "
+                    : view.lastRequest.request.result === "cancelled"
+                      ? de
+                        ? "Abgebrochen. "
+                        : "Cancelled. "
+                      : de
+                        ? "Verbindung oder Dienstantwort fehlgeschlagen. "
+                        : "Connection or service response failed. "}
+            {view.lastRequest.request.httpStatus &&
+              `HTTP ${view.lastRequest.request.httpStatus}. `}
+            {de
+              ? "Vorhandene Einzelergebnisse und Kurzfassungen bleiben erhalten."
+              : "Existing notes and overviews are retained."}
+          </p>
+        )}
       {view && view.damagedRuns > 0 && (
         <p className="notice warning" role="status">
           {de
