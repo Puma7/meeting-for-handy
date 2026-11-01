@@ -139,6 +139,18 @@ export default function UpdatePanel({
         failed: "Update failed",
         cancelled: "Download cancelled",
       };
+  const activityLabel =
+    job?.status === "downloading"
+      ? labels.downloading
+      : de
+        ? "Update wird geprüft…"
+        : "Checking for updates…";
+  const shortcutLabel =
+    request || running
+      ? activityLabel
+      : de
+        ? "Update prüfen"
+        : "Check for updates";
   // A cancelled download was the user's own choice; a failure stays until dismissed.
   const failureKey = `${job?.attempt ?? ""}:${job?.version ?? ""}:${job?.error ?? ""}`;
   if (shortcut)
@@ -146,16 +158,8 @@ export default function UpdatePanel({
       <div className="sidebar-update">
         <button
           className="secondary"
-          title={de ? "Update prüfen" : "Check for updates"}
-          aria-label={
-            request || running
-              ? de
-                ? "Update wird geprüft…"
-                : "Checking for updates…"
-              : de
-                ? "Update prüfen"
-                : "Check for updates"
-          }
+          title={shortcutLabel}
+          aria-label={shortcutLabel}
           disabled={request || running}
           onClick={() => void action(api.checkForUpdate!)}
         >
@@ -163,22 +167,10 @@ export default function UpdatePanel({
             size={16}
             className={request || running ? "spinning" : undefined}
           />
-          <span className="sidebar-update-label">
-            {request || running
-              ? de
-                ? "Update wird geprüft…"
-                : "Checking for updates…"
-              : de
-                ? "Update prüfen"
-                : "Check for updates"}
-          </span>
+          <span className="sidebar-update-label">{shortcutLabel}</span>
         </button>
         <span className="sr-only" role="status" aria-live="polite">
-          {request || running
-            ? de
-              ? "Update wird geprüft…"
-              : "Checking for updates…"
-            : ""}
+          {request || running ? activityLabel : ""}
         </span>
         {job?.status === "current" && (
           <p role="status">{de ? "App ist aktuell." : "App is up to date."}</p>

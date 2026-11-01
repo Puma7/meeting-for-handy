@@ -49,7 +49,7 @@ Update-Ansicht. Umbenennen und VIP-Schutz haben erklärende Tooltips.
 - Die vollständige Windows-Rust-Suite umfasst 442 bestandene Tests und zwei
   regulär ignorierte spezielle Einstiege. Formatierung und Workspace-Clippy
   mit `-D warnings` bestehen; Abhängigkeiten bleiben gesperrt.
-- 283 Oberflächenprüfungen, TypeScript und Produktionsbuild bestehen.
+- 285 Oberflächenprüfungen, TypeScript und Produktionsbuild bestehen.
   Synthetische Browserprüfungen mit Edge 156.0.4314.50 bei 1280 und 390 Pixeln
   bestätigen Update-Prüfung, knappe Überschrift, Ladezustand, Tooltips und
   unterdrückte Mehrfachanforderungen ohne horizontalen Seitenüberlauf oder
@@ -86,6 +86,16 @@ ausschließlich aus Dokumentationszeilen. Der ausführbare Modellablauf ist unve
 die oben genannten 442 Rusttests, Clippy und der echte lokale Referenzlauf stammen
 aus dem ursprünglichen Kandidaten und wurden für diese reine Dokumentationsänderung
 nicht erneut ausgeführt. Rustformatierung und Gesamtprüfung sind erneut bestanden.
+
+In der zweiten Reviewrunde wurde außerdem die Ankündigung eines laufenden
+Downloads von einer Update-Prüfung getrennt. Der bestätigte native Downloadstatus
+bestimmt nun dieselbe passende Meldung für Schaltfläche und höfliche Statusregion,
+auch in den Einstellungen bei ausgeblendetem Footer. Zwei zusätzliche Fälle auf
+Deutsch und Englisch scheiterten vorher mit der falschen Prüfmeldung; danach
+bestehen alle 285 UI-Prüfungen, TypeScript, Produktionsbuild und Gesamtprüfung.
+Browserprüfungen verwenden ausschließlich simulierten Downloadfortschritt und
+starten weder Download noch Installation. Native Quellen sind gegenüber der
+vorherigen Reviewkorrektur byteunverändert.
 
 Der Referenzlauf lädt oder entlädt keine Modellinstanz, lädt kein Modell herunter
 und verwendet keine Nutzermeetings. Er belegt keine neue Residenz- oder

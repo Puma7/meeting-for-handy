@@ -192,6 +192,38 @@ it("recovers a full speaker-check archive only through an explicit preserving ac
   expect(check).toHaveBeenCalledTimes(2);
 });
 
+it.each([
+  ["de", "Windows-Installer wird geladen"],
+  ["en", "Downloading the Windows installer"],
+] as const)(
+  "announces a sidebar download distinctly from a check in %s",
+  async (locale, downloading) => {
+    const api = {
+      checkForUpdate: vi.fn(),
+      getUpdateProgress: vi.fn().mockResolvedValue({
+        status: "downloading",
+        version: "9.9.9",
+        releaseUrl: null,
+        receivedBytes: 25,
+        totalBytes: 100,
+        elapsedMs: 1000,
+        error: null,
+      }),
+    } as unknown as DesktopApi;
+    render(<UpdatePanel api={api} locale={locale} shortcut />);
+    const live = screen.getByRole("status");
+    await waitFor(() => expect(live.textContent).toBe(downloading));
+    expect(live.getAttribute("aria-live")).toBe("polite");
+    expect(
+      (screen.getByRole("button", { name: downloading }) as HTMLButtonElement)
+        .disabled,
+    ).toBe(true);
+    expect(api.checkForUpdate).not.toHaveBeenCalled();
+    expect(screen.queryByText("Update wird geprüft…")).toBeNull();
+    expect(screen.queryByText("Checking for updates…")).toBeNull();
+  },
+);
+
 it.each(["recording", "checkingBlocked"] as const)(
   "blocks check-proof archival during %s",
   async (gate) => {
