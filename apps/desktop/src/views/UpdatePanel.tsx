@@ -172,14 +172,24 @@ export default function UpdatePanel({
           </button>
         )}
         <span className="sr-only" role="status" aria-live="polite">
-          {request || running ? activityLabel : ""}
+          {request || running
+            ? activityLabel
+            : job?.status === "ready"
+              ? labels.ready
+              : ""}
         </span>
         {job?.status === "current" && (
           <p role="status">{de ? "App ist aktuell." : "App is up to date."}</p>
         )}
         {(job?.status === "available" || job?.status === "ready") && (
-          <p role="status">
-            {de ? "Update verfügbar." : "Update available."}{" "}
+          <p role={job?.status === "ready" ? undefined : "status"}>
+            {job?.status === "ready"
+              ? de
+                ? "Installer bereit."
+                : "Installer ready."
+              : de
+                ? "Update verfügbar."
+                : "Update available."}{" "}
             {onOpenSettings && (
               <button className="text-button" onClick={onOpenSettings}>
                 {de ? "Update öffnen" : "Open update"}

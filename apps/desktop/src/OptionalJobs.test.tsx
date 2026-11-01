@@ -555,6 +555,71 @@ it("blocks installation while archive maintenance is running", async () => {
   });
   expect((button as HTMLButtonElement).disabled).toBe(true);
 });
+it.each([
+  [
+    "de",
+    "Windows-Installer wird geladen",
+    "Installer vollständig geladen und geprüft",
+    "Installer bereit.",
+    "Update verfügbar.",
+  ],
+  [
+    "en",
+    "Downloading the Windows installer",
+    "Installer downloaded and verified",
+    "Installer ready.",
+    "Update available.",
+  ],
+] as const)(
+  "announces confirmed sidebar download completion once without losing the ready action (%s)",
+  async (locale, downloading, ready, visibleReady, available) => {
+    let status: UpdateProgress["status"] = "available";
+    const api = {
+      checkForUpdate: vi.fn(),
+      downloadUpdate: vi.fn(),
+      installUpdate: vi.fn(),
+      getUpdateProgress: vi.fn(async () => ({
+        status,
+        version: "synthetic",
+        receivedBytes: status === "ready" ? 10 : 1,
+        totalBytes: 10,
+        elapsedMs: 0,
+        error: null,
+      })),
+    } as unknown as DesktopApi;
+    const openSettings = vi.fn();
+    const { container } = render(
+      <UpdatePanel
+        api={api}
+        locale={locale}
+        shortcut
+        onOpenSettings={openSettings}
+      />,
+    );
+    await screen.findByText(available);
+    const live = container.querySelector('[aria-live="polite"]')!;
+    status = "downloading";
+    act(() => requestJobStatusRefresh());
+    await waitFor(() => expect(live.textContent).toBe(downloading));
+    status = "ready";
+    act(() => requestJobStatusRefresh());
+    await waitFor(() => expect(live.textContent).toBe(ready));
+    expect(container.querySelector('[aria-live="polite"]')).toBe(live);
+    expect(screen.getByText(visibleReady, { exact: false })).toBeTruthy();
+    expect(screen.queryByText(available, { exact: false })).toBeNull();
+    expect(screen.getAllByRole("status")).toHaveLength(1);
+    await userEvent.click(
+      screen.getByRole("button", {
+        name: locale === "de" ? "Update öffnen" : "Open update",
+      }),
+    );
+    expect(openSettings).toHaveBeenCalledTimes(1);
+    expect(api.checkForUpdate).not.toHaveBeenCalled();
+    expect(api.downloadUpdate).not.toHaveBeenCalled();
+    expect(api.installUpdate).not.toHaveBeenCalled();
+  },
+);
+
 it.each(["de", "en"] as const)(
   "announces a native update failure once and keeps it dismissed across refresh (%s)",
   async (locale) => {

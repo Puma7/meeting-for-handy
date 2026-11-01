@@ -141,12 +141,14 @@ pub(crate) fn read_checkpoint_batch(
     struct Header {
         split_schema: Option<u32>,
     }
-    let header: Header = serde_json::from_str(json)?;
+    let header: Header =
+        serde_json::from_str(json).context("Gespeicherter Auswertungsabschnitt ist ungültig.")?;
     let Some(version) = header.split_schema else {
         return read_checkpoint(json, sources, kind);
     };
     ensure!(version == 1, "Unbekanntes Speicherformat des geteilten Auswertungsabschnitts; der Arbeitsstand bleibt erhalten.");
-    let checkpoint: SplitCheckpoint = serde_json::from_str(json)?;
+    let checkpoint: SplitCheckpoint = serde_json::from_str(json)
+        .context("Gespeicherter geteilter Auswertungsabschnitt ist ungültig.")?;
     ensure!(
         (2..=1 << MAX_SPLIT_DEPTH).contains(&checkpoint.parts.len()),
         "Ungültige Aufteilung des Auswertungsabschnitts."
@@ -290,5 +292,26 @@ mod tests {
         let mut value = serde_json::to_value(&checked).unwrap();
         value["items"] = json!(vec![value["items"][0].clone(); 21]);
         assert!(read_checkpoint_batch(&value.to_string(), &sources, &Kind::Summary).is_err());
+    }
+
+    #[test]
+    fn malformed_checkpoint_errors_explain_saved_work_without_echoing_private_payloads() {
+        let sources = sources();
+        for text in [
+            "{\"items\":[PRIVATE_SYNTHETIC_PAYLOAD",
+            "{\"splitSchema\":1,\"parts\":\"PRIVATE_SYNTHETIC_PAYLOAD\"}",
+        ] {
+            let error = read_checkpoint_batch(text, &sources, &Kind::Summary).unwrap_err();
+            let displayed = error.to_string();
+            assert!(
+                displayed.contains("Gespeicherter") && displayed.contains("Auswertungsabschnitt"),
+                "{displayed}"
+            );
+            assert!(!displayed.contains("PRIVATE_SYNTHETIC_PAYLOAD"));
+            assert!(
+                error.downcast_ref::<serde_json::Error>().is_some(),
+                "The original strict parse failure must remain the cause"
+            );
+        }
     }
 }

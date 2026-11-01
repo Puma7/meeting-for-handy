@@ -1204,58 +1204,62 @@ fn earlier_prompt_results_stay_listed_read_only_and_damaged_files_are_skipped_un
 
 #[test]
 fn unfinished_run_of_an_earlier_prompt_is_listed_read_only_and_never_resumed() {
-    let root = tempfile::tempdir().unwrap();
-    let server = SyntheticHttp::new(vec![Reply::successful(false), Reply::failed()]);
-    assert!(analyze(
-        root.path(),
-        "synthetic-meeting",
-        sources(),
-        template(),
-        connection(&server.endpoint),
-        None
-    )
-    .is_err());
-    let folder = run_folder(root.path());
-    let current = read_pending_analysis(&folder).unwrap().unwrap();
-    assert!(current.resumable);
-    assert_eq!(current.prompt_version, meeting_notes::PROMPT_VERSION);
-    let snapshot = rewrite(&folder.join("snapshot.json"), |v| {
-        v["promptVersion"] = "handymeeting-rust-notes-1".into();
-        v.as_object_mut().unwrap().remove("resultSchema");
-    });
-    let checkpoint = fs::read(folder.join("step-0000-000000.json")).unwrap();
-    let pending = read_pending_analysis(&folder).unwrap().unwrap();
-    assert!(!pending.resumable);
-    assert_eq!(pending.prompt_version, "handymeeting-rust-notes-1");
-    assert_eq!(pending.confirmed_tasks, 1);
-    let error = read_snapshot(&folder.join("snapshot.json")).unwrap_err();
-    assert!(error.to_string().contains("anderen Promptfassung"));
-    server.queue(Reply::successful(true));
-    assert!(analyze(
-        root.path(),
-        "synthetic-meeting",
-        sources(),
-        template(),
-        connection(&server.endpoint),
-        Some(only_run_id(&folder))
-    )
-    .is_err());
-    assert_eq!(
-        server.requests(),
-        2,
-        "An earlier prompt version must not be continued"
-    );
-    assert!(!folder.join("step-0001-000000.json").exists());
-    assert!(!folder.join("result.json").exists());
-    assert_eq!(fs::read(folder.join("snapshot.json")).unwrap(), snapshot);
-    assert_eq!(
-        fs::read(folder.join("step-0000-000000.json")).unwrap(),
-        checkpoint
-    );
-    // A snapshot from an unknown newer storage format is reported as such, not guessed at.
-    rewrite(&folder.join("snapshot.json"), |v| {
-        v["resultSchema"] = 99.into()
-    });
-    let error = read_pending_analysis(&folder).unwrap_err();
-    assert_eq!(meeting_notes::skip_reason(&error), SkipReason::NewerFormat);
+    for old_prompt in ["handymeeting-rust-notes-1", "handymeeting-rust-notes-3"] {
+        let root = tempfile::tempdir().unwrap();
+        let server = SyntheticHttp::new(vec![Reply::successful(false), Reply::failed()]);
+        assert!(analyze(
+            root.path(),
+            "synthetic-meeting",
+            sources(),
+            template(),
+            connection(&server.endpoint),
+            None
+        )
+        .is_err());
+        let folder = run_folder(root.path());
+        let current = read_pending_analysis(&folder).unwrap().unwrap();
+        assert!(current.resumable);
+        assert_eq!(current.prompt_version, meeting_notes::PROMPT_VERSION);
+        let snapshot = rewrite(&folder.join("snapshot.json"), |v| {
+            v["promptVersion"] = old_prompt.into();
+            if old_prompt == "handymeeting-rust-notes-1" {
+                v.as_object_mut().unwrap().remove("resultSchema");
+            }
+        });
+        let checkpoint = fs::read(folder.join("step-0000-000000.json")).unwrap();
+        let pending = read_pending_analysis(&folder).unwrap().unwrap();
+        assert!(!pending.resumable);
+        assert_eq!(pending.prompt_version, old_prompt);
+        assert_eq!(pending.confirmed_tasks, 1);
+        let error = read_snapshot(&folder.join("snapshot.json")).unwrap_err();
+        assert!(error.to_string().contains("anderen Promptfassung"));
+        server.queue(Reply::successful(true));
+        assert!(analyze(
+            root.path(),
+            "synthetic-meeting",
+            sources(),
+            template(),
+            connection(&server.endpoint),
+            Some(only_run_id(&folder))
+        )
+        .is_err());
+        assert_eq!(
+            server.requests(),
+            2,
+            "An earlier prompt version must not be continued"
+        );
+        assert!(!folder.join("step-0001-000000.json").exists());
+        assert!(!folder.join("result.json").exists());
+        assert_eq!(fs::read(folder.join("snapshot.json")).unwrap(), snapshot);
+        assert_eq!(
+            fs::read(folder.join("step-0000-000000.json")).unwrap(),
+            checkpoint
+        );
+        // A snapshot from an unknown newer storage format is reported as such, not guessed at.
+        rewrite(&folder.join("snapshot.json"), |v| {
+            v["resultSchema"] = 99.into()
+        });
+        let error = read_pending_analysis(&folder).unwrap_err();
+        assert_eq!(meeting_notes::skip_reason(&error), SkipReason::NewerFormat);
+    }
 }

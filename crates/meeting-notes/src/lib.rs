@@ -29,7 +29,7 @@ pub use service::{
 pub use templates::{validate_library, TemplateLibrary, TemplateStore};
 pub use transport::{credential_account, local_json_lines, local_model_ids, TextClient};
 pub use validation::{validate_answer, validate_template, MAX_ITEMS_PER_ANSWER};
-pub const PROMPT_VERSION: &str = "handymeeting-rust-notes-3";
+pub const PROMPT_VERSION: &str = "handymeeting-rust-notes-4";
 
 #[cfg(test)]
 mod request_budget_tests;

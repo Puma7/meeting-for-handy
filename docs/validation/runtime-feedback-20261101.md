@@ -241,3 +241,60 @@ Alle 301 UI-Prüfungen, TypeScript, Produktionsbuild, Formatierung und Gesamtpr�
 bestehen. Eine synthetische Browserprüfung bei 1280 und 390 Pixeln öffnet nur
 den vorhandenen Update-Bereich und weist null neue Updateprüfungen nach.
 Es wurde dafür kein realer Installer heruntergeladen, gestartet oder verändert.
+
+## Fertigmeldung, beschädigte Zwischenstände und wörtliche Zuständigkeit
+
+Die nächste vollständige Runde bestätigte zwei weitere Probleme. Ein fertig
+geladener und geprüfter Installer wird jetzt mit einer eigenen deutschen oder
+englischen Meldung im dauerhaft vorhandenen höflichen Statusbereich angekündigt.
+Der sichtbare Kurztext unterscheidet den fertigen Installer von einer lediglich
+verfügbaren Version. Es entsteht keine zweite automatische Fertigansage; der
+Zugang zur vorhandenen Update-Ansicht bleibt erhalten. Zwei neue Übergangsfälle
+scheiterten vorher; danach bestehen alle 303 UI-Prüfungen sowie TypeScript,
+Produktionsbuild und Formatierung. Die synthetische Edge-Prüfung bei 1280 und
+390 Pixeln bestätigt den Übergang in beiden Sprachen ohne neue Updateprüfung,
+Download oder Installation. Eine tatsächliche Screenreader-Sprachausgabe wird
+damit nicht belegt.
+
+Beschädigte normale oder geteilte Zwischenstände erhalten eine verständliche
+Fehlermeldung zum gespeicherten Auswertungsabschnitt. Die ursprüngliche strenge
+Parserursache bleibt erhalten; Inhalt wird weder ausgegeben noch repariert oder
+gelöscht. Der neue Regressionstest scheiterte vorher an der rohen Parsermeldung
+und prüft danach beide Fehlerwege einschließlich des erhaltenen Ursachenfehlers.
+
+Der erneut ausgeführte echte Modelltest bestand zunächst nicht: Eine ausdrückliche
+Aufgabe wurde mit dem Grund `unverifiedOwnerOrDue` verworfen. Eine zusätzliche
+neue synthetische Diagnoseantwort nannte die zuständige Person, ließ deren Namen
+aber im wörtlichen Beleg weg. Diese neue Antwort ist kein nachträglicher Mitschnitt
+der ursprünglichen Antwort. Die Belegprüfung wies sie korrekt zurück und bleibt
+unverändert. Der Modellauftrag erklärt nun zusätzlich, dass ein nichtleerer
+Zuständigkeits- oder Terminwert selbst im exakt kopierten Zitat stehen muss;
+vorhandene Sprecherpräfixe dürfen dafür nicht weggekürzt und Namen niemals in
+Zitate eingefügt werden. Fehlt der Wert im Zitat, bleibt er unbekannt.
+
+Dieser präzisierte Nachbearbeitungsauftrag hat die eigene Promptfassung
+`handymeeting-rust-notes-4`. Ältere fertige Ergebnisse bleiben lesbar; unfertige
+Arbeiten der Fassungen 1 und 3 werden unverändert als nicht fortsetzbar angezeigt,
+statt mit dem neuen Auftrag vermischt zu werden. Ein tatsächlicher Vorherfall
+zeigte die fehlende Trennung bei beibehaltener Fassung 3. Die Regression prüft
+jetzt beide früheren Fassungen samt bytegleicher Erhaltung und ohne neue Anfrage.
+Live-Promptfassung, Sitzungsformat, Paketversion und Belegregeln bleiben gleich.
+
+Nach der Präzisierung besteht der unveränderte echte Referenzfall mit einer
+Aufgabe, einer Entscheidung und null Aufgaben oder Entscheidungen aus den
+unverbindlichen Aussagen. Drei Live-Fenster haben eine vollständig abgedeckte
+Übersicht; Wiederöffnung ist bytegleich. Laufzeit: 173,5037189 Sekunden mit
+LM Studio 0.4.26.0, dem bereits geladenen ausgewählten Gemma-4-E4B Q4_K_M und
+8192 Kontexttokens auf dem oben genannten Rechner. Parallel liefen eigene
+Windows-Rust-Prüfungen; dies ist kein Leistungs- oder Speicherbenchmark.
+Alle 20 nativen Notizen-Quelldateien wurden vor diesem Lauf eingefroren und
+danach bytegleich geprüft. Der frühere fehlgeschlagene Lauf bleibt erhalten;
+ein einzelner erfolgreicher Modelllauf garantiert keine vollständige oder
+inhaltlich richtige Ausgabe in jedem künftigen Gespräch.
+
+Frisch auf dem finalen nativen Stand bestehen 449 Rust-Workspace/All-Targettests,
+zwei regulär ignorierte spezielle Einstiege, Workspace-Clippy mit `-D warnings`,
+Rustformatierung und die Gesamtprüfung mit 47 PCM-, 35 Notizen-, 28 Vorlagen-
+und acht Agentenprüfungen samt Monitor. Nutzermeetings, Modelldownloads,
+Instanzübernahme und Entladung waren nicht beteiligt. Vollständiger Prüfbericht,
+gesperrte Abhängigkeiten, Aufnahme-/CI-Verifier und Schutzregeln bleiben unverändert.
