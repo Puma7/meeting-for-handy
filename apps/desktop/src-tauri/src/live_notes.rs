@@ -433,6 +433,7 @@ impl LiveNotes {
         &self,
         service: &Arc<Service>,
         meeting_id: &str,
+        run_id: &str,
         context: meeting_notes::workspace::WorkspaceContext,
     ) -> AppResult<bool> {
         validate_id(meeting_id)?;
@@ -457,6 +458,14 @@ impl LiveNotes {
                 .join(saved.run_id.ok_or("Laufkennung fehlt.")?)
                 .join("workspace-v9")
         };
+        if folder
+            .parent()
+            .and_then(|path| path.file_name())
+            .and_then(|name| name.to_str())
+            != Some(run_id)
+        {
+            return Err("Der Auswertungslauf hat gewechselt. Bitte erneut versuchen.".into());
+        }
         let handle = job.and_then(|j| j.workspace_context.clone());
         let mut current = handle
             .as_ref()

@@ -206,7 +206,7 @@ impl LiveRunner {
         control: &AnalysisControl,
     ) -> Result<UpdateOutcome> {
         if let Some(w) = &mut self.workspace {
-            let count = w.update(&self.client, pending, control)?;
+            let count = w.update(&self.client, pending, control, &self.state.run.language)?;
             let revision = w.view().revision as u32;
             return Ok(UpdateOutcome {
                 window: (count > 0).then_some(revision),

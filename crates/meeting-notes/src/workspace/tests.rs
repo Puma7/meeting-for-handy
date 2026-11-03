@@ -334,7 +334,7 @@ fn removed_text_withdraws_active_authority_but_retains_originals_and_manual_ids(
     })
     .unwrap();
     runner
-        .update(&client, &[], &AnalysisControl::default())
+        .update(&client, &[], &AnalysisControl::default(), "de")
         .unwrap();
     assert_eq!(runner.state.entities.len(), 1);
     assert_eq!(runner.state.events.len(), 1);
@@ -425,7 +425,7 @@ fn newly_shared_agenda_replays_original_text_without_duplication_or_a_new_transc
     }];
     let pending = runner.pending(&texts);
     runner
-        .update(&client, &pending, &AnalysisControl::default())
+        .update(&client, &pending, &AnalysisControl::default(), "en")
         .unwrap();
     let mut context = runner.context.lock().unwrap().clone();
     context.agenda.push(Agenda {
@@ -438,13 +438,14 @@ fn newly_shared_agenda_replays_original_text_without_duplication_or_a_new_transc
     assert!(runner.pending(&texts).is_empty());
     assert!(runner.context_dirty());
     runner
-        .update(&client, &[], &AnalysisControl::default())
+        .update(&client, &[], &AnalysisControl::default(), "en")
         .unwrap();
     assert!(!runner.context_dirty());
     assert_eq!(runner.state.processed.len(), 1);
     assert_eq!(runner.state.originals.len(), 1);
     assert_eq!(runner.state.entities[0].status, "open");
     let requests = server.join().unwrap();
+    assert!(requests.iter().all(|input| input["language"] == "en"));
     assert_eq!(
         requests[0]["transcriptSources"],
         requests[2]["transcriptSources"]
@@ -592,7 +593,7 @@ fn invalid_model_answer_gets_one_fully_validated_retry_and_never_a_partial_save(
         }];
         let pending = runner.pending(&texts);
         let control = AnalysisControl::default();
-        let result = runner.update(&client, &pending, &control);
+        let result = runner.update(&client, &pending, &control, "de");
         assert_eq!(control.validation_retries(), 1);
         let phases = server.join().unwrap();
         if always_bad {

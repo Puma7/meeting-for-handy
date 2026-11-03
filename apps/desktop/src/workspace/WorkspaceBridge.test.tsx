@@ -70,7 +70,7 @@ function fixture() {
     running: true,
     intervalMs: 120000,
     updateElapsedMs: 210000,
-    view: { model: "synthetic-test", workspace },
+    view: { runId: "run-current", model: "synthetic-test", workspace },
     workspaceContext: context,
   };
   const adapter = {
@@ -131,6 +131,8 @@ describe("Native workspace boundary", () => {
       `handymeeting.workspace.v1.${f.meeting.id}`,
       JSON.stringify({
         version: 1,
+        nativeContextRunId: "run-other",
+        nativeContextRevision: 7,
         topics: [],
         history: [],
         attachments: [],
@@ -592,3 +594,51 @@ it("gives a manually resized card real space in a crowded column", () => {
       3 * resized.gap,
   ).toBeCloseTo(available);
 });
+
+it.each([false, true])(
+  "uses the configured credential mode for workspace starts (saved=%s)",
+  async (useSavedKey) => {
+    const f = fixture();
+    f.status.running = false;
+    f.status.status = "off";
+    const api = {
+      getLiveNotes: f.adapter.status,
+      startLiveNotes: f.adapter.start,
+      stopLiveNotes: f.adapter.stop,
+      refreshLiveNotes: f.adapter.refresh,
+      setLiveNotesInterval: f.adapter.interval,
+      setWorkspaceContext: vi.fn(),
+      localModelSetup: f.adapter.models,
+    } as unknown as DesktopApi;
+    const { container } = render(
+      <WorkspaceBridge
+        api={api}
+        meeting={f.meeting as unknown as Meeting}
+        endpoint="http://127.0.0.1:1235/v1/"
+        model="synthetic"
+        apiKey="synthetic-fixture-key"
+        useSavedKey={useSavedKey}
+        onBack={() => {}}
+      />,
+    );
+    const shadow = within(
+      container.querySelector(".native-workspace-host")!
+        .shadowRoot as unknown as HTMLElement,
+    );
+    const start = await shadow.findByRole("button", {
+      name: "Lokale Auswertung starten",
+    });
+    await waitFor(() => expect(start.hasAttribute("disabled")).toBe(false));
+    fireEvent.click(start);
+    await waitFor(() =>
+      expect(f.adapter.start).toHaveBeenCalledWith(
+        expect.objectContaining({
+          apiKey: useSavedKey ? "" : "synthetic-fixture-key",
+          useSavedKey,
+          mode: "local",
+          cloudConsent: false,
+        }),
+      ),
+    );
+  },
+);

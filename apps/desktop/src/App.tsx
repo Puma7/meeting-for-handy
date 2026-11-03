@@ -2043,6 +2043,8 @@ export default function App({ api = desktopApi }: { api?: DesktopApi }) {
           }
           endpoint={endpoint}
           model={textModel}
+          apiKey={apiKey}
+          useSavedKey={useSavedKey}
           mode={mode}
           theme={theme}
           onThemeChange={setTheme}

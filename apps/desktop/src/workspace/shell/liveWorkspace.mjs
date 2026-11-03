@@ -89,13 +89,19 @@ export function stableVisibleItems(workspace, kind, query = "") {
 
 // Native shared inputs are authoritative across restarts. Preserve any divergent
 // local draft as a note-history snapshot instead of silently erasing either copy.
-export function restoreSharedContext(local, native) {
-  if (!native || local.nativeContextRevision === native.revision) return local;
+export function restoreSharedContext(local, native, runId) {
+  if (
+    !native ||
+    (local.nativeContextRunId === runId &&
+      local.nativeContextRevision === native.revision)
+  )
+    return local;
   const protocol = native.sharedNotes.map((n) => n.text).join("");
   const divergent = local.notes.protocol && local.notes.protocol !== protocol;
   return {
     ...local,
     nativeContextRevision: native.revision,
+    nativeContextRunId: runId,
     topics: [
       ...native.agenda.map((a) => ({ ...a, shared: true })),
       ...local.topics.filter(

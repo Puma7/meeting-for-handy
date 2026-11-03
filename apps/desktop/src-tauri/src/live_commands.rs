@@ -81,13 +81,14 @@ pub(crate) fn cancel_model_pull(service: State<'_, Arc<Service>>) -> AppResult<b
 pub(crate) async fn set_workspace_context(
     service: State<'_, Arc<Service>>,
     meeting_id: String,
+    run_id: String,
     context: meeting_notes::workspace::WorkspaceContext,
 ) -> AppResult<bool> {
     let service = Arc::clone(&service);
     blocking(move || {
         service
             .live_notes
-            .set_workspace_context(&service, &meeting_id, context)
+            .set_workspace_context(&service, &meeting_id, &run_id, context)
     })
     .await
 }

@@ -536,6 +536,7 @@ export interface DesktopApi {
   getSourceAudio?(id: string, file: string): Promise<ArrayBuffer>;
   setWorkspaceContext?(
     meetingId: string,
+    runId: string,
     context: WorkspaceContext,
   ): Promise<boolean>;
   startLiveNotes?(request: LiveNotesRequest): Promise<LiveNotesStatus>;

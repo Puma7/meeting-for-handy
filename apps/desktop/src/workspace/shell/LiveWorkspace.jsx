@@ -197,6 +197,7 @@ export function LiveWorkspace({
     [panelViews, setPanelViews] = useState({});
   const current = useRef(state),
     context = useRef(null),
+    contextRun = useRef(null),
     contextQueue = useRef(Promise.resolve()),
     polling = useRef(false),
     alive = useRef(true);
@@ -210,36 +211,30 @@ export function LiveWorkspace({
     try {
       const next = await adapter.status(meeting.id);
       if (!alive.current) return;
-      if (next.running && !next.workspaceContext) context.current = null;
+      const runId = next.view?.runId ?? null;
+      const native = runId ? next.workspaceContext : null;
+      const sameRun = runId === contextRun.current;
       if (
-        next.workspaceContext &&
-        context.current &&
-        next.workspaceContext.revision < context.current.revision
+        native &&
+        sameRun &&
+        native.revision < (context.current?.revision ?? 0)
       )
         return;
       setStatus(next);
       if (
         !hydrated.current ||
-        (next.workspaceContext &&
-          context.current &&
-          next.workspaceContext.revision > context.current.revision)
+        (native &&
+          (!sameRun || native.revision > (context.current?.revision ?? -1)))
       ) {
-        const restored = restoreSharedContext(
-          current.current,
-          next.workspaceContext,
-        );
+        const restored = restoreSharedContext(current.current, native, runId);
         current.current = restored;
         setState(restored);
         hydrated.current = true;
         setStorageReady(true);
       }
-      if (
-        next.workspaceContext &&
-        (!context.current ||
-          next.workspaceContext.revision > context.current.revision)
-      )
-        context.current = next.workspaceContext;
-      if (next.workspaceContext) await syncContext();
+      contextRun.current = native ? runId : null;
+      context.current = native ?? null;
+      if (native) await syncContext();
     } catch (e) {
       if (alive.current) setError(String(e));
     } finally {
@@ -247,9 +242,12 @@ export function LiveWorkspace({
     }
   }
   function syncContext(extra) {
+    const runId = contextRun.current;
     const send = async () => {
       if (
         !context.current ||
+        !runId ||
+        runId !== contextRun.current ||
         !alive.current ||
         blocked.current ||
         !hydrated.current
@@ -263,11 +261,13 @@ export function LiveWorkspace({
           : context.current.overrides || [],
       );
       if (sameSharedContext(next, context.current)) return;
-      await adapter.context(next);
+      await adapter.context(next, runId);
+      if (contextRun.current !== runId || !alive.current) return;
       context.current = { ...next, revision: next.revision + 1 };
       const saved = {
         ...current.current,
         nativeContextRevision: context.current.revision,
+        nativeContextRunId: runId,
       };
       current.current = saved;
       setState(saved);
@@ -594,7 +594,7 @@ export function LiveWorkspace({
               }
               onClick={() =>
                 action(async () => {
-                  const next = await adapter.start({
+                  await adapter.start({
                     meetingId: meeting.id,
                     endpoint,
                     model,
@@ -606,8 +606,6 @@ export function LiveWorkspace({
                     language,
                     workspace: sharedWorkspaceContext(state),
                   });
-                  context.current =
-                    next.workspaceContext || sharedWorkspaceContext(state);
                 })
               }
             >

@@ -139,6 +139,7 @@ impl WorkspaceRunner {
         client: &TextClient,
         pending: &[LiveSource],
         control: &AnalysisControl,
+        language: &str,
     ) -> Result<usize> {
         control.begin_workspace_update();
         let context = self
@@ -169,7 +170,7 @@ impl WorkspaceRunner {
         };
         let mut count = live::next_window(input).len();
         for depth in 0..=4 {
-            match self.update_window(client, &input[..count], control, cursor, replay) {
+            match self.update_window(client, &input[..count], control, cursor, replay, language) {
                 Err(error)
                     if crate::transport::is_budget_error(&error) && count > 1 && depth < 4 =>
                 {
@@ -187,6 +188,7 @@ impl WorkspaceRunner {
         control: &AnalysisControl,
         cursor: Option<usize>,
         replay: bool,
+        language: &str,
     ) -> Result<usize> {
         control.check()?;
         let context = self
@@ -314,6 +316,7 @@ impl WorkspaceRunner {
                     selected,
                 );
                 req.purpose = phase.into();
+                req.language = language.into();
                 let input = serde_json::to_string(&req)?;
                 if input.chars().count() > MAX_REQUEST_CHARS {
                     if ["facts", "reconcile"].contains(&phase) && seeds {

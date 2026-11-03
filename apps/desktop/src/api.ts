@@ -31,8 +31,8 @@ function jobInvoke<T>(
 export const desktopApi: DesktopApi = {
   getSourceAudio: (id, file) =>
     desktopInvoke<ArrayBuffer>("get_source_audio", { id, file }),
-  setWorkspaceContext: (meetingId, context) =>
-    jobInvoke("set_workspace_context", { meetingId, context }),
+  setWorkspaceContext: (meetingId, runId, context) =>
+    jobInvoke("set_workspace_context", { meetingId, runId, context }),
   previewMeetingErasure: (meetingId) =>
     jobInvoke("preview_meeting_erasure", { meetingId }),
   getMeetingErasurePreview: (jobId) =>

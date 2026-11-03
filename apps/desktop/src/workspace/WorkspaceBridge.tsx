@@ -60,6 +60,8 @@ export default function WorkspaceBridge({
   endpoint,
   selectedFile,
   model,
+  apiKey = "",
+  useSavedKey = false,
   ...presentation
 }: {
   api: DesktopApi;
@@ -68,6 +70,8 @@ export default function WorkspaceBridge({
   endpoint: string;
   selectedFile?: string | null;
   model: string;
+  apiKey?: string;
+  useSavedKey?: boolean;
   mode?: "local" | "cloud";
   theme?: "light" | "dark" | "system";
   onThemeChange?: (theme: "light" | "dark") => void;
@@ -103,18 +107,23 @@ export default function WorkspaceBridge({
       status: (id: string) => api.getLiveNotes!(id, true),
       start: (
         request: Parameters<NonNullable<DesktopApi["startLiveNotes"]>>[0],
-      ) => api.startLiveNotes!(request),
+      ) =>
+        api.startLiveNotes!({
+          ...request,
+          apiKey: useSavedKey ? "" : apiKey,
+          useSavedKey,
+        }),
       stop: () => api.stopLiveNotes!(),
       refresh: () => api.refreshLiveNotes!(),
       interval: (ms: number) => api.setLiveNotesInterval!(ms),
-      context: (context: WorkspaceContext) =>
-        api.setWorkspaceContext!(meeting.id, context),
+      context: (context: WorkspaceContext, runId: string) =>
+        api.setWorkspaceContext!(meeting.id, runId, context),
       models: () => api.localModelSetup!(),
       sourceAudio: api.getSourceAudio
         ? (file: string) => api.getSourceAudio!(meeting.id, file)
         : undefined,
     }),
-    [api, meeting.id],
+    [api, meeting.id, apiKey, useSavedKey],
   );
   if (
     !api.startLiveNotes ||
