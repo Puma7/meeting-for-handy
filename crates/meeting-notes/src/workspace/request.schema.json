@@ -1,0 +1,353 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "contractVersion",
+    "requestId",
+    "language",
+    "purpose",
+    "window",
+    "transcriptSources",
+    "state",
+    "humanContext",
+    "overviewRefs",
+    "outputBudget"
+  ],
+  "properties": {
+    "contractVersion": {
+      "enum": [
+        "meeting-update-1"
+      ],
+      "type": "string"
+    },
+    "requestId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 96,
+      "pattern": "^r_[A-Za-z0-9_]+$"
+    },
+    "language": {
+      "enum": [
+        "de",
+        "en"
+      ],
+      "type": "string"
+    },
+    "purpose": {
+      "enum": [
+        "live_update",
+        "tasks",
+        "facts",
+        "reconcile"
+      ],
+      "type": "string"
+    },
+    "window": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "sourceRevision",
+        "startMs",
+        "endMs",
+        "requiredSourceIds",
+        "contextSourceIds"
+      ],
+      "properties": {
+        "sourceRevision": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 96,
+          "pattern": "^tx_[A-Za-z0-9_]+$"
+        },
+        "startMs": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "endMs": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "requiredSourceIds": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 128,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 96,
+            "pattern": "^s_[A-Za-z0-9_]+$"
+          },
+          "uniqueItems": true
+        },
+        "contextSourceIds": {
+          "type": "array",
+          "minItems": 0,
+          "maxItems": 128,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 96,
+            "pattern": "^s_[A-Za-z0-9_]+$"
+          },
+          "uniqueItems": true
+        }
+      }
+    },
+    "transcriptSources": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 128,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "track",
+          "startMs",
+          "endMs",
+          "text"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 96,
+            "pattern": "^s_[A-Za-z0-9_]+$"
+          },
+          "track": {
+            "enum": [
+              "system",
+              "microphone"
+            ],
+            "type": "string"
+          },
+          "startMs": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "endMs": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "text": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1600
+          }
+        }
+      }
+    },
+    "state": {
+      "type": "array",
+      "minItems": 0,
+      "maxItems": 80,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "revision",
+          "kind",
+          "text",
+          "status",
+          "attention",
+          "owner",
+          "due",
+          "evidence",
+          "humanLocked"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 96,
+            "pattern": "^e_[A-Za-z0-9_]+$"
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "kind": {
+            "enum": [
+              "fact",
+              "decision",
+              "task",
+              "agenda",
+              "impulse"
+            ],
+            "type": "string"
+          },
+          "text": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1000
+          },
+          "status": {
+            "enum": [
+              "recorded",
+              "open",
+              "touched",
+              "discussed",
+              "completed",
+              "withdrawn",
+              "unclear"
+            ],
+            "type": "string"
+          },
+          "attention": {
+            "enum": [
+              "normal",
+              "current",
+              "clarification"
+            ],
+            "type": "string"
+          },
+          "owner": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "minLength": 1,
+            "maxLength": 120
+          },
+          "due": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "minLength": 1,
+            "maxLength": 120
+          },
+          "evidence": {
+            "type": "array",
+            "minItems": 0,
+            "maxItems": 6,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "sourceId",
+                "quote"
+              ],
+              "properties": {
+                "sourceId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 96,
+                  "pattern": "^s_[A-Za-z0-9_]+$"
+                },
+                "quote": {
+                  "type": "string",
+                  "minLength": 8,
+                  "maxLength": 600
+                }
+              }
+            }
+          },
+          "humanLocked": {
+            "type": "boolean"
+          }
+        }
+      }
+    },
+    "humanContext": {
+      "type": "array",
+      "minItems": 0,
+      "maxItems": 40,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "revision",
+          "kind",
+          "text",
+          "anchorSourceId",
+          "markerType"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 96,
+            "pattern": "^h_[A-Za-z0-9_]+$"
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "kind": {
+            "enum": [
+              "agenda",
+              "shared_note",
+              "marker"
+            ],
+            "type": "string"
+          },
+          "text": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1600
+          },
+          "anchorSourceId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "minLength": 1,
+            "maxLength": 96,
+            "pattern": "^s_[A-Za-z0-9_]+$"
+          },
+          "markerType": {
+            "enum": [
+              "important",
+              "task",
+              "question",
+              "decision",
+              null
+            ],
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      }
+    },
+    "overviewRefs": {
+      "type": "array",
+      "minItems": 0,
+      "maxItems": 8,
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 96,
+        "pattern": "^e_[A-Za-z0-9_]+$"
+      },
+      "uniqueItems": true
+    },
+    "outputBudget": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "maxChanges",
+        "maxOverviewRefs"
+      ],
+      "properties": {
+        "maxChanges": {
+          "enum": [
+            20
+          ],
+          "type": "integer"
+        },
+        "maxOverviewRefs": {
+          "enum": [
+            8
+          ],
+          "type": "integer"
+        }
+      }
+    }
+  }
+}

@@ -1,3 +1,5 @@
+import { lazy, Suspense } from "react";
+const WorkspaceBridge = lazy(() => import("./workspace/WorkspaceBridge"));
 import EraseMeetingDialog from "./views/EraseMeetingDialog";
 import PendingErasures from "./views/PendingErasures";
 import MeetingLabels from "./views/MeetingLabels";
@@ -141,6 +143,27 @@ function loadLivePreferences(): LivePreferences & {
  * feedback. Child actions are bound to meeting IDs rather than display titles.
  */
 export default function App({ api = desktopApi }: { api?: DesktopApi }) {
+  const [classicMeetingView, setClassicMeetingView] = useState(() => {
+    try {
+      return (
+        localStorage.getItem("handymeeting.meeting-view.full-window.v1") !==
+        "workspace"
+      );
+    } catch {
+      return true;
+    }
+  });
+  function chooseClassicMeetingView(classic: boolean) {
+    setClassicMeetingView(classic);
+    try {
+      localStorage.setItem(
+        "handymeeting.meeting-view.full-window.v1",
+        classic ? "classic" : "workspace",
+      );
+    } catch {
+      // The view can still be changed for this window.
+    }
+  }
   const [erasureTarget, setErasureTarget] = useState<MeetingSummary | null>(
     null,
   );
@@ -1966,6 +1989,116 @@ export default function App({ api = desktopApi }: { api?: DesktopApi }) {
       />
     ) : undefined;
 
+  function changeCapturePause(paused: boolean) {
+    const id = app?.activeMeeting?.id;
+    if (!id || !api.setCapturePaused) return;
+    void action(async () => {
+      const state = await api.setCapturePaused!(id, paused);
+      requestSequence.current++;
+      setApp(state);
+    });
+  }
+  function changeMicrophoneMute(muted: boolean) {
+    const id = app?.activeMeeting?.id;
+    if (!id || !api.setMicrophoneMuted) return;
+    void action(async () => {
+      const state = await api.setMicrophoneMuted!(id, muted);
+      requestSequence.current++;
+      setApp(state);
+    });
+  }
+
+  const meetingWorkspaceAvailable = Boolean(
+    (page === "meeting" || page === "detail") &&
+      shownMeeting &&
+      !shownMeeting.readOnly &&
+      api.startLiveNotes &&
+      api.getLiveNotes &&
+      api.setWorkspaceContext &&
+      api.stopLiveNotes &&
+      api.refreshLiveNotes &&
+      api.setLiveNotesInterval &&
+      api.localModelSetup,
+  );
+  const meetingWorkspace =
+    meetingWorkspaceAvailable && !classicMeetingView && shownMeeting ? (
+      <Suspense
+        fallback={
+          <div role="status">
+            {locale === "de"
+              ? "Meetingansicht wird geöffnet …"
+              : "Opening meeting workspace …"}
+          </div>
+        }
+      >
+        <WorkspaceBridge
+          key={shownMeeting.id}
+          api={api}
+          meeting={shownMeeting}
+          onBack={() => chooseClassicMeetingView(true)}
+          selectedFile={
+            searchSource?.meetingId === shownMeeting.id
+              ? searchSource.file
+              : null
+          }
+          endpoint={endpoint}
+          model={textModel}
+          mode={mode}
+          theme={theme}
+          onThemeChange={setTheme}
+          onModelSettings={() => {
+            void navigate("settings");
+            requestAnimationFrame(() => {
+              document.getElementById("text-model-settings")?.focus();
+            });
+          }}
+          onStopRecording={
+            page === "meeting" && recording ? () => void stop() : undefined
+          }
+          onTogglePause={
+            page === "meeting" && recording && api.setCapturePaused
+              ? () => changeCapturePause(!app?.captureControl?.paused)
+              : undefined
+          }
+          paused={Boolean(app?.captureControl?.paused)}
+          onToggleMute={
+            page === "meeting" &&
+            recording &&
+            micEnabled &&
+            api.setMicrophoneMuted
+              ? () =>
+                  changeMicrophoneMute(!app?.captureControl?.microphoneMuted)
+              : undefined
+          }
+          muted={Boolean(app?.captureControl?.microphoneMuted)}
+          captureError={error}
+          stopping={isStopping}
+          language={locale}
+        />
+      </Suspense>
+    ) : undefined;
+  const classicViewSwitcher =
+    meetingWorkspaceAvailable && classicMeetingView ? (
+      <button
+        className="secondary"
+        type="button"
+        onClick={() => chooseClassicMeetingView(false)}
+      >
+        {locale === "de"
+          ? "Erweiterte Meetingansicht öffnen"
+          : "Open advanced meeting view"}
+      </button>
+    ) : undefined;
+
+  if (meetingWorkspace) {
+    return (
+      <>
+        {meetingWorkspace}
+        {livePreferences.auto && livePanel(true)}
+      </>
+    );
+  }
+
   return (
     <div className="app-shell">
       <Sidebar
@@ -2302,24 +2435,8 @@ export default function App({ api = desktopApi }: { api?: DesktopApi }) {
                   }
                 : undefined
             }
-            onPause={(paused) => {
-              const id = app?.activeMeeting?.id;
-              if (!id || !api.setCapturePaused) return;
-              void action(async () => {
-                const state = await api.setCapturePaused!(id, paused);
-                requestSequence.current++;
-                setApp(state);
-              });
-            }}
-            onMute={(muted) => {
-              const id = app?.activeMeeting?.id;
-              if (!id || !api.setMicrophoneMuted) return;
-              void action(async () => {
-                const state = await api.setMicrophoneMuted!(id, muted);
-                requestSequence.current++;
-                setApp(state);
-              });
-            }}
+            onPause={changeCapturePause}
+            onMute={changeMicrophoneMute}
             isStopping={isStopping}
             connected={connected}
             title={title}
@@ -2373,6 +2490,7 @@ export default function App({ api = desktopApi }: { api?: DesktopApi }) {
             copyFullTranscript={() => copyFullTranscript(liveMeeting)}
             liveFocus={liveFocus}
             onLiveFocus={setLiveFocus}
+            workspaceSwitcher={classicViewSwitcher}
             liveNotes={livePanel(false)}
             refreshHandy={() => void action(() => refreshModels(false))}
             refreshDevices={() => void action(refreshDevices)}
@@ -2392,6 +2510,7 @@ export default function App({ api = desktopApi }: { api?: DesktopApi }) {
         {page === "detail" && meeting && (
           <MeetingDetail
             meeting={meeting}
+            workspaceSwitcher={classicViewSwitcher}
             onErase={
               canEraseMeeting ? () => openMeetingErasure(meeting) : undefined
             }

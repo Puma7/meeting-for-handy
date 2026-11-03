@@ -1469,3 +1469,51 @@ fn failed_background_renewal_blocks_text_until_explicit_retry_succeeds() {
         .iter()
         .any(|(path, body)| path == "/api/generate" && body["keep_alive"] == 0));
 }
+
+/// Explicit workspace borrowing never loads/unloads a foreign selected instance,
+/// and disappearance is detected before an inference could trigger a JIT load.
+#[test]
+fn workspace_borrow_rechecks_loaded_instance_and_never_manages_it() {
+    let loaded = Arc::new(AtomicBool::new(true));
+    let flag = loaded.clone();
+    let server = Server::new(move |path, _| {
+        assert_eq!(path, "/api/v1/models");
+        (
+            200,
+            json!({"models":[{"type":"llm","key":"synthetic","loaded_instances":if flag.load(Ordering::Acquire){json!([{"id":"existing-selected"}])}else{json!([])}}]}),
+        )
+    });
+    let pool = LocalModelPool::default();
+    let lease = pool
+        .reserve(&server.connection(), LocalProvider::LmStudio)
+        .unwrap();
+    lease
+        .prepare_workspace(&AnalysisControl::default())
+        .unwrap();
+    lease
+        .prepare_workspace(&AnalysisControl::default())
+        .unwrap();
+    loaded.store(false, Ordering::Release);
+    assert!(lease
+        .prepare_workspace(&AnalysisControl::default())
+        .is_err());
+    drop(lease);
+    assert_eq!(server.seen().len(), 3);
+    assert!(server.seen().iter().all(|(p, _)| p == "/api/v1/models"));
+}
+#[test]
+fn workspace_refuses_an_unknown_ollama_load_size_without_loading() {
+    let server = Server::new(|path, _| match path {
+        "/api/ps" | "/api/tags" => (200, json!({"models":[]})),
+        _ => panic!("Unexpected mutation {path}"),
+    });
+    let pool = LocalModelPool::default();
+    let lease = pool
+        .reserve(&server.connection(), LocalProvider::Ollama)
+        .unwrap();
+    assert!(lease
+        .prepare_workspace(&AnalysisControl::default())
+        .is_err());
+    drop(lease);
+    assert_eq!(server.seen().len(), 2);
+}

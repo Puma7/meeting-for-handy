@@ -1,3 +1,7 @@
+import type {
+  WorkspaceContext,
+  WorkspaceState,
+} from "./workspace/WorkspaceBridge";
 export type Locale = "de" | "en";
 export type Theme = "light" | "dark" | "system";
 export type Track = "system" | "microphone";
@@ -283,6 +287,7 @@ export interface LiveItem {
   evidence: LiveEvidence[];
 }
 export interface LiveView {
+  workspace?: WorkspaceState;
   lastRequest?: {
     operation: "window" | "overview";
     window: number;
@@ -326,6 +331,10 @@ export interface LiveView {
   damagedRuns: number;
 }
 export interface LiveNotesStatus {
+  updateElapsedMs?: number;
+  responseBytes?: number;
+  responseIdleMs?: number;
+  workspaceContext?: WorkspaceContext | null;
   /** Native worker has acknowledged a manual request, including while ASR has priority. */
   refreshRequested?: boolean;
   waitingForTranscript?: boolean;
@@ -348,6 +357,7 @@ export interface LiveNotesStatus {
   view: LiveView | null;
 }
 export interface LiveNotesRequest {
+  workspace?: WorkspaceContext;
   meetingId: string;
   endpoint: string;
   model: string;
@@ -523,6 +533,11 @@ export interface DesktopApi {
   listTextModels(endpoint: string): Promise<string[]>;
   getNotesProgress(): Promise<NotesProgress | null>;
   cancelNotes(jobId: string): Promise<boolean>;
+  getSourceAudio?(id: string, file: string): Promise<ArrayBuffer>;
+  setWorkspaceContext?(
+    meetingId: string,
+    context: WorkspaceContext,
+  ): Promise<boolean>;
   startLiveNotes?(request: LiveNotesRequest): Promise<LiveNotesStatus>;
   checkSpeakerModel?(modelId: string): Promise<boolean>;
   /** Explicitly moves generated check proofs into a retained archive, without deletion. */
@@ -530,7 +545,10 @@ export interface DesktopApi {
   stopLiveNotes?(): Promise<boolean>;
   refreshLiveNotes?(): Promise<boolean>;
   setLiveNotesInterval?(intervalMs: number): Promise<boolean>;
-  getLiveNotes?(meetingId: string): Promise<LiveNotesStatus>;
+  getLiveNotes?(
+    meetingId: string,
+    preferWorkspace?: boolean,
+  ): Promise<LiveNotesStatus>;
   localModelSetup?(): Promise<LocalModelSetupInfo>;
   pullOllamaModel?(model: string): Promise<ModelPullProgress>;
   getModelPullProgress?(): Promise<ModelPullProgress | null>;

@@ -12,6 +12,7 @@ mod service;
 mod templates;
 mod transport;
 mod validation;
+pub mod workspace;
 pub use control::{is_cancelled, new_job_id, AnalysisControl, AnalysisProgress};
 pub use listing::{
     is_run_id, list_analyses, skip_reason, AnalysisListing, ListedAnalysis, PendingListing,

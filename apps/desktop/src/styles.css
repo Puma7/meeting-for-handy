@@ -1458,35 +1458,6 @@ mark {
   }
 }
 @media (max-width: 740px) {
-  .sidebar {
-    width: 68px;
-    flex-basis: 68px;
-    padding: 20px 8px;
-  }
-  .brand {
-    padding: 0 9px 22px;
-  }
-  .brand > div,
-  .nav-item {
-    font-size: 0;
-  }
-  .brand > div {
-    display: none;
-  }
-  .brand img {
-    width: 30px;
-    height: 30px;
-    max-width: none;
-  }
-  .nav-item {
-    justify-content: center;
-    padding: 12px 0;
-    gap: 0;
-  }
-  .nav-item svg {
-    width: 21px;
-    height: 21px;
-  }
   .privacy-mark {
     display: none;
   }
@@ -1767,7 +1738,7 @@ mark {
 }
 @media (max-width: 740px) {
   .app-shell {
-    --sidebar-width: 68px;
+    --sidebar-width: min(180px, 48vw);
   }
   .notes-progress.notes-statusbar {
     padding: 10px 12px;
@@ -2378,4 +2349,73 @@ p {
     white-space: normal;
     flex: 1 1 160px;
   }
+}
+.app-shell:has(> .sidebar.is-collapsed) {
+  --sidebar-width: 68px;
+}
+.app-shell > .sidebar {
+  grid-area: 1 / 1 / -1;
+  position: relative;
+  width: 100%;
+  min-width: 0;
+}
+.sidebar.is-collapsed {
+  padding-inline: 6px;
+}
+.sidebar.is-collapsed .brand {
+  justify-content: center;
+  padding-inline: 0;
+}
+.sidebar.is-collapsed .brand > div,
+.sidebar.is-collapsed .sidebar-update-label,
+.sidebar.is-collapsed .sidebar-recording-label,
+.sidebar.is-collapsed .sidebar-recording-time,
+.sidebar.is-collapsed .sidebar-recording-facts,
+.sidebar.is-collapsed .sidebar-recording-text {
+  display: none;
+}
+.sidebar.is-collapsed .nav-item {
+  flex-direction: column;
+  justify-content: center;
+  gap: 3px;
+  padding: 7px 0;
+  font-size: 10px;
+  text-align: center;
+  overflow-wrap: anywhere;
+}
+.sidebar.is-collapsed .nav-label {
+  max-width: 100%;
+}
+.sidebar.is-collapsed .appearance-row {
+  flex-direction: column;
+}
+.sidebar.is-collapsed .appearance-row select {
+  max-width: 100%;
+}
+.sidebar.is-collapsed .sidebar-bottom {
+  padding-inline: 0;
+  overflow-wrap: anywhere;
+}
+.sidebar.is-collapsed .sidebar-update > button,
+.sidebar.is-collapsed .sidebar-recording-head {
+  justify-content: center;
+  padding-inline: 0;
+}
+.sidebar .sidebar-toggle {
+  flex: 0 0 34px;
+  align-self: flex-start;
+  margin-bottom: 6px;
+}
+.sidebar.is-collapsed .sidebar-toggle {
+  align-self: center;
+}
+.setup-panel:not(.recording-compact) > .record-controls {
+  margin: 0;
+  padding: 6px 0;
+  border-top: 0;
+}
+.detail-actions.meeting-quick-actions {
+  justify-content: flex-start;
+  flex-wrap: wrap;
+  gap: 6px;
 }

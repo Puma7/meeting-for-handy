@@ -905,3 +905,51 @@ fn a_failed_window_commit_is_distinguished_from_a_model_validation_error() {
     assert!(occupied.is_dir());
     server.finish();
 }
+
+#[test]
+fn workspace_view_survives_a_newer_classic_run_and_reports_damaged_workspace() {
+    let dir = tempfile::tempdir().unwrap();
+    let server = Server::start(vec![]);
+    let workspace = LiveRunner::start(
+        dir.path(),
+        "meeting-a",
+        server.connection("workspace-model"),
+        "de",
+    )
+    .unwrap()
+    .with_workspace(crate::workspace::WorkspaceContext::default())
+    .unwrap();
+    let workspace_id = workspace.run().id.clone();
+    let workspace_folder = workspace.workspace_folder().unwrap();
+    drop(workspace);
+    let classic = LiveRunner::start(
+        dir.path(),
+        "meeting-a",
+        server.connection("classic-model"),
+        "de",
+    )
+    .unwrap();
+    server.finish();
+    assert_eq!(
+        read_latest(dir.path(), "meeting-a").unwrap().unwrap().model,
+        "classic-model"
+    );
+    let saved = read_latest_workspace(dir.path(), "meeting-a")
+        .unwrap()
+        .unwrap();
+    assert_eq!(saved.run_id.as_deref(), Some(workspace_id.as_str()));
+    assert!(saved.workspace.is_some());
+
+    let damaged = workspace_folder.join("revision-00000001.json");
+    std::fs::write(&damaged, b"broken").unwrap();
+    let saved = read_latest_workspace(dir.path(), "meeting-a")
+        .unwrap()
+        .unwrap();
+    assert!(saved.workspace.is_none());
+    assert_eq!(saved.damaged_runs, 1);
+    assert_eq!(std::fs::read(damaged).unwrap(), b"broken");
+    assert_eq!(
+        read_latest(dir.path(), "meeting-a").unwrap().unwrap().model,
+        classic.run().model
+    );
+}

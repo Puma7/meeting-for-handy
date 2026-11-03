@@ -641,13 +641,16 @@ export default function LiveNotesPanel({
         </label>
       )}
 
-      {connection.mode === "local" && (
-        <p className="muted live-memory-note">
-          {de
-            ? "Lokales Textmodell benötigt zusätzlichen Arbeitsspeicher. Bei knappem Speicher kann der Ton stocken – dann erst nach der Aufnahme auswerten."
-            : "A local text model needs additional memory. Low memory can make audio stutter; run analysis after recording if memory is tight."}
-        </p>
-      )}
+      {meetingActive &&
+        connection.mode === "local" &&
+        modelReady &&
+        !running && (
+          <p className="muted live-memory-detail">
+            {de
+              ? "Lokales Textmodell benötigt zusätzlichen Arbeitsspeicher. Bei knappem Speicher erst nach der Aufnahme starten."
+              : "Local models need extra memory. If memory is low, start after recording."}
+          </p>
+        )}
       <div className="live-controls">
         {running ? (
           <>
@@ -704,6 +707,16 @@ export default function LiveNotesPanel({
         <summary>
           {de ? "Optionen und Hinweise" : "Options and guidance"}
         </summary>
+        {meetingActive &&
+          connection.mode === "local" &&
+          modelReady &&
+          !running && (
+            <p className="muted live-memory-detail">
+              {de
+                ? "Lokales Textmodell benötigt zusätzlichen Arbeitsspeicher. Bei knappem Speicher erst nach der Aufnahme starten."
+                : "Local models need extra memory. If memory is low, start after recording."}
+            </p>
+          )}
         <div className="live-controls">
           <label className="live-interval">
             {de ? "Alle" : "Every"}
@@ -797,15 +810,13 @@ export default function LiveNotesPanel({
       )}
 
       {!hasContent ? (
-        <p className="muted live-empty">
-          {running
-            ? de
-              ? `Sobald bestätigter Text vorliegt, entsteht hier die Zusammenfassung – spätestens alle ${preferences.intervalMinutes} Minuten, früher nach längeren Redebeiträgen.`
-              : `As soon as confirmed text exists the summary appears here – at least every ${preferences.intervalMinutes} minutes, sooner after long contributions.`
-            : de
-              ? "Verlauf, Entscheidungen und Aufgaben mit Originalbelegen. Wähle ein Textmodell und starte die Zusammenfassung."
-              : "Summary, decisions and tasks with original evidence. Choose a text model and start the summary."}
-        </p>
+        running ? (
+          <p className="muted live-empty">
+            {de
+              ? "Wartet auf bestätigten Text."
+              : "Waiting for confirmed text."}
+          </p>
+        ) : null
       ) : (
         view && (
           <div className="live-sections">

@@ -84,6 +84,7 @@ pub struct LiveRunner {
     damaged_runs: usize,
     diagnostic_warning: std::cell::RefCell<Option<String>>,
     overview_attempt: std::cell::Cell<(u32, usize, usize)>,
+    workspace: Option<crate::workspace::WorkspaceRunner>,
 }
 
 impl LiveRunner {
@@ -139,7 +140,36 @@ impl LiveRunner {
             damaged_runs,
             diagnostic_warning: Default::default(),
             overview_attempt: Default::default(),
+            workspace: None,
         })
+    }
+
+    pub fn with_workspace(mut self, context: crate::workspace::WorkspaceContext) -> Result<Self> {
+        anyhow::ensure!(
+            self.run().mode == "local",
+            "Automatische Kachelauswertung benötigt ein lokales Modell."
+        );
+        let mut workspace =
+            crate::workspace::WorkspaceRunner::open(&self.folder.join("workspace-v9"))?;
+        workspace.set_context(context)?;
+        self.workspace = Some(workspace);
+        Ok(self)
+    }
+
+    pub fn workspace_context(
+        &self,
+    ) -> Option<std::sync::Arc<std::sync::Mutex<crate::workspace::WorkspaceContext>>> {
+        self.workspace
+            .as_ref()
+            .map(|w| std::sync::Arc::clone(&w.context))
+    }
+
+    pub fn workspace_replay_due(&self) -> bool {
+        self.workspace.as_ref().is_some_and(|w| w.context_dirty())
+    }
+
+    pub fn workspace_folder(&self) -> Option<std::path::PathBuf> {
+        self.workspace.as_ref().map(|w| w.folder())
     }
 
     pub fn run(&self) -> &LiveRun {
@@ -148,12 +178,18 @@ impl LiveRunner {
 
     /// Confirmed text not yet covered by a stored window.
     pub fn pending(&self, texts: &[LiveText]) -> Vec<LiveSource> {
+        if let Some(w) = &self.workspace {
+            return w.pending(texts);
+        }
         let processed: Vec<LiveSource> = self.state.sources().cloned().collect();
         sources::pending(&processed, texts)
     }
 
     /// True when stored windows have statements the newest overview does not include yet.
     pub fn overview_due(&self) -> bool {
+        if let Some(w) = &self.workspace {
+            return w.context_dirty();
+        }
         let covered = self.state.overviews.last().map_or(0, |o| o.window as usize);
         self.state.windows[covered..]
             .iter()
@@ -169,6 +205,16 @@ impl LiveRunner {
         trigger: Trigger,
         control: &AnalysisControl,
     ) -> Result<UpdateOutcome> {
+        if let Some(w) = &mut self.workspace {
+            let count = w.update(&self.client, pending, control)?;
+            let revision = w.view().revision as u32;
+            return Ok(UpdateOutcome {
+                window: (count > 0).then_some(revision),
+                overview: Some(revision),
+                accepted: w.view().entities.len(),
+                ..Default::default()
+            });
+        }
         let mut outcome = UpdateOutcome::default();
         // The warning describes this update only; a later successful save clears it.
         self.diagnostic_warning.replace(None);
@@ -458,6 +504,9 @@ impl LiveRunner {
     pub fn view(&self) -> LiveView {
         let mut view = LiveView::from_run(&self.state, self.damaged_runs);
         view.last_request = diagnostics::latest(&self.folder);
+        if let Some(workspace) = &self.workspace {
+            view.attach_workspace(workspace.view());
+        }
         view
     }
 }
@@ -472,14 +521,63 @@ pub fn read_latest(root: &Path, meeting_id: &str) -> Result<Option<LiveView>> {
         }
         matches
     });
-    Ok(runs
-        .first()
-        .map(|run| {
-            let mut view = LiveView::from_run(run, damaged);
-            view.last_request = diagnostics::latest(&root.join(&run.run.id));
-            view
-        })
-        .or_else(|| (damaged > 0).then(|| LiveView::damaged_only(damaged))))
+    if let Some(run) = runs.first() {
+        let mut view = LiveView::from_run(run, damaged);
+        let folder = root.join(&run.run.id);
+        view.last_request = diagnostics::latest(&folder);
+        let workspace = folder.join("workspace-v9");
+        match read_workspace_if_present(&workspace) {
+            Ok(Some(state)) => view.attach_workspace(state),
+            Ok(None) => {}
+            Err(_) => view.damaged_runs += 1,
+        }
+        return Ok(Some(view));
+    }
+    Ok((damaged > 0).then(|| LiveView::damaged_only(damaged)))
+}
+
+fn read_workspace_if_present(folder: &Path) -> Result<Option<crate::workspace::WorkspaceState>> {
+    match std::fs::symlink_metadata(folder) {
+        Ok(_) => crate::workspace::read_state(folder).map(Some),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(error.into()),
+    }
+}
+
+/// Selects the latest readable workspace by activity without letting a classic run hide it.
+pub fn read_latest_workspace(root: &Path, meeting_id: &str) -> Result<Option<LiveView>> {
+    let (runs, mut damaged) = list_runs(root)?;
+    let mut newest = None;
+    for run in runs {
+        if run.run.meeting_id != meeting_id {
+            damaged += 1;
+            continue;
+        }
+        let folder = root.join(&run.run.id);
+        let state = match read_workspace_if_present(&folder.join("workspace-v9")) {
+            Ok(Some(state)) => state,
+            Ok(None) => continue,
+            Err(_) => {
+                damaged += 1;
+                continue;
+            }
+        };
+        let activity = state
+            .updated_at
+            .as_deref()
+            .and_then(|at| chrono::DateTime::parse_from_rfc3339(at).ok())
+            .or_else(|| chrono::DateTime::parse_from_rfc3339(&run.run.created_at).ok());
+        if newest.as_ref().is_none_or(|(at, _, _, _)| activity > *at) {
+            newest = Some((activity, run, folder, state));
+        }
+    }
+    if let Some((_, run, folder, state)) = newest {
+        let mut view = LiveView::from_run(&run, damaged);
+        view.last_request = diagnostics::latest(&folder);
+        view.attach_workspace(state);
+        return Ok(Some(view));
+    }
+    Ok((damaged > 0).then(|| LiveView::damaged_only(damaged)))
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -508,6 +606,8 @@ pub struct LiveItem {
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LiveView {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub workspace: Option<crate::workspace::WorkspaceState>,
     pub run_id: Option<String>,
     pub model: String,
     pub mode: String,
@@ -532,8 +632,76 @@ pub struct LiveView {
 }
 
 impl LiveView {
+    fn attach_workspace(&mut self, state: crate::workspace::WorkspaceState) {
+        self.prompt_version = crate::workspace::PROMPT_VERSION.into();
+        self.updated_at = state.updated_at.clone();
+        self.windows = state.revision as usize;
+        self.summarized_sections = state.originals.len();
+        let item = |e: &crate::workspace::Entity| {
+            let evidence = e
+                .evidence
+                .iter()
+                .map(|v| {
+                    let s = state.originals.iter().find(|s| s.id == v.source_id);
+                    LiveEvidence {
+                        source_id: v.source_id.clone(),
+                        quote: v.quote.clone(),
+                        track: s.map(|s| s.source.clone()).unwrap_or_default(),
+                        start_ms: s.map_or(0, |s| s.start_ms),
+                        end_ms: s.map_or(0, |s| s.end_ms),
+                    }
+                })
+                .collect::<Vec<_>>();
+            let mut tracks = evidence.iter().map(|v| v.track.clone()).collect::<Vec<_>>();
+            tracks.sort();
+            tracks.dedup();
+            LiveItem {
+                text: e.text.clone(),
+                owner: e.owner.clone(),
+                due: e.due.clone(),
+                window: state.revision as u32,
+                tracks,
+                evidence,
+            }
+        };
+        let active = state
+            .entities
+            .iter()
+            .filter(|e| !state.context_excluded_ids.contains(&e.id))
+            .collect::<Vec<_>>();
+        self.points = active
+            .iter()
+            .filter(|e| e.kind == "fact")
+            .map(|e| item(e))
+            .collect();
+        self.decisions = active
+            .iter()
+            .filter(|e| e.kind == "decision" && e.status != "withdrawn")
+            .map(|e| item(e))
+            .collect();
+        self.tasks = active
+            .iter()
+            .filter(|e| e.kind == "task" && e.status == "open")
+            .map(|e| item(e))
+            .collect();
+        self.questions = active
+            .iter()
+            .filter(|e| e.kind == "impulse" && e.status != "discussed")
+            .map(|e| item(e))
+            .collect();
+        self.overview = state
+            .overview_refs
+            .iter()
+            .filter_map(|id| active.iter().find(|e| &e.id == id))
+            .filter(|e| e.status != "completed")
+            .map(|e| item(e))
+            .collect();
+        self.workspace = Some(state);
+    }
+
     fn damaged_only(damaged_runs: usize) -> Self {
         Self {
+            workspace: None,
             run_id: None,
             model: String::new(),
             mode: String::new(),
@@ -606,6 +774,7 @@ impl LiveView {
         .flatten()
         .max();
         Self {
+            workspace: None,
             run_id: Some(state.run.id.clone()),
             model: state.run.model.clone(),
             mode: state.run.mode.clone(),

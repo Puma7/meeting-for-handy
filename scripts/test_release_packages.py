@@ -269,6 +269,10 @@ class WindowsZipContract(unittest.TestCase):
             def invoke(*args):
                 """Run only the copied filesystem packager; fixture program bytes are never executed."""
                 return subprocess.run([shutil.which('pwsh'), '-NoProfile', '-NonInteractive', '-File', str(packager), *args], cwd=root, capture_output=True, text=True, timeout=60)
+            workspace = root / 'apps/desktop/src/workspace/Meeting.jsx'
+            workspace.parent.mkdir(parents=True)
+            original_jsx = b'export const title = <h1>Original</h1>;'
+            workspace.write_bytes(original_jsx)
             fingerprint = invoke('-SourceFingerprintOnly')
             self.assertEqual(fingerprint.returncode, 0, fingerprint.stderr)
             digest = lambda path: hashlib.sha256(path.read_bytes()).hexdigest()
@@ -278,9 +282,15 @@ class WindowsZipContract(unittest.TestCase):
             (proof / 'rust-release-verification.json').write_text(json.dumps(receipt), encoding='utf-8')
             (proof / 'rust-verification.json').write_text(json.dumps({'success': True, 'sourceFingerprintSHA256': receipt['sourceFingerprintSHA256']}), encoding='utf-8')
             output = root / 'packages'
+            archive = output / ('HandyMeeting-' + version + '-windows-x64.zip')
+            workspace.write_bytes(b'export const title = <h1>Changed</h1>;')
+            stale = invoke('-OutputDirectory', str(output))
+            self.assertNotEqual(stale.returncode, 0)
+            self.assertIn('exact current source tree', stale.stderr)
+            self.assertFalse(archive.exists())
+            workspace.write_bytes(original_jsx)
             result = invoke('-OutputDirectory', str(output))
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-            archive = output / ('HandyMeeting-' + version + '-windows-x64.zip')
             with zipfile.ZipFile(archive) as package:
                 names = package.namelist()
                 self.assertIn('HandyMeeting/' + launcher.name, names)

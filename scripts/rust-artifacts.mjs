@@ -7,7 +7,7 @@ import crypto from 'node:crypto';
 const ROOT = path.resolve(import.meta.dirname, '..');
 const SOURCE_ROOTS = ['crates', 'apps/desktop', 'src', 'scripts', 'platform', 'assets', 'licenses/rust', 'licenses/frontend', 'licenses/installer'];
 const SOURCE_FILES = ['Cargo.toml', 'Cargo.lock', '.gitattributes', '.cargo/config.toml', 'rust-toolchain.toml', 'verify.ps1', 'global.json', 'NuGet.config', 'LICENSE', 'THIRD_PARTY_NOTICES.txt', '.github/workflows/rust.yml', '.github/workflows/rust-portable.yml', '.github/workflows/rust-release.yml'];
-const EXTENSIONS = new Set(['.rs', '.toml', '.lock', '.json', '.ts', '.tsx', '.css', '.html', '.svg', '.png', '.ico', '.md', '.txt', '.ps1', '.mjs', '.sh', '.py', '.swift', '.yml', '.yaml', '.config', '.manifest', '.cs', '.csproj', '.xaml', '.axaml', '.props', '.targets', '.nsi']);
+const EXTENSIONS = new Set(['.rs', '.toml', '.lock', '.json', '.ts', '.tsx', '.jsx', '.css', '.html', '.svg', '.png', '.ico', '.md', '.txt', '.ps1', '.mjs', '.sh', '.py', '.swift', '.yml', '.yaml', '.config', '.manifest', '.cs', '.csproj', '.xaml', '.axaml', '.props', '.targets', '.nsi']);
 const EXCLUDED = /(^|\/)(node_modules|target|dist|bin|obj|\.build|\.vite|test-results|playwright-report)(\/|$)/i;
 const GENERATED = /^apps\/desktop\/src-tauri\/(gen|generated-schemas)(\/|$)/i;
 const CHECKS = ['legacy', 'artifact-guards', 'distribution-guards', 'cargo-format', 'frontend-tests', 'frontend-build', 'rust-tests', 'rust-clippy'];
@@ -212,8 +212,14 @@ async function selfTest() {
   await fs.mkdir(path.join(directory, 'crates/example/src'), { recursive: true });
   await fs.writeFile(path.join(directory, 'Cargo.lock'), 'synthetic-lock');
   await fs.writeFile(path.join(directory, 'crates/example/src/lib.rs'), 'pub fn fixture() {}\n');
+  const workspace = path.join(directory, 'apps/desktop/src/workspace/Meeting.jsx');
+  await fs.mkdir(path.dirname(workspace), { recursive: true });
+  await fs.writeFile(workspace, 'export const title = <h1>Original</h1>;\n');
   const first = await sourceFingerprint(directory);
   const again = await sourceFingerprint(directory); insist(first.sha256 === again.sha256, 'Fingerprint is not deterministic.');
+  await fs.writeFile(workspace, 'export const title = <h1>Changed</h1>;\n');
+  insist((await sourceFingerprint(directory)).sha256 !== first.sha256, 'A changed workspace JSX file escaped the fingerprint.');
+  await fs.writeFile(workspace, 'export const title = <h1>Original</h1>;\n');
   await fs.mkdir(path.join(directory, 'apps/desktop/src-tauri/gen/schemas'), { recursive: true });
   await fs.writeFile(path.join(directory, 'apps/desktop/src-tauri/gen/schemas/generated.json'), '{}');
   insist((await sourceFingerprint(directory)).sha256 === first.sha256, 'Generated schema changed the source fingerprint.');
@@ -225,7 +231,7 @@ async function selfTest() {
   const retained = path.join(directory, 'retained.txt'); await putSame(retained, Buffer.from('original'));
   let overwriteRejected = false; try { await putSame(retained, Buffer.from('different')); } catch { overwriteRejected = true; }
   insist(overwriteRejected && await fs.readFile(retained, 'utf8') === 'original', 'An existing artifact was overwritten.');
-  const result = { success: true, checks: 9, synthetic: true, commandsExecuted: false, networkUsed: false, outputDirectory: unix(path.relative(ROOT, directory)) };
+  const result = { success: true, checks: 10, synthetic: true, commandsExecuted: false, networkUsed: false, outputDirectory: unix(path.relative(ROOT, directory)) };
   await writeJson(path.join(directory, 'result.json'), result, true); return result;
 }
 

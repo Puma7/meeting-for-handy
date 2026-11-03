@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { ArrowLeft, Check, Copy, Sparkles, Trash2 } from "lucide-react";
 import { meetingLabel } from "../domain";
 import type { Meeting, Locale, TranscriptFormat } from "../types";
@@ -24,6 +25,8 @@ export default function MeetingDetail({
   savedFile,
   selectedFile,
   speakers,
+  workspace,
+  workspaceSwitcher,
 }: {
   meeting: Meeting;
   locale: Locale;
@@ -39,6 +42,8 @@ export default function MeetingDetail({
   savedFile: string | null;
   selectedFile?: string | null;
   speakers?: Record<string, string>;
+  workspace?: ReactNode;
+  workspaceSwitcher?: ReactNode;
 }) {
   const parts = [...meeting.parts]
     .sort(
@@ -55,9 +60,15 @@ export default function MeetingDetail({
       <div className="detail-heading">
         <div>
           <h2>{meeting.title}</h2>
-          <p>{meetingLabel(meeting, locale)}</p>
+          <p>
+            {meetingLabel({ ...meeting, title: "" }, locale).replace(
+              /^\s*·\s*/,
+              "",
+            )}
+          </p>
         </div>
-        <div className="detail-actions">
+        <div className="detail-actions meeting-quick-actions">
+          {workspaceSwitcher}
           {onErase && !meeting.id.startsWith("legacy-") && (
             <button
               type="button"
@@ -101,13 +112,15 @@ export default function MeetingDetail({
         />
       </div>
       <SessionWarnings warnings={meeting.warnings} locale={locale} t={t} />
-      <TranscriptBody
-        parts={parts}
-        locale={locale}
-        t={t}
-        selectedFile={selectedFile}
-        speakers={speakers}
-      />
+      {workspace ?? (
+        <TranscriptBody
+          parts={parts}
+          locale={locale}
+          t={t}
+          selectedFile={selectedFile}
+          speakers={speakers}
+        />
+      )}
     </section>
   );
 }

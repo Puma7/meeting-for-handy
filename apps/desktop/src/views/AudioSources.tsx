@@ -202,16 +202,6 @@ export default function AudioSources({
           )}
         </div>
       </div>
-      <details className="help-disclosure audio-level-help">
-        <summary>
-          {locale === "de" ? "Pegel verstehen" : "About audio levels"}
-        </summary>
-        <p>
-          {locale === "de"
-            ? "Die Balken zeigen den digitalen Spitzenpegel; 0 dBFS ist das Maximum. Sprache liegt meist im grünen bis gelben Bereich, Pausen 20–40 dB darunter, das ist normal. Rot heißt knapp unter dem Maximum. „Übersteuert“ heißt, der Ton kam schon abgeschnitten an; das lässt sich nachträglich nicht reparieren. Beim Computerton dann die Lautstärke in der Meeting-App oder dem abspielenden Programm senken, beim Mikrofon den Eingangspegel in den Systemeinstellungen senken oder mehr Abstand halten."
-            : "The bars show the digital peak level; 0 dBFS is the maximum. Speech is usually in the green to yellow range and pauses 20–40 dB lower, which is normal. Red means just below the maximum. “Clipping” means the audio already arrived cut off, which cannot be repaired afterwards. For system audio, lower the volume in the meeting app or the program that plays the sound; for the microphone, lower its input level in the system settings or keep more distance."}
-        </p>
-      </details>
       <p id={levelExplanation} className="sr-only">
         {locale === "de"
           ? "Digitaler Spitzenpegel in dBFS. Keine kalibrierte Lautstärkemessung und kein Nachweis, dass Audio bereits gespeichert ist."

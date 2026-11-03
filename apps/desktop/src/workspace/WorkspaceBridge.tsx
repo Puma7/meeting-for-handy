@@ -1,0 +1,159 @@
+import { useLayoutEffect, useMemo, useRef, useState } from "react";
+import type { DesktopApi, Meeting } from "../types";
+import { LiveWorkspace } from "./shell/LiveWorkspace.jsx";
+import { createPortal } from "react-dom";
+import workspaceCss from "./shell/workspace.css?inline";
+import overviewCss from "./shell/overview.css?inline";
+import densityCss from "./shell/density.css?inline";
+import liveCss from "./shell/liveWorkspace.css?inline";
+
+export interface WorkspaceContext {
+  revision: number;
+  agenda: { id: string; revision: number; text: string }[];
+  sharedNotes: { id: string; revision: number; text: string }[];
+  overrides: {
+    id: string;
+    expectedRevision: number;
+    status: string;
+    saved: boolean;
+  }[];
+}
+export interface WorkspaceEntity {
+  id: string;
+  revision: number;
+  kind: string;
+  text: string;
+  status: string;
+  attention: string;
+  owner: string | null;
+  due: string | null;
+  evidence: { sourceId: string; quote: string }[];
+  humanLocked: boolean;
+}
+export interface WorkspaceState {
+  revision: number;
+  updatedAt: string | null;
+  context: WorkspaceContext;
+  entities: WorkspaceEntity[];
+  events: {
+    id: string;
+    entityId: string;
+    revision: number;
+    atMs: number;
+    text: string;
+    status: string;
+    evidence: { sourceId: string; quote: string }[];
+  }[];
+  overviewRefs: string[];
+  originals: {
+    id: string;
+    source: string;
+    startMs: number;
+    endMs: number;
+    text: string;
+  }[];
+}
+export default function WorkspaceBridge({
+  api,
+  meeting,
+  onBack,
+  endpoint,
+  selectedFile,
+  model,
+  ...presentation
+}: {
+  api: DesktopApi;
+  meeting: Meeting;
+  onBack: () => void;
+  endpoint: string;
+  selectedFile?: string | null;
+  model: string;
+  mode?: "local" | "cloud";
+  theme?: "light" | "dark" | "system";
+  onThemeChange?: (theme: "light" | "dark") => void;
+  onModelSettings?: () => void;
+  onStopRecording?: () => void;
+  stopping?: boolean;
+  onTogglePause?: () => void;
+  paused?: boolean;
+  onToggleMute?: () => void;
+  muted?: boolean;
+  captureError?: string | null;
+  language?: "de" | "en";
+}) {
+  const host = useRef<HTMLDivElement>(null);
+  const [shadow, setShadow] = useState<ShadowRoot | null>(null);
+  const available = Boolean(
+    api.startLiveNotes &&
+      api.getLiveNotes &&
+      api.setWorkspaceContext &&
+      api.stopLiveNotes &&
+      api.refreshLiveNotes &&
+      api.setLiveNotesInterval &&
+      api.localModelSetup,
+  );
+  useLayoutEffect(() => {
+    if (host.current)
+      setShadow(
+        host.current.shadowRoot || host.current.attachShadow({ mode: "open" }),
+      );
+  }, [available]);
+  const adapter = useMemo(
+    () => ({
+      status: (id: string) => api.getLiveNotes!(id, true),
+      start: (
+        request: Parameters<NonNullable<DesktopApi["startLiveNotes"]>>[0],
+      ) => api.startLiveNotes!(request),
+      stop: () => api.stopLiveNotes!(),
+      refresh: () => api.refreshLiveNotes!(),
+      interval: (ms: number) => api.setLiveNotesInterval!(ms),
+      context: (context: WorkspaceContext) =>
+        api.setWorkspaceContext!(meeting.id, context),
+      models: () => api.localModelSetup!(),
+      sourceAudio: api.getSourceAudio
+        ? (file: string) => api.getSourceAudio!(meeting.id, file)
+        : undefined,
+    }),
+    [api, meeting.id],
+  );
+  if (
+    !api.startLiveNotes ||
+    !api.getLiveNotes ||
+    !api.setWorkspaceContext ||
+    !api.stopLiveNotes ||
+    !api.refreshLiveNotes ||
+    !api.setLiveNotesInterval ||
+    !api.localModelSetup
+  )
+    return (
+      <div role="status">
+        Die native Kachelanbindung ist in diesem Programmstand nicht verfügbar.
+        <button onClick={onBack}>Zur Aufnahme</button>
+      </div>
+    );
+  return (
+    <div
+      ref={host}
+      className="native-workspace-host"
+      style={{ display: "block", height: "100dvh", width: "100%" }}
+    >
+      {shadow &&
+        createPortal(
+          <>
+            <style>{`:host{all:initial;display:block;height:100dvh;width:100%}\n${workspaceCss.replaceAll(":root", ":host")}\n${overviewCss}\n${densityCss}\n${liveCss}`}</style>
+            <LiveWorkspace
+              key={meeting.id}
+              adapter={adapter}
+              selectedFile={selectedFile}
+              meeting={meeting}
+              onBack={onBack}
+              {...presentation}
+              initialEndpoint={endpoint}
+              initialModel={model}
+            />
+          </>,
+          shadow,
+        )}
+    </div>
+  );
+}

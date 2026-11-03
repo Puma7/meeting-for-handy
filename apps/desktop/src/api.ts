@@ -29,6 +29,10 @@ function jobInvoke<T>(
   return pending;
 }
 export const desktopApi: DesktopApi = {
+  getSourceAudio: (id, file) =>
+    desktopInvoke<ArrayBuffer>("get_source_audio", { id, file }),
+  setWorkspaceContext: (meetingId, context) =>
+    jobInvoke("set_workspace_context", { meetingId, context }),
   previewMeetingErasure: (meetingId) =>
     jobInvoke("preview_meeting_erasure", { meetingId }),
   getMeetingErasurePreview: (jobId) =>
@@ -127,7 +131,8 @@ export const desktopApi: DesktopApi = {
   refreshLiveNotes: () => jobInvoke("refresh_live_notes"),
   setLiveNotesInterval: (intervalMs) =>
     desktopInvoke("set_live_notes_interval", { intervalMs }),
-  getLiveNotes: (meetingId) => desktopInvoke("get_live_notes", { meetingId }),
+  getLiveNotes: (meetingId, preferWorkspace) =>
+    desktopInvoke("get_live_notes", { meetingId, preferWorkspace }),
   localModelSetup: () => desktopInvoke("local_model_setup"),
   pullOllamaModel: (model) => jobInvoke("pull_ollama_model", { model }),
   getModelPullProgress: () => desktopInvoke("get_model_pull_progress"),

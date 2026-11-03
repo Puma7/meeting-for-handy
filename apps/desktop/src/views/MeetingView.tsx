@@ -72,6 +72,8 @@ type Props = {
   copyFullTranscript: () => Promise<void>;
   /** Live summary shown beside the transcript. */
   liveNotes?: ReactNode;
+  workspace?: ReactNode;
+  workspaceSwitcher?: ReactNode;
   /** Only the live summary is shown; the transcript stays available behind a toggle. */
   liveFocus?: boolean;
   onLiveFocus?: (focus: boolean) => void;
@@ -126,6 +128,8 @@ export default function MeetingView({
   resume,
   copyFullTranscript,
   liveNotes,
+  workspace,
+  workspaceSwitcher,
   liveFocus = false,
   onLiveFocus,
 }: Props) {
@@ -158,6 +162,65 @@ export default function MeetingView({
         className={`setup-panel${recording && !setupOpen ? " recording-compact" : ""}`}
         aria-label={t.meeting}
       >
+        <div className="record-controls full">
+          <span
+            className={
+              recording && !app?.captureControl?.paused
+                ? "state recording"
+                : "state"
+            }
+          >
+            <span className="state-dot" />
+            {isStopping
+              ? t.stopping
+              : app?.transitioning ||
+                  (!recording &&
+                    ["catching-up", "streaming"].includes(
+                      app?.activeMeeting?.status ?? "",
+                    ))
+                ? t.busy
+                : recording
+                  ? app?.captureControl?.paused
+                    ? locale === "de"
+                      ? "Aufnahme pausiert"
+                      : "Recording paused"
+                    : t.recording
+                  : connected && modelId && systemId
+                    ? t.ready
+                    : t.choose}
+          </span>
+          {recording || isStopping ? (
+            <button
+              className="danger"
+              disabled={(busy && !reconnecting) || isStopping}
+              title={t.stopTooltip}
+              onClick={() => void stop()}
+            >
+              {isStopping ? (
+                <RefreshCw size={16} className="spinning" />
+              ) : (
+                <Square size={16} />
+              )}
+              {isStopping ? t.stopping : t.stop}
+            </button>
+          ) : (
+            <button
+              className="primary"
+              disabled={
+                !connected ||
+                busy ||
+                !modelId ||
+                !systemId ||
+                (micEnabled && !micId)
+              }
+              title={t.startTooltip}
+              onClick={() => void start()}
+            >
+              <AudioLines size={18} />
+              {busy ? t.busy : t.start}
+            </button>
+          )}
+        </div>
         <details
           className="setup-details"
           open={setupOpen}
@@ -234,65 +297,6 @@ export default function MeetingView({
           canReconnectMicrophone={app?.microphoneReconnectAvailable}
           onReconnectMicrophone={onReconnectMicrophone}
         />
-        <div className="record-controls full">
-          <span
-            className={
-              recording && !app?.captureControl?.paused
-                ? "state recording"
-                : "state"
-            }
-          >
-            <span className="state-dot" />
-            {isStopping
-              ? t.stopping
-              : app?.transitioning ||
-                  (!recording &&
-                    ["catching-up", "streaming"].includes(
-                      app?.activeMeeting?.status ?? "",
-                    ))
-                ? t.busy
-                : recording
-                  ? app?.captureControl?.paused
-                    ? locale === "de"
-                      ? "Aufnahme pausiert"
-                      : "Recording paused"
-                    : t.recording
-                  : connected && modelId && systemId
-                    ? t.ready
-                    : t.choose}
-          </span>
-          {recording || isStopping ? (
-            <button
-              className="danger"
-              disabled={(busy && !reconnecting) || isStopping}
-              title={t.stopTooltip}
-              onClick={() => void stop()}
-            >
-              {isStopping ? (
-                <RefreshCw size={16} className="spinning" />
-              ) : (
-                <Square size={16} />
-              )}
-              {isStopping ? t.stopping : t.stop}
-            </button>
-          ) : (
-            <button
-              className="primary"
-              disabled={
-                !connected ||
-                busy ||
-                !modelId ||
-                !systemId ||
-                (micEnabled && !micId)
-              }
-              title={t.startTooltip}
-              onClick={() => void start()}
-            >
-              <AudioLines size={18} />
-              {busy ? t.busy : t.start}
-            </button>
-          )}
-        </div>
         {recording && controlsAvailable && app?.captureControl && (
           <RecordingControls
             control={app.captureControl}
@@ -363,6 +367,34 @@ export default function MeetingView({
             </button>
           </div>
         )}
+      <div
+        className="detail-actions meeting-quick-actions"
+        role="group"
+        aria-label={locale === "de" ? "Meetingaktionen" : "Meeting actions"}
+      >
+        {workspaceSwitcher}
+        <button
+          className="secondary"
+          disabled={
+            busy || !meeting?.parts.some((item) => (item.text ?? "").trim())
+          }
+          title={t.copyTooltip}
+          onClick={() => void copyFullTranscript()}
+        >
+          {copied ? <Check size={16} /> : <Copy size={16} />}
+          <span>{copied ? t.copied : t.copy}</span>
+        </button>
+        {meeting?.status === "complete" && (
+          <button
+            className="primary"
+            disabled={busy || !recentParts.length}
+            onClick={onAnalyse}
+          >
+            <Sparkles size={16} />
+            {t.analyzeMeeting}
+          </button>
+        )}
+      </div>
       <div className="meeting-workspace-frame">
         {liveNotes && onLiveFocus && (
           <div
@@ -392,35 +424,6 @@ export default function MeetingView({
           }`}
         >
           <section className="transcript-panel">
-            <div className="section-heading">
-              <div>
-                <h2>{meeting?.title ?? t.live}</h2>
-              </div>
-              <div className="detail-actions">
-                <button
-                  className="secondary"
-                  disabled={
-                    busy ||
-                    !meeting?.parts.some((item) => (item.text ?? "").trim())
-                  }
-                  title={t.copyTooltip}
-                  onClick={() => void copyFullTranscript()}
-                >
-                  {copied ? <Check size={16} /> : <Copy size={16} />}
-                  <span>{copied ? t.copied : t.copy}</span>
-                </button>
-                {meeting?.status === "complete" && (
-                  <button
-                    className="primary"
-                    disabled={busy || !recentParts.length}
-                    onClick={onAnalyse}
-                  >
-                    <Sparkles size={16} />
-                    {t.analyzeMeeting}
-                  </button>
-                )}
-              </div>
-            </div>
             {meeting && (
               <div className="meeting-files">
                 <MeetingFiles
@@ -447,7 +450,9 @@ export default function MeetingView({
                     : "Load complete transcript"}
               </button>
             )}
-            <TranscriptBody parts={recentParts} locale={locale} t={t} />
+            {workspace ?? (
+              <TranscriptBody parts={recentParts} locale={locale} t={t} />
+            )}
           </section>
           {liveNotes}
         </div>

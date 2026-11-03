@@ -1898,3 +1898,81 @@ describe("workspace navigation (synthetic IPC)", () => {
     expect(api.cancelNotes).not.toHaveBeenCalled();
   });
 });
+
+it("opens the full-window workspace on demand and switches views without stopping capture", async () => {
+  // Keep Vite module transformation outside the rendering assertion.
+  await import("./workspace/WorkspaceBridge");
+  const active = { ...meeting, status: "recording" };
+  const api = fakeApi(active);
+  api.getAppState = vi
+    .fn()
+    .mockResolvedValue({ ...state(active), recording: true });
+  api.getLiveNotes = vi
+    .fn()
+    .mockResolvedValue({ status: "off", running: false });
+  api.startLiveNotes = vi.fn();
+  api.setWorkspaceContext = vi.fn();
+  api.stopLiveNotes = vi.fn();
+  api.refreshLiveNotes = vi.fn();
+  api.setLiveNotesInterval = vi.fn();
+  api.localModelSetup = vi.fn();
+  vi.stubGlobal(
+    "ResizeObserver",
+    class {
+      observe() {}
+      disconnect() {}
+    },
+  );
+  try {
+    const { container, unmount } = render(<App api={api} />);
+    const getShadow = () =>
+      container.querySelector(".native-workspace-host")?.shadowRoot;
+    const collapse = await screen.findByRole("button", {
+      name: "Seitenleiste einklappen",
+    });
+    fireEvent.click(collapse);
+    const expand = screen.getByRole("button", {
+      name: "Seitenleiste ausklappen",
+    });
+    expect(expand.getAttribute("aria-expanded")).toBe("false");
+    expect(
+      screen.getByRole("button", { name: de.history }).getAttribute("title"),
+    ).toBe(de.history);
+    fireEvent.click(expand);
+    expect(collapse.getAttribute("aria-expanded")).toBe("true");
+    fireEvent.click(
+      await screen.findByRole("button", {
+        name: "Erweiterte Meetingansicht öffnen",
+      }),
+    );
+    await waitFor(() =>
+      expect(
+        getShadow()?.querySelector<HTMLSelectElement>(
+          '[aria-label="Überblick-Layout"]',
+        )?.value,
+      ).toBe("verlauf"),
+    );
+    expect(screen.queryByRole("navigation")).toBeNull();
+    await waitFor(() =>
+      expect(api.getLiveNotes).toHaveBeenCalledWith(active.id, true),
+    );
+    const shadow = within(getShadow() as unknown as HTMLElement);
+    expect(
+      shadow.getByRole("button", { name: "Aufnahme beenden" }),
+    ).toBeTruthy();
+    fireEvent.click(
+      shadow.getByRole("button", { name: "Zur Standardansicht" }),
+    );
+    expect(getShadow()).toBeUndefined();
+    expect(screen.getByRole("button", { name: de.stop })).toBeTruthy();
+    fireEvent.click(
+      screen.getByRole("button", { name: "Erweiterte Meetingansicht öffnen" }),
+    );
+    await waitFor(() => expect(getShadow()).toBeTruthy());
+    expect(api.stopMeeting).not.toHaveBeenCalled();
+    expect(api.startLiveNotes).not.toHaveBeenCalled();
+    unmount();
+  } finally {
+    vi.unstubAllGlobals();
+  }
+});

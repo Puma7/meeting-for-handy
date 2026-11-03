@@ -49,6 +49,10 @@ enum Loaded {
     LmStudio {
         instance: String,
     },
+    /// Explicit workspace use of an already loaded instance; never load or unload it.
+    LmStudioBorrowed {
+        instance: String,
+    },
 }
 
 /// One logical user's reservation. Arc clones retain an in-flight user's ownership.
@@ -161,6 +165,13 @@ impl ModelLease {
     /// Preloads once. The caller runs this outside recording locks and retains the lease
     /// through final persistence; failed/partial jobs may retain it for an explicit retry.
     pub fn prepare(&self, control: &AnalysisControl) -> Result<()> {
+        self.prepare_inner(control, None)
+    }
+    /// The workspace bounds its own first LM load, without changing an existing reservation.
+    pub fn prepare_workspace(&self, control: &AnalysisControl) -> Result<()> {
+        self.prepare_inner(control, Some(8192))
+    }
+    fn prepare_inner(&self, control: &AnalysisControl, context_length: Option<u64>) -> Result<()> {
         control.check()?;
         let mut state = self
             .slot
@@ -169,6 +180,18 @@ impl ModelLease {
             .map_err(|_| anyhow::anyhow!("Lokales Modell ist gesperrt."))?;
         control.check()?;
         ensure!(!state.lm_load_uncertain, "Die vorherige Modellladung wurde nicht eindeutig bestätigt. Keine weitere Instanz wird geladen. In LM Studio den Ladezustand prüfen; erst nach abgeschlossenem oder abgebrochenem Laden und manueller Bereinigung eigener Instanzen die Anwendung neu starten. Fremde Modelle nicht entladen.");
+        if let Some(Loaded::LmStudioBorrowed { instance }) = &state.loaded {
+            // A borrowed ID must still be loaded before each inference. A vanished ID
+            // is never passed to a JIT-loading endpoint as if ownership had survived.
+            let before = state.client.model_request(
+                "api/v1/models",
+                None,
+                control,
+                Duration::from_secs(10),
+            )?;
+            ensure!(before["models"].as_array().is_some_and(|models| models.iter().filter(|m|m["type"]=="llm").filter_map(|m|m["loaded_instances"].as_array()).flatten().any(|i|i["id"].as_str()==Some(instance))), "Die mitbenutzte Modellinstanz ist nicht mehr geladen. In LM Studio prüfen; es wird keine neue Kopie automatisch geladen.");
+            return Ok(());
+        }
         if state.loaded.is_some() {
             if state.refresh_failed {
                 renew_ollama(&mut state, Duration::from_secs(300))?;
@@ -190,6 +213,20 @@ impl ModelLease {
                 let found = models
                     .iter()
                     .find(|m| model_name_matches(m["name"].as_str(), &client.model));
+                if context_length.is_some() && found.is_none() {
+                    let available =
+                        client.model_request("api/tags", None, control, Duration::from_secs(10))?;
+                    let size = available["models"]
+                        .as_array()
+                        .and_then(|models| {
+                            models
+                                .iter()
+                                .find(|m| model_name_matches(m["name"].as_str(), &client.model))
+                        })
+                        .and_then(|m| m["size"].as_u64())
+                        .unwrap_or(0);
+                    crate::workspace::memory::require_load_headroom(size)?;
+                }
                 let release_after = match found {
                     None => 0,
                     Some(model) => {
@@ -252,6 +289,16 @@ impl ModelLease {
                 let selected_instances = model["loaded_instances"].as_array().context(
                     "Lokale Instanzliste fehlt; keine zusätzliche Modellkopie wird geladen.",
                 )?;
+                if context_length.is_some() && selected_instances.len() == 1 {
+                    let instance = selected_instances[0]["id"]
+                        .as_str()
+                        .context("Geladene Modellinstanz fehlt.")?;
+                    valid_model_name(instance)?;
+                    state.loaded = Some(Loaded::LmStudioBorrowed {
+                        instance: instance.into(),
+                    });
+                    return Ok(());
+                }
                 ensure!(selected_instances.is_empty(), "Dieses Modell ist in LM Studio bereits geladen. Es wird weder eine weitere Kopie geladen noch die fremde Instanz übernommen oder entladen. Für eine eigene Reservierung zuerst den Ladezustand in LM Studio prüfen.");
                 let existing: Vec<&str> = models
                     .iter()
@@ -261,10 +308,20 @@ impl ModelLease {
                     .collect();
                 // Once submitted, an unknown outcome is sticky: automatic retries
                 // may not create another full model or guess a foreign instance ID.
+                if context_length.is_some() {
+                    crate::workspace::memory::require_load_headroom(
+                        model["size_bytes"].as_u64().unwrap_or(0),
+                    )?;
+                }
                 state.lm_load_uncertain = true;
+                let mut load = json!({"model":key});
+                if let Some(length) = context_length {
+                    load["context_length"] = length.into();
+                    load["eval_batch_size"] = 128.into();
+                }
                 let response = state.client.model_request(
                     "api/v1/models/load",
-                    Some(&json!({"model":key})),
+                    Some(&load),
                     &AnalysisControl::default(),
                     Duration::from_secs(300),
                 )?;
@@ -332,7 +389,9 @@ impl ModelLease {
             .context("Lokales Modell wurde noch nicht geladen.")?
         {
             Loaded::Ollama { .. } => state.client.model.clone(),
-            Loaded::LmStudio { instance } => instance.clone(),
+            Loaded::LmStudio { instance } | Loaded::LmStudioBorrowed { instance } => {
+                instance.clone()
+            }
         };
         ensure!(!state.refresh_failed, "Die lokale Modellreservierung konnte nicht erneuert werden. Modelldienst prüfen und Auswertung fortsetzen.");
         Ok((state.provider, name, ollama_keep_alive(&state).unwrap_or(0)))
@@ -403,6 +462,7 @@ impl Slot {
             return;
         };
         let expected_instance = match &loaded {
+            Loaded::LmStudioBorrowed { .. } => return,
             Loaded::LmStudio { instance } => Some(instance.clone()),
             _ => None,
         };
@@ -416,6 +476,7 @@ impl Slot {
                 self.cleanup_failed.store(false, Ordering::Release);
                 return;
             }
+            Loaded::LmStudioBorrowed { .. } => return,
             Loaded::LmStudio { instance } => state.client.model_request(
                 "api/v1/models/unload",
                 Some(&json!({"instance_id":instance})),

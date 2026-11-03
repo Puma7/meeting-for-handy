@@ -329,6 +329,12 @@ mod platform {
     }
 }
 
+/// Admission only. A slow in-flight request is never cancelled by this reading.
+pub(crate) fn workspace_memory_ready() -> bool {
+    platform::memory()
+        .is_none_or(|(used, total)| total.saturating_sub(used) >= 2 * 1024 * 1024 * 1024)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

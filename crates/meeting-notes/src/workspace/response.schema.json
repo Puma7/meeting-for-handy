@@ -1,0 +1,192 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "contractVersion",
+    "requestId",
+    "changes",
+    "overviewRefs",
+    "unresolvedContextIds",
+    "moreChangesPossible"
+  ],
+  "properties": {
+    "contractVersion": {
+      "enum": [
+        "meeting-update-1"
+      ],
+      "type": "string"
+    },
+    "requestId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 96,
+      "pattern": "^r_[A-Za-z0-9_]+$"
+    },
+    "changes": {
+      "type": "array",
+      "minItems": 0,
+      "maxItems": 20,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "proposalId",
+          "kind",
+          "targetId",
+          "targetRevision",
+          "text",
+          "status",
+          "attention",
+          "owner",
+          "due",
+          "evidence",
+          "relatedEntityIds"
+        ],
+        "properties": {
+          "proposalId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 96,
+            "pattern": "^p_[A-Za-z0-9_]+$"
+          },
+          "kind": {
+            "enum": [
+              "fact",
+              "decision",
+              "task",
+              "agenda",
+              "impulse"
+            ],
+            "type": "string"
+          },
+          "targetId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "minLength": 1,
+            "maxLength": 96,
+            "pattern": "^e_[A-Za-z0-9_]+$"
+          },
+          "targetRevision": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 1
+          },
+          "text": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "minLength": 1,
+            "maxLength": 1000
+          },
+          "status": {
+            "enum": [
+              "recorded",
+              "open",
+              "touched",
+              "discussed",
+              "completed",
+              "withdrawn",
+              "unclear"
+            ],
+            "type": "string"
+          },
+          "attention": {
+            "enum": [
+              "normal",
+              "current",
+              "clarification"
+            ],
+            "type": "string"
+          },
+          "owner": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "minLength": 1,
+            "maxLength": 120
+          },
+          "due": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "minLength": 1,
+            "maxLength": 120
+          },
+          "evidence": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 6,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "sourceId",
+                "quote"
+              ],
+              "properties": {
+                "sourceId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 96,
+                  "pattern": "^s_[A-Za-z0-9_]+$"
+                },
+                "quote": {
+                  "type": "string",
+                  "minLength": 8,
+                  "maxLength": 600
+                }
+              }
+            }
+          },
+          "relatedEntityIds": {
+            "type": "array",
+            "minItems": 0,
+            "maxItems": 0,
+            "items": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 96,
+              "pattern": "^(e|h)_[A-Za-z0-9_]+$"
+            },
+            "uniqueItems": true
+          }
+        }
+      }
+    },
+    "overviewRefs": {
+      "type": "array",
+      "minItems": 0,
+      "maxItems": 8,
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 96,
+        "pattern": "^(e|p)_[A-Za-z0-9_]+$"
+      },
+      "uniqueItems": true
+    },
+    "unresolvedContextIds": {
+      "type": "array",
+      "minItems": 0,
+      "maxItems": 20,
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 96,
+        "pattern": "^(e|h)_[A-Za-z0-9_]+$"
+      },
+      "uniqueItems": true
+    },
+    "moreChangesPossible": {
+      "type": "boolean"
+    }
+  }
+}

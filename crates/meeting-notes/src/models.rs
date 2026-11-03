@@ -32,7 +32,7 @@ pub struct Template {
     pub name: String,
     pub steps: Vec<Step>,
 }
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Evidence {
     pub source_id: String,

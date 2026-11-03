@@ -39,9 +39,17 @@ pub(crate) async fn set_live_notes_interval(
 pub(crate) async fn get_live_notes(
     service: State<'_, Arc<Service>>,
     meeting_id: String,
+    prefer_workspace: Option<bool>,
 ) -> AppResult<LiveNotesStatus> {
     let service = Arc::clone(&service);
-    blocking(move || service.live_notes.status(&service, &meeting_id)).await
+    blocking(move || {
+        service.live_notes.status_with_preference(
+            &service,
+            &meeting_id,
+            prefer_workspace.unwrap_or(false),
+        )
+    })
+    .await
 }
 
 #[tauri::command]
@@ -67,4 +75,19 @@ pub(crate) fn get_model_pull_progress(
 #[tauri::command]
 pub(crate) fn cancel_model_pull(service: State<'_, Arc<Service>>) -> AppResult<bool> {
     Ok(service.model_pulls.cancel())
+}
+
+#[tauri::command]
+pub(crate) async fn set_workspace_context(
+    service: State<'_, Arc<Service>>,
+    meeting_id: String,
+    context: meeting_notes::workspace::WorkspaceContext,
+) -> AppResult<bool> {
+    let service = Arc::clone(&service);
+    blocking(move || {
+        service
+            .live_notes
+            .set_workspace_context(&service, &meeting_id, context)
+    })
+    .await
 }
