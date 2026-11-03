@@ -104,9 +104,11 @@ export function restoreSharedContext(local, native, runId) {
     nativeContextRunId: runId,
     topics: [
       ...native.agenda.map((a) => ({ ...a, shared: true })),
-      ...local.topics.filter(
-        (t) => !t.shared && !native.agenda.some((a) => a.id === t.id),
-      ),
+      ...local.topics
+        .filter(
+          (topic) => !native.agenda.some((entry) => entry.id === topic.id),
+        )
+        .map((topic) => ({ ...topic, shared: false })),
     ],
     notes: { ...local.notes, protocol },
     protocolRevision: Math.max(1, ...native.sharedNotes.map((n) => n.revision)),

@@ -133,7 +133,9 @@ describe("Native workspace boundary", () => {
         version: 1,
         nativeContextRunId: "run-other",
         nativeContextRevision: 7,
-        topics: [],
+        topics: [
+          { id: "e_unsynced", text: "Lokales Thema erhalten", shared: true },
+        ],
         history: [],
         attachments: [],
         notes: { private: "PRIVATE_ONLY", protocol: "Veralteter Entwurf" },
@@ -170,6 +172,18 @@ describe("Native workspace boundary", () => {
     expect(JSON.stringify(f.adapter.status.mock.calls)).not.toContain(
       "PRIVATE_ONLY",
     );
+    fireEvent.click(screen.getByRole("tab", { name: "Vorbereitung" }));
+    const preserved = screen
+      .getByRole("button", { name: "Lokales Thema erhalten" })
+      .closest("article")!;
+    expect(
+      (
+        within(preserved).getByRole("checkbox", {
+          name: "Freigeben",
+        }) as HTMLInputElement
+      ).checked,
+    ).toBe(false);
+    expect(f.adapter.context).not.toHaveBeenCalled();
   });
   it("does not stop or restart a slow update and coalesces a manual refresh", async () => {
     const f = fixture();
@@ -530,49 +544,72 @@ it("shows a relevant result only once inside the live overview", async () => {
   expect(screen.queryByRole("region", { name: "Jetzt relevant" })).toBeNull();
 });
 
-it("moves a card between columns using the pointer grip", () => {
-  const f = fixture();
-  render(
-    <LiveWorkspace adapter={f.adapter} meeting={f.meeting} onBack={() => {}} />,
-  );
-  fireEvent.click(screen.getByRole("button", { name: "Anordnen" }));
-  const left = screen.getByLabelText("Überblick Spalte 1");
-  const right = screen.getByLabelText("Überblick Spalte 2");
-  vi.spyOn(left, "getBoundingClientRect").mockReturnValue(
-    new DOMRect(0, 0, 400, 600),
-  );
-  vi.spyOn(right, "getBoundingClientRect").mockReturnValue(
-    new DOMRect(410, 0, 400, 600),
-  );
-  const grip = within(right).getByRole("button", {
-    name: "Gesprächsimpulse verschieben",
-  });
-  Object.defineProperty(grip, "setPointerCapture", { value: vi.fn() });
-  const pointer = (type: string, x: number, y: number) =>
-    fireEvent(
-      grip,
-      Object.assign(
-        new MouseEvent(type, {
-          bubbles: true,
-          button: 0,
-          clientX: x,
-          clientY: y,
-        }),
-        { isPrimary: true, pointerId: 1 },
-      ),
+it.each([false, true])(
+  "moves a card using the pointer grip (stacked=%s)",
+  (stacked) => {
+    const f = fixture();
+    render(
+      <LiveWorkspace
+        adapter={f.adapter}
+        meeting={f.meeting}
+        onBack={() => {}}
+      />,
     );
-  pointer("pointerdown", 450, 450);
-  pointer("pointermove", 250, 300);
-  pointer("pointerup", 250, 300);
-  expect(
-    within(left).getByRole("button", { name: "Gesprächsimpulse verschieben" }),
-  ).toBeTruthy();
-  expect(
-    within(right).queryByRole("button", {
+    fireEvent.click(screen.getByRole("button", { name: "Anordnen" }));
+    const left = screen.getByLabelText("Überblick Spalte 1");
+    const right = screen.getByLabelText("Überblick Spalte 2");
+    vi.spyOn(left, "getBoundingClientRect").mockReturnValue(
+      new DOMRect(0, 0, 400, 600),
+    );
+    vi.spyOn(right, "getBoundingClientRect").mockReturnValue(
+      new DOMRect(410, 0, 400, 600),
+    );
+    if (stacked) {
+      const grid = left.parentElement!;
+      grid.style.display = "flex";
+      vi.spyOn(grid, "getBoundingClientRect").mockReturnValue(
+        new DOMRect(0, 0, 400, 1100),
+      );
+      vi.mocked(left.getBoundingClientRect).mockReturnValue(new DOMRect());
+      vi.mocked(right.getBoundingClientRect).mockReturnValue(new DOMRect());
+      [...grid.querySelectorAll(".overview-card")].forEach((card, index) =>
+        vi
+          .spyOn(card, "getBoundingClientRect")
+          .mockReturnValue(new DOMRect(0, 200 * index, 400, 180)),
+      );
+    }
+    const grip = within(right).getByRole("button", {
       name: "Gesprächsimpulse verschieben",
-    }),
-  ).toBeNull();
-});
+    });
+    Object.defineProperty(grip, "setPointerCapture", { value: vi.fn() });
+    const pointer = (type: string, x: number, y: number) =>
+      fireEvent(
+        grip,
+        Object.assign(
+          new MouseEvent(type, {
+            bubbles: true,
+            button: 0,
+            clientX: x,
+            clientY: y,
+          }),
+          { isPrimary: true, pointerId: 1 },
+        ),
+      );
+    pointer("pointerdown", 450, 450);
+    pointer("pointermove", 250, 30);
+    pointer("pointerup", 250, 30);
+    expect(
+      within(left).getByRole("button", {
+        name: "Gesprächsimpulse verschieben",
+      }),
+    ).toBeTruthy();
+    expect(
+      within(right).queryByRole("button", {
+        name: "Gesprächsimpulse verschieben",
+      }),
+    ).toBeNull();
+  },
+);
 
 it("gives a manually resized card real space in a crowded column", () => {
   const cards = [

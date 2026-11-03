@@ -45,6 +45,8 @@ export interface WorkspaceState {
     evidence: { sourceId: string; quote: string }[];
   }[];
   overviewRefs: string[];
+  contextExcludedIds?: string[];
+  supersededSources?: string[];
   originals: {
     id: string;
     source: string;

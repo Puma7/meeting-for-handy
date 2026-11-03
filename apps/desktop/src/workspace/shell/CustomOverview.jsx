@@ -182,7 +182,7 @@ export function CustomOverview({
     const columns = [
       ...grid.current.querySelectorAll(":scope > .overview-column"),
     ];
-    const column = columns.findIndex((element) => {
+    function inside(element) {
       const rect = element.getBoundingClientRect();
       return (
         event.clientX >= rect.left &&
@@ -190,16 +190,32 @@ export function CustomOverview({
         event.clientY >= rect.top &&
         event.clientY <= rect.bottom
       );
-    });
+    }
+    function cardRects(elements) {
+      return elements.flatMap((element, column) =>
+        [...element.children]
+          .filter((card) => card.dataset.module && card.dataset.module !== id)
+          .map((card) => {
+            const { top, height } = card.getBoundingClientRect();
+            return { id: card.dataset.module, top, height, column };
+          }),
+      );
+    }
+    if (getComputedStyle(grid.current).display === "flex") {
+      if (!inside(grid.current)) return null;
+      const rects = cardRects(columns);
+      const anchor = gapAnchor(rects, event.clientY);
+      const destination = rects.find((rect) => rect.id === anchor.anchorId);
+      return destination ? { column: destination.column, ...anchor } : null;
+    }
+    const column = columns.findIndex(inside);
     if (column < 0) return null;
-    const rects = [...columns[column].children]
-      .filter((el) => el.dataset.module && el.dataset.module !== id)
-      .map((el) => {
-        const { top, height } = el.getBoundingClientRect();
-        return { id: el.dataset.module, top, height };
-      });
-    return { column, ...gapAnchor(rects, event.clientY) };
+    return {
+      column,
+      ...gapAnchor(cardRects([columns[column]]), event.clientY),
+    };
   }
+
   function gripEvents(id) {
     return {
       onPointerDown(event) {
