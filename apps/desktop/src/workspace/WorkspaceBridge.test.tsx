@@ -191,10 +191,19 @@ describe("Native workspace boundary", () => {
     render(
       <LiveWorkspace
         adapter={f.adapter}
-        meeting={f.meeting}
+        meeting={{
+          ...f.meeting,
+          modelId: "parakeet-ultra",
+          status: "recording",
+          pendingAudioMs: 15000,
+        }}
         onBack={() => {}}
       />,
     );
+    expect(screen.getByText("Aufnahme läuft")).toBeTruthy();
+    expect(
+      screen.getByText("Abschnittstranskription · offenes Audio 00:15"),
+    ).toBeTruthy();
     await screen.findByText(
       "Auswertung läuft · 3:30 · weiterer Text folgt danach · Belege bis 00:30 · 180 Zeichen noch nicht ausgewertet",
     );

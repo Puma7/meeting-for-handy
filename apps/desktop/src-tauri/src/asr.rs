@@ -1,4 +1,4 @@
-//! One owned native worker per track. Capture never waits on this module.
+//! Owned native recognition workers. Streaming uses one per track, batch shares one.
 use handy_bridge::native::{default_run_options, native_error, NativeEngine};
 use handy_bridge::BridgeError;
 use meeting_core::{
@@ -22,6 +22,8 @@ const MAX_REQUEST: usize = 16 * 1024;
 const MAX_REPLY: usize = 2 * 1024 * 1024;
 const MAX_STDERR: usize = 16 * 1024 * 1024;
 const FEED_SAMPLES: usize = 8_000;
+const BATCH_CONTEXT_SAMPLES: usize = meeting_core::SAMPLE_RATE as usize;
+const MAX_BATCH_SAMPLES: usize = meeting_core::SAMPLE_RATE as usize * 30;
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(
@@ -46,6 +48,11 @@ pub(super) enum Request {
         confirmed_samples: u64,
     },
     Finalize,
+    BatchSection {
+        part: AudioPart,
+        #[serde(default)]
+        previous: Option<Box<AudioPart>>,
+    },
     Quit,
 }
 
@@ -61,6 +68,8 @@ pub(super) struct Reply {
     pub committed: String,
     #[serde(default)]
     pub tentative: String,
+    #[serde(default)]
+    pub overlap_words: usize,
     #[serde(default)]
     pub backend: String,
     #[serde(default)]
@@ -78,7 +87,7 @@ fn bridge_protocol(_: impl std::fmt::Display) -> BridgeError {
 /// directory, track source, and optional `--cpu`. This function opens no device.
 pub fn worker_main(args: &[String]) -> Result<(), String> {
     if !(4..=5).contains(&args.len())
-        || !["system", "microphone"].contains(&args[3].as_str())
+        || !["system", "microphone", "batch"].contains(&args[3].as_str())
         || (args.len() == 5 && args[4] != "--cpu")
     {
         return Err("Invalid recognition worker arguments".into());
@@ -89,9 +98,18 @@ pub fn worker_main(args: &[String]) -> Result<(), String> {
         .canonicalize()
         .map_err(|_| "Session directory is unavailable")?;
     let source = &args[3];
-    handy_bridge::verify_model_snapshot(&folder, model_path).map_err(|error| error.to_string())?;
-    let engine = NativeEngine::load(model_path, args.len() == 5, Some(backend_dir))
+    let identity = handy_bridge::verify_model_snapshot(&folder, model_path)
         .map_err(|error| error.to_string())?;
+    let batch = source == "batch";
+    if batch != identity.source_model_metadata.ready_for_batch() {
+        return Err("Recognition mode differs from the saved model identity".into());
+    }
+    let engine = if batch {
+        NativeEngine::load_batch(model_path, args.len() == 5, Some(backend_dir))
+    } else {
+        NativeEngine::load(model_path, args.len() == 5, Some(backend_dir))
+    }
+    .map_err(|error| error.to_string())?;
     let stdin = std::io::stdin();
     let stdout = std::io::stdout();
     let mut input = BufReader::new(stdin.lock());
@@ -108,7 +126,46 @@ pub fn worker_main(args: &[String]) -> Result<(), String> {
         let request = read_request(&mut input)?.ok_or("Recognition controller closed its input")?;
         match request {
             Request::Quit => return Ok(()),
-            Request::Begin { file } => {
+            Request::BatchSection { part, previous } if batch => {
+                batch_sample_count(part.confirmed_sample_count)?;
+                let mut pcm = Vec::new();
+                if let Some(previous) = previous {
+                    if previous.source != part.source
+                        || previous.start_sample >= part.start_sample
+                        || previous
+                            .start_sample
+                            .checked_add(previous.confirmed_sample_count)
+                            != Some(part.start_sample)
+                    {
+                        return Err("Batch context is not contiguous on this track".into());
+                    }
+                    batch_sample_count(previous.confirmed_sample_count)?;
+                    let preceding = meeting_core::read_closed_audio(&folder, &previous)
+                        .map_err(|_| "Batch context failed verification")?;
+                    pcm.extend_from_slice(
+                        &preceding[preceding.len().saturating_sub(BATCH_CONTEXT_SAMPLES)..],
+                    );
+                }
+                let context_samples = pcm.len();
+                pcm.extend(
+                    meeting_core::read_closed_audio(&folder, &part)
+                        .map_err(|_| "Closed audio did not pass batch verification")?,
+                );
+                let (text, overlap_words) = engine
+                    .transcribe_batch(&pcm, context_samples)
+                    .map_err(|error| error.to_string())?;
+                send_reply(
+                    &mut output,
+                    Reply {
+                        ok: true,
+                        committed: text.clone(),
+                        full: text,
+                        overlap_words,
+                        ..Reply::default()
+                    },
+                )?;
+            }
+            Request::Begin { file } if !batch => {
                 let path = worker_audio_path(&folder, &file, source)?;
                 let result = engine.with_stream(&default_run_options(), |stream| {
                     send_reply(
@@ -194,6 +251,13 @@ pub fn worker_main(args: &[String]) -> Result<(), String> {
             _ => return Err("Recognition requires a new bounded audio window first".into()),
         }
     }
+}
+
+fn batch_sample_count(samples: u64) -> Result<usize, String> {
+    usize::try_from(samples)
+        .ok()
+        .filter(|count| (1..=MAX_BATCH_SAMPLES).contains(count))
+        .ok_or_else(|| "Closed batch audio section exceeds its safe limit".into())
 }
 
 fn validate_feed(cursor: u64, offset: u64, count: usize, confirmed: u64) -> Result<(), String> {
@@ -485,7 +549,10 @@ impl Worker {
     }
 
     pub(super) fn call(&mut self, request: Request) -> Result<Reply, String> {
-        let timeout = if matches!(&request, Request::SpeakerIdentity { .. }) {
+        let timeout = if matches!(
+            &request,
+            Request::SpeakerIdentity { .. } | Request::BatchSection { .. }
+        ) {
             180
         } else {
             90
@@ -565,6 +632,148 @@ pub(crate) fn spawn_track(
         source: worker_source,
         handle,
     }
+}
+
+/// A single model processes closed sections from both tracks in time order.
+pub(crate) fn spawn_batch(
+    store: SessionStore,
+    model: PathBuf,
+    backend: PathBuf,
+    stop: Arc<AtomicBool>,
+) -> RecognitionWorker {
+    let handle = thread::spawn(move || {
+        let mut worker = None;
+        let result = run_batch(&store, &stop, |part, previous| {
+            let worker = match &mut worker {
+                Some(worker) => worker,
+                slot @ None => slot.insert(Worker::start(
+                    &model,
+                    &backend,
+                    store.folder(),
+                    "batch",
+                    true,
+                    None,
+                )?),
+            };
+            let audio_only = |part: &AudioPart| {
+                let mut audio = part.clone();
+                audio.text = None;
+                audio.committed_text.clear();
+                audio.tentative_text.clear();
+                audio.error = None;
+                audio
+            };
+            worker.call(Request::BatchSection {
+                part: audio_only(part),
+                previous: previous.map(|part| Box::new(audio_only(part))),
+            })
+        });
+        if let Err(error) = result {
+            let _ = store.notice(&format!("Batch transcription stopped: {error}. Saved audio and text are retained. Retry from history."));
+        }
+    });
+    RecognitionWorker {
+        source: "batch".into(),
+        handle,
+    }
+}
+
+fn run_batch(
+    store: &SessionStore,
+    stop: &AtomicBool,
+    mut transcribe: impl FnMut(&AudioPart, Option<&AudioPart>) -> Result<Reply, String>,
+) -> Result<(), String> {
+    let model = store.model_id().map_err(|_| "Saved session unavailable")?;
+    loop {
+        // Acquire the flag before reading the track heads. Once stop is visible,
+        // capture has closed and journaled its final sections.
+        let stopped = stop.load(Ordering::Acquire);
+        let mut heads = Vec::with_capacity(2);
+        for track in ["system", "microphone"] {
+            if let Some(part) = store
+                .next_pending_part(track, &model)
+                .map_err(|_| "Saved session unavailable")?
+            {
+                heads.push(part);
+            }
+        }
+        let pending = heads
+            .iter()
+            .filter(|part| part.audio_closed)
+            .min_by_key(|part| part.start_sample);
+        let Some(part) = pending else {
+            if stopped {
+                return if heads.is_empty() {
+                    Ok(())
+                } else {
+                    Err("An audio section is still open; saved work is retained".into())
+                };
+            }
+            thread::sleep(Duration::from_millis(100));
+            continue;
+        };
+        let samples = part.confirmed_sample_count;
+        batch_sample_count(samples)?;
+        let reply = if part.has_signal {
+            let previous = store
+                .previous_recognized_part(part, &model)
+                .map_err(|_| "Previous audio section unavailable")?
+                .filter(|previous| previous.has_signal);
+            let mut reply = transcribe(part, previous.as_ref())?;
+            if let Some(text) = previous.as_ref().and_then(|part| part.text.as_deref()) {
+                reply.full = trim_batch_overlap(text, &reply.full, reply.overlap_words);
+                reply.committed.clone_from(&reply.full);
+            }
+            reply
+        } else {
+            Reply {
+                ok: true,
+                ..Reply::default()
+            }
+        };
+        persist(store, part, &model, reply, samples, true, false)?;
+    }
+}
+
+// Only drop a strong, bounded suffix/prefix match. With weak matches keep
+// the recognized text so an uncertain stitch cannot silently delete speech.
+fn trim_batch_overlap(previous: &str, current: &str, overlap_words: usize) -> String {
+    let word = |value: &str| {
+        value
+            .trim_matches(|ch: char| !ch.is_alphanumeric())
+            .to_lowercase()
+    };
+    let prior: Vec<_> = previous
+        .split_whitespace()
+        .rev()
+        .take(5)
+        .map(word)
+        .collect();
+    let prefix: Vec<_> = current
+        .split_whitespace()
+        .take(5.min(overlap_words))
+        .map(word)
+        .collect();
+    let overlap = (2..=prior.len().min(prefix.len()))
+        .rev()
+        .find(|&count| {
+            prefix[..count]
+                .iter()
+                .zip(prior[..count].iter().rev())
+                .all(|(left, right)| !left.is_empty() && left == right)
+        })
+        .unwrap_or(0);
+    if overlap == 0 {
+        return current.into();
+    }
+    let mut remainder = current;
+    for _ in 0..overlap {
+        remainder = remainder.trim_start();
+        remainder = remainder
+            .find(char::is_whitespace)
+            .map_or("", |at| &remainder[at..]);
+    }
+    remainder.trim_start().into()
 }
 
 #[derive(Clone, Default)]
@@ -1070,6 +1279,208 @@ pub fn synthetic_smoke(args: &[String]) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn batch_closes_both_tracks_and_feeds_live_text_while_capture_continues() {
+        use std::sync::mpsc::sync_channel;
+        let root =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../.build/asr-batch-regressions");
+        let store = SessionStore::create(
+            &root,
+            "Synthetic live batch",
+            handy_bridge::PARAKEET_ULTRA_ID,
+            "Output",
+            Some("Mic"),
+        )
+        .unwrap()
+        .with_quiet_sections();
+        let mut system = meeting_core::PcmWriter::new(store.clone(), "system").unwrap();
+        let mut mic = meeting_core::PcmWriter::new(store.clone(), "microphone").unwrap();
+        let loud = vec![3000_i16; 16_000];
+        let quiet = vec![0_i16; 16_000];
+        for _ in 0..20 {
+            system.append(&loud).unwrap();
+        }
+        // Split the quiet period across packets to exercise its sample counter.
+        system.append(&quiet[..3500]).unwrap();
+        system.append(&quiet[3500..]).unwrap();
+        for _ in 0..30 {
+            mic.append(&loud).unwrap();
+        }
+        let (entered, events) = sync_channel(0);
+        let (release, gate) = sync_channel(0);
+        let stop = AtomicBool::new(false);
+        struct StopOnDrop<'a>(&'a AtomicBool);
+        impl Drop for StopOnDrop<'_> {
+            fn drop(&mut self) {
+                self.0.store(true, Ordering::Release);
+            }
+        }
+        thread::scope(|scope| {
+            let _stop_on_failure = StopOnDrop(&stop);
+            let worker_store = &store;
+            let worker_stop = &stop;
+            let worker = scope.spawn(move || {
+                run_batch(worker_store, worker_stop, |part, previous| {
+                    if part.start_sample == 0 {
+                        entered
+                            .send(part.source.clone())
+                            .map_err(|e| e.to_string())?;
+                        gate.recv_timeout(Duration::from_secs(5))
+                            .map_err(|e| e.to_string())?;
+                    }
+                    let (text, overlap_words) = match (part.source.as_str(), previous.is_some()) {
+                        ("system", false) => ("Send the report today.", 0),
+                        ("system", true) => ("report today. Next subject.", 2),
+                        ("microphone", false) => ("The budget is open.", 0),
+                        _ => ("A new microphone section.", 0),
+                    };
+                    Ok(Reply {
+                        full: text.into(),
+                        committed: text.into(),
+                        overlap_words,
+                        ..Reply::default()
+                    })
+                })
+            });
+            let limit = Duration::from_secs(5);
+            assert_eq!(events.recv_timeout(limit).unwrap(), "system");
+            // Writes progress even while the recognizer cannot complete its first section.
+            system.append(&loud).unwrap();
+            mic.append(&loud).unwrap();
+            system.checkpoint().unwrap();
+            mic.checkpoint().unwrap();
+            assert_eq!(system.written_samples(), 22 * 16_000);
+            assert_eq!(mic.written_samples(), 31 * 16_000);
+            assert!(crate::live_notes::live_texts(&store.snapshot().unwrap())
+                .0
+                .is_empty());
+            release.send(()).unwrap();
+            assert_eq!(events.recv_timeout(limit).unwrap(), "microphone");
+            let (texts, finished) = crate::live_notes::live_texts(&store.snapshot().unwrap());
+            assert!(!finished);
+            assert_eq!(texts.len(), 1);
+            assert_eq!(texts[0].text, "Send the report today.");
+            assert_eq!(texts[0].end_ms, 20_450);
+            release.send(()).unwrap();
+            let deadline = Instant::now() + limit;
+            loop {
+                let (texts, finished) = crate::live_notes::live_texts(&store.snapshot().unwrap());
+                assert!(!finished);
+                if texts.len() == 2 {
+                    assert!(texts
+                        .iter()
+                        .any(|text| text.track == "microphone" && text.end_ms == 30_000));
+                    break;
+                }
+                assert!(Instant::now() < deadline);
+                thread::sleep(Duration::from_millis(10));
+            }
+            system.finish().unwrap();
+            mic.finish().unwrap();
+            store.set_status("recorded").unwrap();
+            stop.store(true, Ordering::Release);
+            worker.join().unwrap().unwrap();
+        });
+        let snapshot = store.snapshot().unwrap();
+        let (texts, _) = crate::live_notes::live_texts(&snapshot);
+        assert_eq!(texts.len(), 4);
+        assert!(texts.iter().any(|text| text.text == "Next subject."));
+        for (track, expected) in [
+            (
+                "system",
+                [loud.repeat(20), quiet.clone(), loud.clone()].concat(),
+            ),
+            ("microphone", loud.repeat(31)),
+        ] {
+            let mut parts: Vec<_> = snapshot
+                .parts
+                .iter()
+                .filter(|part| part.source == track)
+                .collect();
+            parts.sort_by_key(|part| part.start_sample);
+            let mut recorded = Vec::new();
+            for part in parts {
+                assert_eq!(part.start_sample, recorded.len() as u64);
+                recorded.extend(
+                    meeting_core::read_closed_audio(store.folder(), part)
+                        .unwrap()
+                        .into_iter()
+                        .map(|sample| (sample * 32768.0) as i16),
+                );
+            }
+            assert_eq!(recorded, expected);
+        }
+        assert_eq!(
+            trim_batch_overlap("report today.", "report today. Again.", 0),
+            "report today. Again."
+        );
+    }
+
+    #[test]
+    fn batch_retries_only_unfinished_sections() {
+        let dir =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../.build/asr-batch-regressions");
+        let store = SessionStore::create(
+            &dir,
+            "Synthetic batch",
+            handy_bridge::PARAKEET_ULTRA_ID,
+            "Output",
+            Some("Mic"),
+        )
+        .unwrap();
+        for source in ["system", "microphone"] {
+            let mut writer = meeting_core::PcmWriter::new(store.clone(), source).unwrap();
+            writer.append(&vec![3000_i16; 16_000]).unwrap();
+            writer.finish().unwrap();
+        }
+        store.set_status("recorded").unwrap();
+        let original = store.snapshot().unwrap();
+        let mut seen = Vec::new();
+        assert!(run_batch(&store, &AtomicBool::new(true), |part, _| {
+            seen.push(part.file.clone());
+            if seen.len() == 2 {
+                return Err("synthetic worker failure".into());
+            }
+            Ok(Reply {
+                full: "First track.".into(),
+                committed: "First track.".into(),
+                ..Reply::default()
+            })
+        })
+        .is_err());
+        let saved = store.snapshot().unwrap();
+        assert_eq!(
+            saved
+                .parts
+                .iter()
+                .filter(|part| part.status == "complete")
+                .count(),
+            1
+        );
+        run_batch(&store, &AtomicBool::new(true), |part, _| {
+            assert_eq!(part.file, seen[1]);
+            Ok(Reply {
+                full: "Second track.".into(),
+                committed: "Second track.".into(),
+                ..Reply::default()
+            })
+        })
+        .unwrap();
+        let resumed = store.snapshot().unwrap();
+        assert!(resumed.parts.iter().all(|part| part.status == "complete"));
+        for part in &resumed.parts {
+            let old = original
+                .parts
+                .iter()
+                .find(|old| old.file == part.file)
+                .unwrap();
+            assert_eq!(old.confirmed_sha256, part.confirmed_sha256);
+            if part.file == seen[0] {
+                assert_eq!(part.text.as_deref(), Some("First track."));
+            }
+        }
+    }
+
     #[test]
     fn feed_rejects_unconfirmed_or_nonsequential_audio() {
         assert!(validate_feed(0, 0, 8000, 8000).is_ok());

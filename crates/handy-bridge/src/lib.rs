@@ -83,7 +83,16 @@ pub struct HandyModel {
     pub supported_languages: Vec<String>,
 }
 
+pub const PARAKEET_ULTRA_ID: &str = "parakeet-ultra";
+
 impl HandyModel {
+    pub fn ready_for_batch(&self) -> bool {
+        self.is_downloaded
+            && !self.is_downloading
+            && !self.supports_streaming
+            && self.id == PARAKEET_ULTRA_ID
+    }
+
     pub fn ready_for_streaming(&self) -> bool {
         self.is_downloaded && !self.is_downloading && self.supports_streaming
     }

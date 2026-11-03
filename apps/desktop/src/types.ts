@@ -10,6 +10,7 @@ export interface HandyModel {
   name: string;
   isDownloaded: boolean;
   supportsStreaming: boolean;
+  supportsBatch?: boolean;
   compatibilityError?: string;
 }
 export interface HandyStatus {

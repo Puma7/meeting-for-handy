@@ -52,6 +52,7 @@ pub(crate) struct RelocationGuard {
 #[derive(Clone)]
 pub struct SessionStore {
     folder: PathBuf,
+    pub(crate) quiet_sections: bool,
     // Join the derived writer before releasing the last session lease.
     mirror: Arc<TextMirror>,
     writers: Arc<Writers>,
@@ -170,6 +171,7 @@ impl SessionStore {
             .ok();
         Self {
             folder,
+            quiet_sections: false,
             mirror: Arc::new(TextMirror {
                 sender: Some(sender),
                 worker,
@@ -331,6 +333,12 @@ impl SessionStore {
     pub(crate) fn test_owner_count(&self) -> usize {
         Arc::strong_count(&self.inner)
     }
+    /// Prefer quiet section boundaries during capture, without changing PCM or its timestamps.
+    pub fn with_quiet_sections(mut self) -> Self {
+        self.quiet_sections = true;
+        self
+    }
+
     pub fn snapshot(&self) -> Result<SessionData> {
         Ok(self
             .inner
@@ -361,6 +369,31 @@ impl SessionStore {
                     && !(part.status == "complete" && part.model_id.as_deref() == Some(model_id))
             })
             .min_by_key(|part| part.start_sample)
+            .cloned())
+    }
+
+    /// The preceding contiguous final section of the same track and model.
+    pub fn previous_recognized_part(
+        &self,
+        part: &AudioPart,
+        model: &str,
+    ) -> Result<Option<AudioPart>> {
+        let guard = self.inner.lock().map_err(|_| "Session lock was poisoned")?;
+        Ok(guard
+            .data
+            .parts
+            .iter()
+            .find(|previous| {
+                previous.source == part.source
+                    && previous.start_sample < part.start_sample
+                    && previous
+                        .start_sample
+                        .checked_add(previous.confirmed_sample_count)
+                        == Some(part.start_sample)
+                    && previous.audio_closed
+                    && previous.status == "complete"
+                    && previous.model_id.as_deref() == Some(model)
+            })
             .cloned())
     }
 

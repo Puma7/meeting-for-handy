@@ -416,7 +416,9 @@ export default function App({ api = desktopApi }: { api?: DesktopApi }) {
     handyRefreshFailure !== null ? [] : (app?.handy?.models ?? [])
   ).filter(
     (item) =>
-      item.isDownloaded && item.supportsStreaming && !item.compatibilityError,
+      item.isDownloaded &&
+      (item.supportsStreaming || item.supportsBatch) &&
+      !item.compatibilityError,
   );
   const canEraseMeeting = Boolean(
     api.previewMeetingErasure &&

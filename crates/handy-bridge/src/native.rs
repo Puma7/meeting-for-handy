@@ -41,6 +41,23 @@ pub struct NativeEngine {
 
 impl NativeEngine {
     pub fn load(path: &Path, cpu_only: bool, backend_directory: Option<&Path>) -> Result<Self> {
+        Self::load_mode(path, cpu_only, backend_directory, false)
+    }
+
+    pub fn load_batch(
+        path: &Path,
+        cpu_only: bool,
+        backend_directory: Option<&Path>,
+    ) -> Result<Self> {
+        Self::load_mode(path, cpu_only, backend_directory, true)
+    }
+
+    fn load_mode(
+        path: &Path,
+        cpu_only: bool,
+        backend_directory: Option<&Path>,
+        batch: bool,
+    ) -> Result<Self> {
         verify_runtime()?;
         // CPU replacement workers never register GPU modules; a broken GPU
         // driver must not be loaded merely to request Backend::Cpu afterward.
@@ -66,13 +83,50 @@ impl NativeEngine {
         )
         .map_err(native_error)?;
         let capabilities = model.capabilities().map_err(native_error)?;
-        if !capabilities.supports_streaming || capabilities.native_sample_rate != 16_000 {
+        if capabilities.supports_streaming == batch
+            || capabilities.native_sample_rate != 16_000
+            || (batch && !model.roles().contains(transcribe_cpp::Role::Asr))
+        {
             return Err(BridgeError::ModelUnavailable);
         }
         Ok(Self {
             model,
             capabilities,
         })
+    }
+
+    /// Alignment is used only to identify a possible repeated prefix.
+    /// Section times remain the only timestamps published to the meeting.
+    pub fn transcribe_batch(&self, pcm: &[f32], context_samples: usize) -> Result<(String, usize)> {
+        let available = std::thread::available_parallelism().map_or(1, usize::from);
+        let result = self
+            .model
+            .session_with(&transcribe_cpp::SessionOptions {
+                n_threads: (available / 2).clamp(1, 4) as i32,
+                ..Default::default()
+            })
+            .map_err(native_error)?
+            .run(pcm, &RunOptions::default())
+            .map_err(native_error)?;
+        let context_ms = (context_samples as i64) * 1000 / 16_000;
+        let normalize = |value: &str| {
+            value
+                .trim_matches(|ch: char| !ch.is_alphanumeric())
+                .to_lowercase()
+        };
+        let overlap = result
+            .words
+            .iter()
+            .zip(result.text.split_whitespace())
+            .take_while(|(word, text)| {
+                word.t0_ms >= 0
+                    && word.t1_ms > word.t0_ms
+                    && word.t0_ms < context_ms
+                    && word.t1_ms - word.t0_ms <= (context_ms - word.t0_ms) * 2
+                    && normalize(&word.text) == normalize(text)
+            })
+            .count();
+        Ok((result.text, overlap))
     }
 
     pub fn backend(&self) -> String {

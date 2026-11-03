@@ -566,6 +566,13 @@ describe("migration frontend boundaries (synthetic IPC)", () => {
           supportsStreaming: true,
         },
         {
+          id: "parakeet-ultra",
+          name: "Parakeet Ultra",
+          isDownloaded: true,
+          supportsStreaming: false,
+          supportsBatch: true,
+        },
+        {
           id: "batch",
           name: "Batch only",
           isDownloaded: true,
@@ -596,13 +603,18 @@ describe("migration frontend boundaries (synthetic IPC)", () => {
     expect(
       await screen.findByRole("option", { name: "New upstream model" }),
     ).toBeTruthy();
+    expect(
+      screen.getByRole("option", {
+        name: "Parakeet Ultra · abschnittsweise",
+      }),
+    ).toBeTruthy();
     expect(screen.queryByRole("option", { name: "Batch only" })).toBeNull();
     expect(screen.queryByRole("option", { name: "Not installed" })).toBeNull();
     await waitFor(() =>
       expect(
         (
           screen.getByLabelText(
-            "Streaming-Modell aus Handy",
+            "Erkennungsmodell aus Handy",
           ) as HTMLSelectElement
         ).value,
       ).toBe(""),
@@ -620,11 +632,11 @@ describe("migration frontend boundaries (synthetic IPC)", () => {
       ).disabled,
     ).toBe(true);
     await userEvent.selectOptions(
-      screen.getByLabelText("Streaming-Modell aus Handy"),
+      screen.getByLabelText("Erkennungsmodell aus Handy"),
       "new",
     );
     expect(
-      (screen.getByLabelText("Streaming-Modell aus Handy") as HTMLSelectElement)
+      (screen.getByLabelText("Erkennungsmodell aus Handy") as HTMLSelectElement)
         .value,
     ).toBe("new");
   });
@@ -675,7 +687,7 @@ describe("migration frontend boundaries (synthetic IPC)", () => {
       }),
     ).toBeTruthy();
     expect(
-      (screen.getByLabelText("Streaming-Modell aus Handy") as HTMLSelectElement)
+      (screen.getByLabelText("Erkennungsmodell aus Handy") as HTMLSelectElement)
         .value,
     ).toBe("installed-stream");
     now += 1000;
@@ -810,7 +822,7 @@ describe("migration frontend boundaries (synthetic IPC)", () => {
         screen.queryByText("Synthetic older automatic query failed"),
       ).toBeNull();
       await userEvent.selectOptions(
-        screen.getByLabelText("Streaming-Modell aus Handy"),
+        screen.getByLabelText("Erkennungsmodell aus Handy"),
         "native-model",
       );
       await ready();
@@ -916,7 +928,7 @@ describe("migration frontend boundaries (synthetic IPC)", () => {
     await waitFor(() => expect(api.refreshHandy).toHaveBeenCalledTimes(2));
     expect(api.refreshHandy).toHaveBeenNthCalledWith(2, nativePath);
     await userEvent.selectOptions(
-      screen.getByLabelText("Streaming-Modell aus Handy"),
+      screen.getByLabelText("Erkennungsmodell aus Handy"),
       "installed-stream",
     );
     await ready();
@@ -974,7 +986,7 @@ describe("migration frontend boundaries (synthetic IPC)", () => {
     );
     await waitFor(() => expect(api.refreshHandy).toHaveBeenCalledWith(path));
     await userEvent.selectOptions(
-      screen.getByLabelText("Streaming-Modell aus Handy"),
+      screen.getByLabelText("Erkennungsmodell aus Handy"),
       "installed-stream",
     );
     await ready();
@@ -1255,7 +1267,7 @@ describe("migration frontend boundaries (synthetic IPC)", () => {
           name: "Installed streaming model",
         });
         await userEvent.selectOptions(
-          screen.getByLabelText("Streaming-Modell aus Handy"),
+          screen.getByLabelText("Erkennungsmodell aus Handy"),
           "installed-stream",
         );
         await ready();
@@ -1904,13 +1916,11 @@ it("opens the full-window workspace on demand and switches views without stoppin
   await import("./workspace/WorkspaceBridge");
   const active = { ...meeting, status: "recording" };
   const api = fakeApi(active);
-  api.getAppState = vi
-    .fn()
-    .mockResolvedValue({
-      ...state(active),
-      recording: true,
-      error: "Mikrofon getrennt. Aufnahme beenden und Gerät neu verbinden.",
-    });
+  api.getAppState = vi.fn().mockResolvedValue({
+    ...state(active),
+    recording: true,
+    error: "Mikrofon getrennt. Aufnahme beenden und Gerät neu verbinden.",
+  });
   api.getLiveNotes = vi
     .fn()
     .mockResolvedValue({ status: "off", running: false });

@@ -258,6 +258,10 @@ export default function MeetingView({
                   {models.map((item) => (
                     <option key={item.id} value={item.id}>
                       {item.name}
+                      {item.supportsBatch &&
+                        (locale === "de"
+                          ? " · abschnittsweise"
+                          : " · in sections")}
                     </option>
                   ))}
                 </select>

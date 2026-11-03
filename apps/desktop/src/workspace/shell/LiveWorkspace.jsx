@@ -501,6 +501,18 @@ export function LiveWorkspace({
                 : "Erkennung holt nach"}
             </span>
           )}
+          {meeting.modelId === "parakeet-ultra" &&
+            ["recording", "streaming", "catching-up"].includes(
+              meeting.status,
+            ) && (
+              <span className="workspace-capture-state">
+                {language === "de"
+                  ? "Abschnittstranskription"
+                  : "Section transcription"}
+                {meeting.pendingAudioMs > 0 &&
+                  ` · ${language === "de" ? "offenes Audio" : "audio pending"} ${formatTime(meeting.pendingAudioMs / 1000)}`}
+              </span>
+            )}
           {onStopRecording && (
             <button
               type="button"
