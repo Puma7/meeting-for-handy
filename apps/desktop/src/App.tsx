@@ -1,3 +1,4 @@
+import { workspaceStorageKey } from "./workspace/workspaceStorage";
 import { lazy, Suspense } from "react";
 const WorkspaceBridge = lazy(() => import("./workspace/WorkspaceBridge"));
 import EraseMeetingDialog from "./views/EraseMeetingDialog";
@@ -1287,14 +1288,24 @@ export default function App({ api = desktopApi }: { api?: DesktopApi }) {
     setHistory((current) => current.filter((item) => item.id !== id));
     setErasureTarget(null);
     setErasureRevision((value) => value + 1);
+    let workspaceCleanupFailed = false;
+    try {
+      localStorage.removeItem(workspaceStorageKey(id));
+    } catch {
+      workspaceCleanupFailed = true;
+    }
     setErasureNotice(
-      preservedAtomicRemnants > 0
+      workspaceCleanupFailed
         ? locale === "de"
-          ? `Zugeordnete Meetinginhalte entfernt. ${preservedAtomicRemnants} unterbrochene Dateien sind nicht sicher zuordenbar und bleiben erhalten. Sie können weiterhin Meetingdaten enthalten; bitte die Ablage manuell prüfen.`
-          : `Attributed meeting contents removed. ${preservedAtomicRemnants} interrupted files cannot be assigned safely and are preserved. They may still contain meeting data; inspect storage manually.`
-        : locale === "de"
-          ? "Meetinginhalte vollständig aus der HandyMeeting-Ablage entfernt."
-          : "Meeting contents completely removed from HandyMeeting storage.",
+          ? "Die zugeordneten nativen Meetingdaten wurden gelöscht. Der lokale Notizstand konnte nicht entfernt werden. Die Löschung ist unvollständig."
+          : "Attributed native meeting data was deleted. Local workspace notes could not be removed. Erasure is incomplete."
+        : preservedAtomicRemnants > 0
+          ? locale === "de"
+            ? `Zugeordnete Meetinginhalte entfernt. ${preservedAtomicRemnants} unterbrochene Dateien sind nicht sicher zuordenbar und bleiben erhalten. Sie können weiterhin Meetingdaten enthalten; bitte die Ablage manuell prüfen.`
+            : `Attributed meeting contents removed. ${preservedAtomicRemnants} interrupted files cannot be assigned safely and are preserved. They may still contain meeting data; inspect storage manually.`
+          : locale === "de"
+            ? "Meetinginhalte vollständig aus der HandyMeeting-Ablage entfernt."
+            : "Meeting contents completely removed from HandyMeeting storage.",
     );
     void refreshHistory().catch((failure) => setError(errorMessage(failure)));
     void api
@@ -2073,7 +2084,7 @@ export default function App({ api = desktopApi }: { api?: DesktopApi }) {
               : undefined
           }
           muted={Boolean(app?.captureControl?.microphoneMuted)}
-          captureError={error}
+          captureError={app?.error || error}
           stopping={isStopping}
           language={locale}
         />

@@ -160,6 +160,47 @@ fn identical_task_wording_keeps_distinct_assignees_and_deadlines() {
 }
 
 #[test]
+fn a_shared_run_keeps_newer_classic_results_when_workspace_is_present() {
+    let dir = tempfile::tempdir().unwrap();
+    let quote = "Anna übernimmt den Bericht bis Freitag.";
+    let server = Server::start(vec![
+        window_answer(
+            vec![],
+            vec![],
+            vec![fact("Bericht schreiben", Some("Anna"), "C0", quote)],
+            vec![],
+        ),
+        overview_answer(vec![]),
+    ]);
+    let mut runner = LiveRunner::start(
+        dir.path(),
+        "meeting-1",
+        server.connection("synthetic"),
+        "de",
+    )
+    .unwrap();
+    let workspace = runner.folder.join("workspace-v9");
+    drop(crate::workspace::WorkspaceRunner::open(&workspace).unwrap());
+    let pending = runner.pending(&[part("a", "system", 0, quote)]);
+    runner
+        .update(&pending, Trigger::Manual, &AnalysisControl::default())
+        .unwrap();
+    server.finish();
+    let expected = runner.view();
+    assert_eq!(expected.tasks.len(), 1);
+    drop(runner);
+    let actual = read_latest(dir.path(), "meeting-1").unwrap().unwrap();
+    assert_eq!(actual.updated_at, expected.updated_at);
+    assert_eq!(actual.tasks[0].text, expected.tasks[0].text);
+    assert!(actual.workspace.is_none());
+    assert!(read_latest_workspace(dir.path(), "meeting-1")
+        .unwrap()
+        .unwrap()
+        .workspace
+        .is_some());
+}
+
+#[test]
 fn displaying_live_runs_rejects_another_meetings_manifest_without_changing_it() {
     let dir = tempfile::tempdir().unwrap();
     let server = Server::start(vec![]);

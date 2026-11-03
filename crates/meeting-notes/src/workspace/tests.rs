@@ -622,3 +622,24 @@ fn linked_workspace_does_not_open_or_write_into_another_directory() {
     assert!(WorkspaceRunner::open(&link).is_err());
     assert!(!original.join("writer.lock").exists());
 }
+
+#[test]
+fn explicit_english_promises_pass_the_task_quote_gate() {
+    for quote in [
+        "I promise to email the report tomorrow.",
+        "We commit to sending the report tomorrow.",
+    ] {
+        assert!(quote_options(quote)
+            .iter()
+            .any(|quote| validate::task_quote_allowed(quote)));
+    }
+    for quote in [
+        "I do not promise to email the report tomorrow.",
+        "I promise to send the report if the budget is approved.",
+        "Do I promise to email the report tomorrow?",
+    ] {
+        assert!(!quote_options(quote)
+            .iter()
+            .any(|quote| validate::task_quote_allowed(quote)));
+    }
+}

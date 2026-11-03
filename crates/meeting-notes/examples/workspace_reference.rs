@@ -17,6 +17,12 @@ fn main() -> Result<()> {
         .next()
         .unwrap_or_else(|| "http://127.0.0.1:1235/v1/".into());
     let model = args.next().unwrap_or_else(|| "google/gemma-4-e4b".into());
+    let language = args.next().unwrap_or_else(|| "de".into());
+    ensure!(
+        ["de", "en"].contains(&language.as_str()),
+        "Unknown fixture language"
+    );
+    let english = language == "en";
     let connection = Connection {
         endpoint,
         model,
@@ -43,15 +49,22 @@ fn main() -> Result<()> {
         &folder.join("live-notes"),
         "synthetic-workspace-reference",
         connection,
-        "de",
+        &language,
     )?
     .with_workspace(context)?
     .with_residency(lease.clone())?;
     let start = Instant::now();
-    let lines=[
-        "Robin sagt: Ich schreibe den Bericht bis Freitag. Zum Budget habe ich noch keine Zusage. Vielleicht könnten wir die Webseite im Dezember erneuern. Das ist keine Zusage.",
-        "Wir entscheiden uns für den Pilotstart am 12. November. Die Freigabe für den Entwurf ist erteilt. Zum Budget wurde noch keine neue Entscheidung getroffen.",
-    ];
+    let lines = if english {
+        [
+            "Robin says: I promise to email the report tomorrow. Who can approve the budget? There is no commitment on the budget. Maybe we could renew the website in December. That is not a commitment.",
+            "We decide to start the pilot on November 12. The draft is approved. There is still no decision on the budget.",
+        ]
+    } else {
+        [
+            "Robin sagt: Ich schreibe den Bericht bis Freitag. Zum Budget habe ich noch keine Zusage. Vielleicht könnten wir die Webseite im Dezember erneuern. Das ist keine Zusage.",
+            "Wir entscheiden uns für den Pilotstart am 12. November. Die Freigabe für den Entwurf ist erteilt. Zum Budget wurde noch keine neue Entscheidung getroffen.",
+        ]
+    };
     let mut total_retries = 0;
     let mut parts = vec![];
     let mut first_ids = vec![];
@@ -75,10 +88,10 @@ fn main() -> Result<()> {
         let view = runner.view();
         let state = view.workspace.as_ref().context("Workspace view missing")?;
         ensure!(
-            !state
-                .entities
-                .iter()
-                .any(|e| e.kind == "task" && e.text.to_lowercase().contains("webseite")),
+            !state.entities.iter().any(|e| e.kind == "task"
+                && e.text
+                    .to_lowercase()
+                    .contains(if english { "website" } else { "webseite" })),
             "Nonbinding suggestion became a task"
         );
         ensure!(
@@ -132,7 +145,7 @@ fn main() -> Result<()> {
     std::fs::write(
         folder.join("reference-result.json"),
         serde_json::to_vec_pretty(
-            &serde_json::json!({"synthetic":true,"validationRetries":total_retries,"promptVersion":meeting_notes::workspace::PROMPT_VERSION,"provider":"actual local","elapsedSeconds":start.elapsed().as_secs_f64(),"impulsesRetained":true,"positiveTask":true,"nonbindingNotTask":true,"stateBytes":before.len(),"reopenByteEqual":true,"hardwareCaptureTest":false}),
+            &serde_json::json!({"synthetic":true,"language":language,"validationRetries":total_retries,"promptVersion":meeting_notes::workspace::PROMPT_VERSION,"provider":"actual local","elapsedSeconds":start.elapsed().as_secs_f64(),"impulsesRetained":true,"positiveTask":true,"nonbindingNotTask":true,"stateBytes":before.len(),"reopenByteEqual":true,"hardwareCaptureTest":false}),
         )?,
     )?;
     Ok(())

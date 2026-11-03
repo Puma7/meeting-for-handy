@@ -527,7 +527,17 @@ pub fn read_latest(root: &Path, meeting_id: &str) -> Result<Option<LiveView>> {
         view.last_request = diagnostics::latest(&folder);
         let workspace = folder.join("workspace-v9");
         match read_workspace_if_present(&workspace) {
-            Ok(Some(state)) => view.attach_workspace(state),
+            Ok(Some(state)) => {
+                let timestamp = |value: Option<&str>| {
+                    value.and_then(|at| chrono::DateTime::parse_from_rfc3339(at).ok())
+                };
+                if view.updated_at.is_none()
+                    || timestamp(state.updated_at.as_deref())
+                        >= timestamp(view.updated_at.as_deref())
+                {
+                    view.attach_workspace(state);
+                }
+            }
             Ok(None) => {}
             Err(_) => view.damaged_runs += 1,
         }

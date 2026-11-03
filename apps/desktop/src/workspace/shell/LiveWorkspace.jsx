@@ -1,3 +1,4 @@
+import { workspaceStorageKey } from "../workspaceStorage";
 import { Fragment, useEffect, useRef, useState } from "react";
 import {
   Activity,
@@ -165,7 +166,7 @@ export function LiveWorkspace({
     if (action === "copy") chooseLayout(id);
     return null;
   }
-  const storageKey = `handymeeting.workspace.v1.${meeting.id}`;
+  const storageKey = workspaceStorageKey(meeting.id);
   const [loaded] = useState(() => {
     try {
       const raw = localStorage.getItem(storageKey);
@@ -485,9 +486,11 @@ export function LiveWorkspace({
             <span className="workspace-capture-state">
               {onStopRecording ||
               ["recording", "streaming"].includes(meeting.status)
-                ? paused
-                  ? "Aufnahme pausiert"
-                  : "Aufnahme läuft"
+                ? captureError
+                  ? "Aufnahme prüfen"
+                  : paused
+                    ? "Aufnahme pausiert"
+                    : "Aufnahme läuft"
                 : "Erkennung holt nach"}
             </span>
           )}
@@ -628,9 +631,14 @@ export function LiveWorkspace({
         <div className="meeting-app">
           <div className="app-interior">
             <div className="meeting-workspace">
-              {(captureError || error || status?.error) && (
+              {captureError && (
+                <div className="state-banner warning" role="alert">
+                  {captureError}
+                </div>
+              )}
+              {(error || status?.error) && (
                 <div className="state-banner warning" role="status">
-                  {captureError || error || status?.error}
+                  {error || status?.error}
                 </div>
               )}
               {storageBlocked && (

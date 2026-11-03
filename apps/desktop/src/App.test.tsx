@@ -1906,7 +1906,11 @@ it("opens the full-window workspace on demand and switches views without stoppin
   const api = fakeApi(active);
   api.getAppState = vi
     .fn()
-    .mockResolvedValue({ ...state(active), recording: true });
+    .mockResolvedValue({
+      ...state(active),
+      recording: true,
+      error: "Mikrofon getrennt. Aufnahme beenden und Gerät neu verbinden.",
+    });
   api.getLiveNotes = vi
     .fn()
     .mockResolvedValue({ status: "off", running: false });
@@ -1957,6 +1961,9 @@ it("opens the full-window workspace on demand and switches views without stoppin
       expect(api.getLiveNotes).toHaveBeenCalledWith(active.id, true),
     );
     const shadow = within(getShadow() as unknown as HTMLElement);
+    expect(shadow.getByRole("alert").textContent).toContain(
+      "Mikrofon getrennt",
+    );
     expect(
       shadow.getByRole("button", { name: "Aufnahme beenden" }),
     ).toBeTruthy();
