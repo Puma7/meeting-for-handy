@@ -4,6 +4,8 @@ mod control;
 pub mod diagnostics;
 mod listing;
 pub mod live;
+#[cfg(target_os = "macos")]
+pub mod macos_memory;
 mod markdown;
 mod models;
 pub mod name_candidates;

@@ -643,3 +643,98 @@ fn explicit_english_promises_pass_the_task_quote_gate() {
             .any(|quote| validate::task_quote_allowed(quote)));
     }
 }
+
+#[test]
+fn latest_display_compares_workspace_activity_across_run_directories() {
+    let root = tempfile::tempdir().unwrap();
+    let connection = |model: &str| crate::Connection {
+        endpoint: "http://127.0.0.1:1235/v1/".into(),
+        model: model.into(),
+        mode: "local".into(),
+        cloud_consent: false,
+        api_key: String::new(),
+    };
+    let first = crate::live::LiveRunner::start(root.path(), "meeting", connection("first"), "de")
+        .unwrap()
+        .with_workspace(WorkspaceContext::default())
+        .unwrap();
+    let folder = first.workspace_folder().unwrap();
+    drop(first);
+    let second =
+        crate::live::LiveRunner::start(root.path(), "meeting", connection("second"), "de").unwrap();
+    assert_eq!(
+        crate::live::read_latest(root.path(), "meeting")
+            .unwrap()
+            .unwrap()
+            .model,
+        "second"
+    );
+    let original = store::read(&folder).unwrap();
+    let mut updated = original.clone();
+    updated.revision += 1;
+    updated.updated_at = Some((chrono::Utc::now() + chrono::Duration::seconds(1)).to_rfc3339());
+    store::append(
+        &folder,
+        &store::Delta::between(&original, &updated, vec![], vec![]),
+    )
+    .unwrap();
+    let selected = crate::live::read_latest(root.path(), "meeting")
+        .unwrap()
+        .unwrap();
+    assert_eq!(selected.model, "first");
+    assert_eq!(selected.updated_at, updated.updated_at);
+    drop(second);
+}
+
+#[test]
+fn completion_accepts_explicit_reports_but_rejects_uncertainty() {
+    for quote in [
+        "Ich habe den Bericht verschickt.",
+        "I sent the report yesterday.",
+        "We have submitted the report.",
+        "Die Freigabe ist erteilt.",
+    ] {
+        assert!(validate::completion_quote_allowed(quote), "{quote}");
+    }
+    for quote in [
+        "Ich habe den Bericht nicht verschickt.",
+        "Ich werde den Bericht verschicken.",
+        "If I sent the report, check the inbox.",
+        "I haven't sent the report.",
+        "I might have sent the report.",
+        "Is it done?",
+        "Ich habe den Bericht. Danach: Thema verschickt laut Notiz.",
+    ] {
+        assert!(!validate::completion_quote_allowed(quote), "{quote}");
+    }
+}
+
+#[test]
+fn a_reshared_agenda_topic_starts_open_without_reusing_old_evidence() {
+    let mut state = WorkspaceState::default();
+    let context = WorkspaceContext {
+        agenda: vec![Agenda {
+            id: "e_topic".into(),
+            revision: 1,
+            text: "Freigabe".into(),
+        }],
+        ..Default::default()
+    };
+    state.apply_context(&context).unwrap();
+    state.entities[0].status = "discussed".into();
+    state.entities[0].human_locked = true;
+    state.overview_refs.push("e_topic".into());
+    state.entities[0].evidence.push(crate::Evidence {
+        source_id: "s_previous".into(),
+        quote: "Wir haben die Freigabe besprochen.".into(),
+    });
+    state.apply_context(&WorkspaceContext::default()).unwrap();
+    assert_eq!(state.entities[0].status, "discussed");
+    assert!(state.context_excluded_ids.contains(&"e_topic".to_owned()));
+    assert!(state.overview_refs.is_empty());
+    state.apply_context(&context).unwrap();
+    assert!(!state.context_excluded_ids.contains(&"e_topic".to_owned()));
+    assert_eq!(state.entities[0].status, "open");
+    assert!(!state.entities[0].human_locked);
+    assert!(state.entities[0].evidence.is_empty());
+}

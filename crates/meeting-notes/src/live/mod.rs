@@ -513,34 +513,37 @@ impl LiveRunner {
 
 /// The newest readable run of a meeting for display, without creating any model client.
 pub fn read_latest(root: &Path, meeting_id: &str) -> Result<Option<LiveView>> {
-    let (mut runs, mut damaged) = list_runs(root)?;
-    runs.retain(|run| {
-        let matches = run.run.meeting_id == meeting_id;
-        if !matches {
+    let (runs, mut damaged) = list_runs(root)?;
+    let timestamp =
+        |value: Option<&str>| value.and_then(|at| chrono::DateTime::parse_from_rfc3339(at).ok());
+    let mut newest = None;
+    for run in &runs {
+        if run.run.meeting_id != meeting_id {
             damaged += 1;
+            continue;
         }
-        matches
-    });
-    if let Some(run) = runs.first() {
-        let mut view = LiveView::from_run(run, damaged);
         let folder = root.join(&run.run.id);
-        view.last_request = diagnostics::latest(&folder);
-        let workspace = folder.join("workspace-v9");
-        match read_workspace_if_present(&workspace) {
-            Ok(Some(state)) => {
-                let timestamp = |value: Option<&str>| {
-                    value.and_then(|at| chrono::DateTime::parse_from_rfc3339(at).ok())
-                };
+        let mut view = LiveView::from_run(run, 0);
+        let classic_activity = timestamp(view.updated_at.as_deref());
+        match read_workspace_if_present(&folder.join("workspace-v9")) {
+            Ok(Some(state))
                 if view.updated_at.is_none()
-                    || timestamp(state.updated_at.as_deref())
-                        >= timestamp(view.updated_at.as_deref())
-                {
-                    view.attach_workspace(state);
-                }
+                    || timestamp(state.updated_at.as_deref()) >= classic_activity =>
+            {
+                view.attach_workspace(state);
             }
-            Ok(None) => {}
-            Err(_) => view.damaged_runs += 1,
+            Ok(_) => {}
+            Err(_) => damaged += 1,
         }
+        let activity =
+            timestamp(view.updated_at.as_deref()).or_else(|| timestamp(Some(&run.run.created_at)));
+        if newest.as_ref().is_none_or(|(at, _, _)| activity > *at) {
+            newest = Some((activity, folder, view));
+        }
+    }
+    if let Some((_, folder, mut view)) = newest {
+        view.last_request = diagnostics::latest(&folder);
+        view.damaged_runs = damaged;
         return Ok(Some(view));
     }
     Ok((damaged > 0).then(|| LiveView::damaged_only(damaged)))

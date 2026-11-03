@@ -206,6 +206,13 @@ export function LiveWorkspace({
   const workspace = status?.view?.workspace;
   const entities = workspace?.entities || [],
     originals = workspace?.originals || [];
+  const lastEvidenceEnd = originals.reduce(
+    (end, source) =>
+      workspace?.supersededSources?.includes(source.id)
+        ? end
+        : Math.max(end, source.endMs),
+    0,
+  );
   async function poll() {
     if (polling.current) return;
     polling.current = true;
@@ -546,6 +553,11 @@ export function LiveWorkspace({
                   ? "Cloud-Modell in den Einstellungen ausgewählt"
                   : workspaceStatusText(status)
                 : "Gespeicherte Auswertung wird geladen …"}
+            {lastEvidenceEnd > 0 &&
+              ` · Belege bis ${formatTime(lastEvidenceEnd / 1000)}`}
+            {status?.running &&
+              status.pendingChars > 0 &&
+              ` · ${status.pendingChars.toLocaleString(language)} Zeichen noch nicht ausgewertet`}
           </span>
           <label>
             Intervall{" "}
@@ -822,7 +834,7 @@ function LiveTopics({ ctx, entities, quote, override, full, onExpand }) {
   });
   const topics = ctx.state.topics.map((t) => ({
     ...t,
-    native: entities.find((e) => e.id === t.id),
+    native: t.shared ? entities.find((e) => e.id === t.id) : undefined,
   }));
   const done = topics.filter((t) => t.native?.status === "discussed").length;
   function change(fn) {

@@ -145,17 +145,9 @@ pub(crate) fn apply(
             .join(" ");
         if c.status == "completed" {
             ensure!(
-                [
-                    "ist erledigt",
-                    "ist erteilt",
-                    "habe erledigt",
-                    "habe freigegeben",
-                    "is complete",
-                    "is done",
-                    "has been approved"
-                ]
-                .iter()
-                .any(|s| quotes.contains(s)),
+                c.evidence
+                    .iter()
+                    .any(|e| completion_quote_allowed(&e.quote)),
                 "Eine Zusage ist keine Erledigung."
             );
         }
@@ -289,6 +281,101 @@ pub(crate) fn apply(
     next.events.extend(events.clone());
     *state = next;
     Ok(events)
+}
+
+/// Explicit past or completed-state wording, with negation and uncertainty rejected.
+pub(super) fn completion_quote_allowed(quote: &str) -> bool {
+    let lower = quote.to_lowercase();
+    let words: Vec<_> = lower
+        .split(|c: char| !c.is_alphabetic())
+        .filter(|s| !s.is_empty())
+        .collect();
+    if quote.contains('?')
+        || words.iter().any(|word| {
+            [
+                "nicht",
+                "kein",
+                "keine",
+                "keinen",
+                "noch",
+                "falls",
+                "wenn",
+                "würde",
+                "werde",
+                "vielleicht",
+                "not",
+                "never",
+                "no",
+                "if",
+                "unless",
+                "would",
+                "will",
+                "might",
+                "maybe",
+                "could",
+                "should",
+                "haven",
+                "hasn",
+                "didn",
+                "isn",
+                "wasn",
+                "won",
+            ]
+            .contains(word)
+        })
+    {
+        return false;
+    }
+    let phrase = |sequence: &[&str]| words.windows(sequence.len()).any(|part| part == sequence);
+    if [
+        &["ist", "erledigt"][..],
+        &["ist", "erteilt"],
+        &["ist", "abgeschlossen"],
+        &["is", "complete"],
+        &["is", "done"],
+        &["has", "been", "approved"],
+    ]
+    .iter()
+    .any(|sequence| phrase(sequence))
+    {
+        return true;
+    }
+    let english = [
+        "sent",
+        "emailed",
+        "completed",
+        "finished",
+        "submitted",
+        "approved",
+        "delivered",
+        "uploaded",
+        "published",
+    ];
+    if words
+        .windows(2)
+        .any(|part| ["i", "we"].contains(&part[0]) && english.contains(&part[1]))
+        || words.windows(3).any(|part| {
+            ["i", "we"].contains(&part[0]) && part[1] == "have" && english.contains(&part[2])
+        })
+    {
+        return true;
+    }
+    let german = [
+        "erledigt",
+        "freigegeben",
+        "abgeschlossen",
+        "verschickt",
+        "gesendet",
+        "eingereicht",
+        "geliefert",
+        "hochgeladen",
+        "veröffentlicht",
+    ];
+    lower.split(['.', '!', ';', '\n']).any(|sentence| {
+        let mut words = sentence.split(|c: char| !c.is_alphabetic());
+        words.any(|word| ["habe", "haben"].contains(&word))
+            && words.any(|word| german.contains(&word))
+    })
 }
 
 fn missing_pledge(quote: &str) -> bool {

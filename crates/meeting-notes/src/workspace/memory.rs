@@ -65,7 +65,12 @@ fn available() -> Option<u64> {
             })
         })
 }
-#[cfg(not(any(windows, target_os = "linux")))]
+#[cfg(target_os = "macos")]
+fn available() -> Option<u64> {
+    let (used, total) = crate::macos_memory::used_and_total()?;
+    total.checked_sub(used)
+}
+#[cfg(not(any(windows, target_os = "linux", target_os = "macos")))]
 fn available() -> Option<u64> {
     None
 }

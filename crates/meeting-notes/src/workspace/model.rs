@@ -129,15 +129,29 @@ impl WorkspaceState {
                     self.context_excluded_ids.push(e.id.clone());
                 }
             }
-            self.overview_refs
-                .retain(|id| !self.context_excluded_ids.contains(id));
         }
+        for entity in self
+            .entities
+            .iter()
+            .filter(|entity| entity.kind == "agenda")
+        {
+            if !context.agenda.iter().any(|entry| entry.id == entity.id)
+                && !self.context_excluded_ids.contains(&entity.id)
+            {
+                self.context_excluded_ids.push(entity.id.clone());
+            }
+        }
+        self.overview_refs
+            .retain(|id| !self.context_excluded_ids.contains(id));
         for a in &context.agenda {
+            let previously_shared = self.context.agenda.iter().any(|entry| entry.id == a.id);
+            self.context_excluded_ids.retain(|id| id != &a.id);
             match self.entities.iter_mut().find(|e| e.id == a.id) {
-                Some(e) if e.text != a.text => {
+                Some(e) if e.text != a.text || !previously_shared => {
                     e.text = a.text.clone();
                     e.revision += 1;
                     e.status = "open".into();
+                    e.attention = "normal".into();
                     e.evidence.clear();
                     e.human_locked = false;
                 }

@@ -70,6 +70,7 @@ function fixture() {
     running: true,
     intervalMs: 120000,
     updateElapsedMs: 210000,
+    pendingChars: 180,
     view: { runId: "run-current", model: "synthetic-test", workspace },
     workspaceContext: context,
   };
@@ -195,7 +196,7 @@ describe("Native workspace boundary", () => {
       />,
     );
     await screen.findByText(
-      "Auswertung läuft · 3:30 · weiterer Text folgt danach",
+      "Auswertung läuft · 3:30 · weiterer Text folgt danach · Belege bis 00:30 · 180 Zeichen noch nicht ausgewertet",
     );
     fireEvent.click(screen.getByRole("button", { name: "Aktualisieren" }));
     await waitFor(() => expect(f.adapter.refresh).toHaveBeenCalledTimes(1));
