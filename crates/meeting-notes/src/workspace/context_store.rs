@@ -125,6 +125,7 @@ fn replay(
         return Ok(fallback.clone());
     }
     let mut context = WorkspaceContext::default();
+    let mut checkpoint_reached = fallback.revision == 0;
     for (index, path) in paths.iter().enumerate() {
         let bytes = store::read_bounded(path)?;
         let entry: Entry = serde_json::from_slice(&bytes)?;
@@ -162,8 +163,29 @@ fn replay(
         context.overrides.extend(entry.overrides);
         context.revision = entry.revision;
         context.validate()?;
+        if index == 0 && context.revision > fallback.revision {
+            // Older checkpoints can have no separate journal. Its first full reset
+            // must then be the immediate successor and retain confirmed actions.
+            ensure!(
+                fallback.revision.checked_add(1) == Some(context.revision)
+                    && context.overrides.starts_with(&fallback.overrides),
+                "Der Meetingkontext schließt nicht an den gespeicherten Stand an."
+            );
+            checkpoint_reached = true;
+        }
+        if context.revision == fallback.revision {
+            ensure!(
+                context == *fallback,
+                "Der Meetingkontext widerspricht dem gespeicherten Stand."
+            );
+            checkpoint_reached = true;
+        }
         apply(&context, activity)?;
     }
+    ensure!(
+        checkpoint_reached && context.revision >= fallback.revision,
+        "Der Meetingkontext endet vor dem gespeicherten Stand. Vorhandene Dateien bleiben erhalten."
+    );
     Ok(context)
 }
 /// Append a durable context revision only when its base matches; retain every earlier human override.
