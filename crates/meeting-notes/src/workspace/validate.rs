@@ -131,6 +131,11 @@ pub(crate) fn apply(
         } else {
             crate::Kind::Summary
         };
+        let screen = if c.kind == "task" && old.is_some() {
+            crate::validation::screen_task_status_facts
+        } else {
+            crate::validation::screen_facts
+        };
         let mut text_evidence = c.evidence.clone();
         if c.text.is_none() && c.kind != "agenda" {
             if let Some(old) = old {
@@ -146,7 +151,7 @@ pub(crate) fn apply(
                     due: c.due.clone(),
                     evidence: c.evidence.clone(),
                 };
-                let status = crate::validation::screen_facts(
+                let status = screen(
                     vec![status],
                     &request.transcript_sources,
                     &kind,
@@ -180,7 +185,7 @@ pub(crate) fn apply(
             due: c.due.clone(),
             evidence: text_evidence,
         };
-        let checked = crate::validation::screen_facts(
+        let checked = screen(
             vec![fact],
             &request.transcript_sources,
             &kind,
@@ -652,6 +657,7 @@ pub(super) fn missing_pledge(quote: &str) -> bool {
 pub(super) fn task_quote_allowed(quote: &str) -> bool {
     let text = quote.to_lowercase();
     !missing_pledge(quote)
+        && !crate::validation::commitment_refused(quote)
         && !text.contains('?')
         && !text.split(|c: char| !c.is_alphabetic()).any(|word| {
             [

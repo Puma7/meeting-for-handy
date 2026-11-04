@@ -28,14 +28,14 @@ Der vollständige TEST_REPORT bleibt byteunverändert; er wurde für diese Nacha
 
 | Prüfung | Ergebnis und Bezug |
 | --- | --- |
-| Rust-Workspace / alle Targets | 542 frisch bestanden, darunter 146 Notizen- und 34 Providerprotokolltests; drei bestehende besondere Einstiege regulär ignoriert. Die drei zusätzlichen Statusregressionen sind enthalten. |
+| Rust-Workspace / alle Targets | 544 frisch bestanden, darunter 148 Notizen- und 34 Providerprotokolltests; drei bestehende besondere Einstiege regulär ignoriert. Die Status- und neuen Zusagen-/Ablehnungsregressionen sind enthalten; einer der besonderen Einstiege wurde zusätzlich ausdrücklich ausgeführt (siehe Langsammodell). |
 | Rustformat / Clippy | Auf diesem Korrekturstand frisch bestanden; gesperrte Abhängigkeiten und Warnungen als Fehler. |
-| Oberfläche | 375 Tests, TypeScript, Produktionsbuild und Format auf `89b85e8` bestanden. Sämtliche UI-Bytes sind gegenüber diesem Stand unverändert; diese Prüfungen wurden für die anschließende reine Rust-Statuskorrektur nicht erneut ausgeführt. |
+| Oberfläche | 375 Tests, TypeScript, Produktionsbuild und vollständiger Formatcheck unter src frisch bestanden. Eine zusätzlich gefundene gemischte letzte Zeile einer Typdeklaration wurde ausschließlich von CRLF zu LF vereinheitlicht; Deklarationstoken unverändert, TypeScript/Build/Format danach erneut bestanden. |
 | Projektfreigabe | `verify.ps1` vor jeder Bereitstellung: 47 PCM-, 35 Notizen-, 28 Vorlagen-, acht Agenten- und Monitorprüfungen bestanden. Der folgende Quellupload bleibt an einen abschließenden erfolgreichen Lauf gebunden. |
-| Echte lokale englische Referenz | Nach den drei zusätzlichen Statuskorrekturen 125,2169942 s, keine Validierungswiederholung. Positive Aufgabe, unverbindliche Aussage, Impulserhalt, menschlicher Status nach Protokolländerung und bytegleiche Wiederöffnung bestanden. Die früheren Läufe auf `89b85e8` mit 138,1599687 s, auf `1768125` mit 129,685532 s und auf `34c1b20` mit 138,0743712 s bleiben erhalten und werden nicht als neu ausgeführt gezählt. |
+| Echte lokale Referenzen Deutsch und Englisch | Nach der gemeinsamen Zusagen-/Ablehnungskorrektur: Deutsch 109,7145876 s, Englisch 129,9766782 s, jeweils 0/0 Validierungswiederholungen (DE/EN). Positive Aufgabe, unverbindliche Aussage, Impulserhalt, menschlicher Status nach Protokolländerung und bytegleiche Wiederöffnung bestanden. Frühere Läufe auf `1e73d8f` mit 125,2169942 s, `89b85e8` mit 138,1599687 s, `1768125` mit 129,685532 s und `34c1b20` mit 138,0743712 s bleiben historische Belege. |
 | Frühere lokale Referenzen | Deutsch 100,9989873 s und Englisch 125,0518623 s auf dem Elternstand `3d4d013`, jeweils ohne Validierungswiederholung. Die deutsche Zusage enthält tatsächlich „jedenfalls“. Diese Läufe werden nicht als erneut ausgeführt ausgegeben. |
-| Langsammodell / zwei Spuren | Historischer, ausdrücklich ausgeführter besonderer Test auf `1768125`: 244,43 s Laufzeit, 210 s kontrollierte SSE-Antwortpause, nächster Refresh nach 210,0497661 s, maximal eine Modellanfrage, ein erhaltener Impuls. Je 3.706.880 Samples / 16.000 Hz = 231,68 s pro synthetischer Spur. Beide dauerhaften PCM-Schreiber liefen nach dem Auswertungsstopp weiter. Der frühere Lauf auf `3d4d013` bleibt ebenfalls historischer Beleg. Für diese reine Status-/Beschriftungsnacharbeit wurde der lange Test nicht erneut ausgeführt; sein Worker-/Transport-/Aufnahmecode ist byteunverändert. |
-| Browsergegenprüfung | Tatsächliche Sidebar-/RecordingStatus-Komponenten auf `3d4d013`, danach unveränderte Sidebar-/Status-/CSS-Bytes: bei 390/740/1280 px ausgeklappt alle vier Statusfelder sichtbar, eingeklappt verborgen; Rechnerdetails erreichbar, keine Konsolenfehler. |
+| Langsammodell / zwei Spuren | Auf diesem Korrekturstand ausdrücklich neu ausgeführter besonderer Test: 244,32 s Laufzeit, 210 s kontrollierte SSE-Antwortpause, nächster Refresh nach 210,0415725 s, maximal eine Modellanfrage, ein erhaltener Impuls. Samples je Spur 3758720/3758720, jeweils geteilt durch 16.000 Hz = 234,92/234,92 s. Beide dauerhaften PCM-Schreiber liefen nach dem Auswertungsstopp weiter. Frühere Läufe auf `1768125` und `3d4d013` bleiben historische Belege. |
+| Browsergegenprüfung | Neu mit tatsächlichen Sidebar-/RecordingStatus-Komponenten und synthetischen Werten bei 390/740/1280 px: vorher aufgeklappt nur 50 px Sprachauswahl in schmalen Fenstern, nachher 161 px und vollständig lesbarer Text. Aufnahmestatus sichtbar, kein horizontaler Überlauf, Ein-/Ausklappen und Rechnerdetails erreichbar, keine Seitenfehler. Kein nativer IPC- oder Gerätezugriff. |
 
 Die echten Referenzen verwendeten ausschließlich synthetischen Text und das vorhandene
 **google/gemma-4-e4b Q4_K_M** mit 6.326.936.720 Modellbytes, LM Studio **0.4.26.0**,
@@ -172,6 +172,37 @@ bewahren den ursprünglichen Aufgabentext und sämtliche ursprünglichen Belege.
 Der erste breitere Lauf war durch beschränkte lokale Datei-/Verbindungsrechte blockiert und wurde
 kontrolliert beendet; er zählt nicht als bestandene Prüfung. Der anschließende vollständige Lauf
 bestand mit den erforderlichen lokalen Ausführungsrechten, unveränderten Prüfregeln und gesperrten Paketen.
+
+## Neue Aufgaben und schmale Seitenleiste: weitere vollständige Runde
+
+Der vollständige CodeRabbit-Lauf auf `1e73d8f` prüfte wieder alle 100 vorgesehenen Dateien ohne
+Verfügbarkeitslücke und fand eine zu schmale Sprachauswahl in der aufgeklappten Seitenleiste.
+Der ebenfalls erwähnte horizontale Aufnahmestatus war nicht reproduzierbar: Eine spätere Regel
+setzte ihn bei derselben Fensterbreite bereits auf Spaltenrichtung. Die eigentlichen 68-Pixel-Sonderregeln
+für Sprachauswahl und Statuskarte gelten jetzt nur im ausdrücklich eingeklappten Zustand.
+Die Browsergegenprobe bestätigt die Korrektur; eingeklappt bleiben die bisherigen Breiten erhalten.
+Zwei zusätzliche Hygieneaussagen im Risikotext wurden auf Nachfrage vom Anbieter nach Quellenprüfung
+ausdrücklich zurückgenommen: Die Listener nutzen freie Ports; die genannten Festport-URLs sind reine
+Metadaten. Der ausdrücklich langsame Test behält absichtlich synthetische Belege. Daraus folgt kein
+neuer Cleanupauftrag und keine Löschung früherer Quellen oder Belege.
+
+Die parallele Codex-Prüfung fand einen echten weiteren Fehler: „Ich übernehme den Bericht nicht“
+konnte eine neue Aufgabe erzeugen. Zwei neue öffentliche Validatorregressionen scheiterten vorher.
+Nachher bestehen elf Zusagen-/Ablehnungsfälle im Workspace und zehn in der klassischen Auswertung.
+Sechs früher gespeicherte, wörtlich belegte klassische Ergebnisse bleiben bei Wiederöffnung bytegleich;
+neue Erzeugungsregeln werden nicht rückwirkend auf alte Checkpoints angewendet.
+
+Die gemeinsame Prüfung unterscheidet neue Verpflichtungen von bestehenden Aufgabenstatusänderungen.
+Die neuen Ablehnungsregeln ergänzen ausschließlich neue Verpflichtungen; alle früheren Quellen-, Zahlen-,
+Metadaten- und Unsicherheitsprüfungen bleiben erhalten. Abschluss und Rücknahme benötigen weiterhin ihre
+eigenen geprüften Originalbelege. Die vorhandene enge Ausnahme „nicht vergessen / not forget“ bleibt erhalten.
+Der Zwischenentwurf, der auch gültige „nicht mehr benötigt“-Rücknahmen abwies, wurde durch die vorhandene
+Regression erkannt und vor Veröffentlichung korrigiert. Die 122 früheren Statusfälle bestehen weiter.
+
+Die zwei lediglich nummerierten Validator-Testmodule sind unter Erhalt aller Testkörper und Fallzahlen
+zusammengeführt. Dadurch bleibt auch die gemeinsame Produktionskorrektur innerhalb der unveränderten
+100-Dateien-Anbietergrenze: 102 tatsächliche PR-Dateien, weiterhin nur die zwei bisherigen Lockdatei-Filter.
+Keine Prüfkonfiguration, Frist oder Dokumentationsgrenze wurde abgeschwächt.
 
 ## Reviewabdeckung und Veröffentlichung
 

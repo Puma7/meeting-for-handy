@@ -57,11 +57,35 @@ pub(crate) fn screen_facts(
     template_id: &str,
     limit: usize,
 ) -> CheckedAnswer {
+    screen_facts_with_obligation_check(facts, sources, kind, template_id, limit, true)
+}
+
+/// Existing task statuses are not new obligations: "no longer needed" can
+/// withdraw a task. Keep all prior literal/number/metadata/uncertainty checks;
+/// workspace validation separately requires explicit completion/withdrawal evidence.
+pub(crate) fn screen_task_status_facts(
+    facts: Vec<Fact>,
+    sources: &[Source],
+    kind: &Kind,
+    template_id: &str,
+    limit: usize,
+) -> CheckedAnswer {
+    screen_facts_with_obligation_check(facts, sources, kind, template_id, limit, false)
+}
+
+fn screen_facts_with_obligation_check(
+    facts: Vec<Fact>,
+    sources: &[Source],
+    kind: &Kind,
+    template_id: &str,
+    limit: usize,
+    require_new_commitment: bool,
+) -> CheckedAnswer {
     let allowed = allowed_sources(sources);
     let mut checked = CheckedAnswer::default();
     for fact in facts {
         let reason = check_fact(&fact, &allowed, kind)
-            .or_else(|| generation_check(&fact, kind))
+            .or_else(|| generation_check(&fact, kind, require_new_commitment))
             .or_else(|| {
                 crate::name_candidates::check_item(template_id, &fact)
                     .err()
@@ -83,7 +107,11 @@ pub(crate) fn screen_facts(
 
 /// Additional conservative rules for newly generated answers only. Historical checkpoints
 /// still use their original literal-source contract; reading never rewrites older work.
-fn generation_check(fact: &Fact, kind: &Kind) -> Option<RejectionReason> {
+fn generation_check(
+    fact: &Fact,
+    kind: &Kind,
+    require_new_commitment: bool,
+) -> Option<RejectionReason> {
     let quoted: HashSet<String> = fact
         .evidence
         .iter()
@@ -101,7 +129,17 @@ fn generation_check(fact: &Fact, kind: &Kind) -> Option<RejectionReason> {
         return Some(RejectionReason::NumberNotQuoted);
     }
     if *kind == Kind::Tasks {
-        let commitments: Vec<_> = fact.evidence.iter().map(|e| commitment(&e.quote)).collect();
+        let commitments: Vec<_> = fact
+            .evidence
+            .iter()
+            .map(|e| {
+                if require_new_commitment && commitment_refused(&e.quote) {
+                    Commitment::Nonbinding
+                } else {
+                    commitment(&e.quote)
+                }
+            })
+            .collect();
         if commitments.iter().all(|c| *c == Commitment::Nonbinding) {
             return Some(RejectionReason::NonbindingTask);
         }
@@ -257,6 +295,37 @@ const AFFIRMING_NEGATIONS: &[&str] = &[
     "won't forget",
 ];
 
+/// Refusal screen for newly generated obligations, shared with workspace schema
+/// admission. Existing literal checkpoints are not reinterpreted by this rule.
+pub(crate) fn commitment_refused(quote: &str) -> bool {
+    let text = quote.to_lowercase();
+    let without_affirmation = AFFIRMING_NEGATIONS
+        .iter()
+        .fold(text, |text, phrase| text.replace(phrase, " "));
+    without_affirmation
+        .split(|c: char| !c.is_alphabetic())
+        .any(|word| {
+            [
+                "nicht",
+                "nie",
+                "niemals",
+                "keineswegs",
+                "kein",
+                "keine",
+                "keinen",
+                "keinem",
+                "keiner",
+                "keines",
+                "niemand",
+                "not",
+                "never",
+                "nobody",
+                "noone",
+            ]
+            .contains(&word)
+        })
+}
+
 /// Conservative commitment reading of one literal quote. Hedges and refusals reject the task;
 /// a hedge directly before a date only makes the date unverified.
 fn commitment(quote: &str) -> Commitment {
@@ -389,6 +458,60 @@ fn check_fact(fact: &Fact, allowed: &HashMap<&str, &str>, kind: &Kind) -> Option
 #[cfg(test)]
 mod generation_tests {
     use super::*;
+    #[test]
+    fn explicit_refusals_are_not_generated_tasks_and_old_checkpoints_are_retained() {
+        for quote in [
+            "Ich übernehme den Bericht nicht.",
+            "Wir übernehmen den Bericht keineswegs.",
+            "Ich schreibe den Bericht niemals.",
+            "Ich verspreche nicht, den Bericht zu schreiben.",
+            "I do not promise to email the report.",
+            "We never take the report.",
+        ] {
+            let checked = check(quote, "Bericht übernehmen", Kind::Tasks);
+            assert!(checked.items.is_empty(), "{quote}");
+            assert!(!checked.rejected.is_empty(), "{quote}");
+            // Saved results use strict literal verification, not a retroactive
+            // rerun of changed generation heuristics or a silent history filter.
+            let source = Source {
+                id: "synthetic".into(),
+                source: "system".into(),
+                start_ms: 0,
+                end_ms: 1000,
+                text: quote.into(),
+            };
+            let saved = CheckedAnswer {
+                items: vec![Fact {
+                    text: "Bericht übernehmen".into(),
+                    owner: None,
+                    due: None,
+                    evidence: vec![crate::Evidence {
+                        source_id: "synthetic".into(),
+                        quote: quote.into(),
+                    }],
+                }],
+                rejected: Default::default(),
+            };
+            let bytes = serde_json::to_string(&saved).unwrap();
+            assert_eq!(
+                serde_json::to_string(&read_checkpoint(&bytes, &[source], &Kind::Tasks).unwrap())
+                    .unwrap(),
+                bytes
+            );
+        }
+        for quote in [
+            "Ich übernehme den Bericht.",
+            "Wir übernehmen den Bericht.",
+            "Ich werde den Bericht nicht vergessen.",
+            "I will not forget to email the report.",
+        ] {
+            assert_eq!(
+                check(quote, "Bericht übernehmen", Kind::Tasks).items.len(),
+                1,
+                "{quote}"
+            );
+        }
+    }
     fn check(quote: &str, text: &str, kind: Kind) -> CheckedAnswer {
         check_due(quote, text, None, kind)
     }

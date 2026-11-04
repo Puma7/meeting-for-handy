@@ -1464,12 +1464,12 @@ mark {
   .sidebar-bottom {
     padding: 0;
   }
-  .sidebar-recording {
+  .sidebar.is-collapsed .sidebar-recording {
     padding: 9px 0;
     display: flex;
     justify-content: center;
   }
-  .sidebar-recording-head {
+  .sidebar.is-collapsed .sidebar-recording-head {
     width: auto;
     justify-content: center;
   }
@@ -1483,7 +1483,7 @@ mark {
     flex-direction: column;
     gap: 12px;
   }
-  .appearance-row select {
+  .sidebar.is-collapsed .appearance-row select {
     width: 50px;
     padding: 5px 2px;
     font-size: 12px;

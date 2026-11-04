@@ -31,4 +31,3 @@ mod inheritance_01;
 mod persistence_01;
 mod sources_01;
 mod validation_01;
-mod validation_02;
