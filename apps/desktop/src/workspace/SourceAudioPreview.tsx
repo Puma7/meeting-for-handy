@@ -1,9 +1,11 @@
+import { useWorkspaceText } from "./shell/workspaceLocale.jsx";
 import { useEffect, useState } from "react";
 
 type PreviewState =
   | { status: "idle" | "loading" | "unavailable" }
   | { status: "ready"; bytes: ArrayBuffer };
 
+/** Request a bounded verified audio excerpt for one original source, cancelling stale preview results. */
 export default function SourceAudioPreview({
   file,
   load,
@@ -13,6 +15,7 @@ export default function SourceAudioPreview({
   load: (file: string) => Promise<ArrayBuffer>;
   offsetSeconds: number;
 }) {
+  const t = useWorkspaceText();
   const [preview, setPreview] = useState<PreviewState>({ status: "idle" });
   const [url, setUrl] = useState<string | null>(null);
 
@@ -27,7 +30,9 @@ export default function SourceAudioPreview({
 
   if (offsetSeconds >= 30)
     return (
-      <p>Diese Stelle liegt hinter der Vorschau der ersten 30 Sekunden.</p>
+      <p>
+        {t("Diese Stelle liegt hinter der Vorschau der ersten 30 Sekunden.")}
+      </p>
     );
 
   if (url && preview.status === "ready")
@@ -35,7 +40,7 @@ export default function SourceAudioPreview({
       <audio
         controls
         preload="metadata"
-        aria-label="Audiovorschau des Originalabschnitts"
+        aria-label={t("Audiovorschau des Originalabschnitts")}
         src={url}
         onLoadedMetadata={({ currentTarget: audio }) => {
           if (offsetSeconds < audio.duration) audio.currentTime = offsetSeconds;
@@ -60,7 +65,7 @@ export default function SourceAudioPreview({
       >
         {preview.status === "loading"
           ? "Audio wird geladen …"
-          : "Audiovorschau laden"}
+          : t("Audiovorschau laden")}
       </button>
       {preview.status === "unavailable" && (
         <p role="status">

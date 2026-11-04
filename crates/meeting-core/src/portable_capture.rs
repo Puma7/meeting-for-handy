@@ -724,7 +724,28 @@ mod tests {
         // The old helper read 11 once at process startup. A fresh helper would read 99;
         // while muted neither is allowed to become confirmed speech.
         std::fs::write(&value, b"99").unwrap();
-        thread::sleep(Duration::from_millis(700));
+        // Wait for the durable silent interval instead of assuming the worker
+        // was scheduled during a fixed wall-clock sleep on a busy CI runner.
+        let muted_deadline = Instant::now() + Duration::from_secs(10);
+        loop {
+            let silent = store.snapshot().unwrap().parts.iter().any(|part| {
+                part.source == "microphone"
+                    && !part.has_signal
+                    && part.confirmed_sample_count >= 3200
+            });
+            if silent {
+                break;
+            }
+            assert!(
+                Instant::now() < muted_deadline,
+                "Muted silence was not durably acknowledged"
+            );
+            assert!(
+                !has_sample(99),
+                "Muted helper speech became confirmed audio"
+            );
+            thread::sleep(Duration::from_millis(10));
+        }
         std::fs::write(&value, b"21").unwrap();
         controls.set_microphone_muted(false).unwrap();
         let resumed_deadline = Instant::now() + Duration::from_secs(10);

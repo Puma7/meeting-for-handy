@@ -7,12 +7,16 @@ export const modules = [
   ["impulses", "Gesprächsimpulse"],
   ["relevant", "Jetzt relevant"],
 ];
+/** Resolve the display label for a known dashboard module. */
 export const moduleName = (id) =>
   modules.find((item) => item[0] === id)?.[1] || "";
+/** Snap preset card height to the supported twelve-pixel grid. */
 export const clampHeight = (height) =>
   Math.max(180, Math.min(1200, Math.round(height / 12) * 12));
+/** Clamp a deliberate pixel resize without restoring the larger preset minimum. */
 export const clampManualHeight = (height) =>
   Math.max(72, Math.min(1200, Math.round(height)));
+/** Create an independent default arrangement for the selected built-in layout. */
 export function presetLayout(variant) {
   const rows =
     variant === "verlauf"
@@ -40,6 +44,7 @@ export function presetLayout(variant) {
     cards: rows.map(([id, column, height]) => ({ id, column, height })),
   };
 }
+/** Validate persisted columns, widths and card identities; mark corrupt preferences as blocked. */
 export function decodeLayout(raw, variant) {
   const fallback = presetLayout(variant);
   if (raw === null) return { layout: fallback, blocked: false };
@@ -94,6 +99,7 @@ export function decodeLayout(raw, variant) {
     return { layout: fallback, blocked: true };
   }
 }
+/** Move one existing card before a destination card or to a column tail without duplicating it. */
 export function moveCard(layout, id, column, beforeId = null) {
   const card = layout.cards.find((item) => item.id === id);
   if (
@@ -115,6 +121,7 @@ export function moveCard(layout, id, column, beforeId = null) {
   cards.splice(index, 0, { ...card, column });
   return { ...layout, cards };
 }
+/** Translate a keyboard direction into a stable card move within or between columns. */
 export function stepCard(layout, id, direction) {
   const card = layout.cards.find((item) => item.id === id);
   if (!card) return layout;
@@ -130,6 +137,7 @@ export function stepCard(layout, id, direction) {
     ? moveCard(layout, id, card.column, column[index + 2]?.id)
     : layout;
 }
+/** Change between two and four columns, retaining cards and clamping their destination columns. */
 export function setColumns(layout, columns) {
   if (![2, 3, 4].includes(columns) || columns === layout.columns) return layout;
   return {
@@ -144,6 +152,7 @@ export function setColumns(layout, columns) {
 }
 // Resolve the visible gap against a list excluding the dragged card. This avoids
 // shifting the destination index when moving down within the same column.
+/** Resolve a visible drop gap after excluding the dragged card, avoiding downward index shifts. */
 export function insertionTarget(
   layout,
   movingId,
@@ -177,6 +186,7 @@ export function insertionTarget(
     edge,
   };
 }
+/** Redistribute an adjacent column pair while retaining their total width and minimum sizes. */
 export function resizeColumns(layout, boundary, delta) {
   if (boundary < 0 || boundary >= layout.columns - 1 || !Number.isFinite(delta))
     return layout;
@@ -189,6 +199,7 @@ export function resizeColumns(layout, boundary, delta) {
   widths[boundary + 1] = total - widths[boundary];
   return { ...layout, widths };
 }
+/** Add a known missing module or remove its existing card while leaving other cards unchanged. */
 export function toggleCard(layout, id) {
   if (!modules.some(([key]) => key === id)) return layout;
   if (layout.cards.some((card) => card.id === id))
@@ -207,6 +218,7 @@ export function toggleCard(layout, id) {
     ],
   };
 }
+/** Exchange a module at the same slot without creating duplicate visible modules. */
 export function replaceCard(layout, id, replacement) {
   if (id === replacement || !modules.some(([key]) => key === replacement))
     return layout;
@@ -224,6 +236,7 @@ export function replaceCard(layout, id, replacement) {
   return { ...layout, cards };
 }
 
+/** Find a stable visible insertion marker for a proposed card destination. */
 export function gapAnchor(rects, y) {
   const next = rects.find((rect) => y < rect.top + rect.height / 2);
   return next

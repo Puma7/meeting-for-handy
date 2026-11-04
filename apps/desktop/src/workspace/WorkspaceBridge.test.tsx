@@ -186,6 +186,61 @@ describe("Native workspace boundary", () => {
     ).toBe(false);
     expect(f.adapter.context).not.toHaveBeenCalled();
   });
+  it("renders English workspace controls and the original audio preview", async () => {
+    const f = fixture();
+    render(
+      <LiveWorkspace
+        adapter={{ ...f.adapter, sourceAudio: vi.fn() }}
+        meeting={f.meeting}
+        language="en"
+        onBack={() => {}}
+      />,
+    );
+    expect(
+      await screen.findByRole("tab", { name: "Preparation" }),
+    ).toBeTruthy();
+    expect(screen.getByRole("tab", { name: "Transcript" })).toBeTruthy();
+    expect(screen.getByRole("tab", { name: "Overview" })).toBeTruthy();
+    expect(screen.getByRole("tab", { name: "Prompts" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Standard view" })).toBeTruthy();
+    expect(
+      screen.getByRole("button", { name: "Stop analysis only" }),
+    ).toBeTruthy();
+    fireEvent.click(screen.getByRole("tab", { name: "Preparation" }));
+    expect(screen.getByRole("textbox", { name: "My goal" })).toBeTruthy();
+    expect(
+      screen.getByRole("textbox", { name: "Private preparation" }),
+    ).toBeTruthy();
+    fireEvent.click(screen.getByRole("tab", { name: "Prompts" }));
+    fireEvent.click(
+      screen.getByRole("button", { name: /Die Freigabe bleibt noch offen/ }),
+    );
+    expect(
+      screen.getByRole("dialog", { name: "Original evidence" }),
+    ).toBeTruthy();
+    expect(
+      screen.getByRole("button", { name: "Load audio preview" }),
+    ).toBeTruthy();
+  });
+  it("keeps a dismissible foreground action error separate from recording health", async () => {
+    const f = fixture();
+    const dismiss = vi.fn();
+    render(
+      <LiveWorkspace
+        adapter={f.adapter}
+        meeting={{ ...f.meeting, status: "recording" }}
+        language="en"
+        onBack={() => {}}
+        actionError="Synthetic export failed"
+        onDismissError={dismiss}
+      />,
+    );
+    expect(await screen.findByText("Synthetic export failed")).toBeTruthy();
+    expect(screen.queryByText(/Check recording/)).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Dismiss message" }));
+    expect(dismiss).toHaveBeenCalledOnce();
+    expect(f.adapter.stop).not.toHaveBeenCalled();
+  });
   it("does not stop or restart a slow update and coalesces a manual refresh", async () => {
     const f = fixture();
     render(

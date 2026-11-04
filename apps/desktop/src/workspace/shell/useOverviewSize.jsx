@@ -1,5 +1,6 @@
 import { useLayoutEffect, useState } from "react";
 
+/** Measure real column space with resize observation and clean up listeners when the panel unmounts. */
 export function useOverviewSize(ref) {
   const [size, setSize] = useState(null);
   useLayoutEffect(() => {

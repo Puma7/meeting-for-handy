@@ -149,9 +149,17 @@ impl LiveRunner {
             self.run().mode == "local",
             "Automatische Kachelauswertung benötigt ein lokales Modell."
         );
+        let previous = read_latest_workspace(
+            self.folder.parent().context("Live root missing")?,
+            &self.state.run.meeting_id,
+        )?
+        .filter(|view| view.run_id.as_deref() != Some(self.state.run.id.as_str()));
         let mut workspace =
             crate::workspace::WorkspaceRunner::open(&self.folder.join("workspace-v9"))?;
         workspace.set_context(context)?;
+        if let Some(state) = previous.and_then(|view| view.workspace) {
+            workspace.inherit_manual(&state)?;
+        }
         self.workspace = Some(workspace);
         Ok(self)
     }

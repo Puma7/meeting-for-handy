@@ -76,6 +76,7 @@ pub(super) struct Reply {
     pub error: Option<String>,
 }
 
+/// Map protocol failures to a content-free error while retaining saved session audio.
 fn bridge_protocol(_: impl std::fmt::Display) -> BridgeError {
     BridgeError::Native(
         "Recognition worker protocol or confirmed audio was invalid. Saved audio is retained."
@@ -253,6 +254,7 @@ pub fn worker_main(args: &[String]) -> Result<(), String> {
     }
 }
 
+/// Convert a confirmed section length only within the fixed batch-audio safety limit.
 fn batch_sample_count(samples: u64) -> Result<usize, String> {
     usize::try_from(samples)
         .ok()
@@ -260,6 +262,7 @@ fn batch_sample_count(samples: u64) -> Result<usize, String> {
         .ok_or_else(|| "Closed batch audio section exceeds its safe limit".into())
 }
 
+/// Reject nonsequential, oversized or unconfirmed streaming audio reads.
 fn validate_feed(cursor: u64, offset: u64, count: usize, confirmed: u64) -> Result<(), String> {
     if count == 0
         || count > FEED_SAMPLES
@@ -275,6 +278,7 @@ fn validate_feed(cursor: u64, offset: u64, count: usize, confirmed: u64) -> Resu
     Ok(())
 }
 
+/// Resolve only a regular audio filename belonging to the expected track and session root.
 fn worker_audio_path(folder: &Path, file: &str, source: &str) -> Result<PathBuf, String> {
     let prefix = format!("{source}-");
     let sample = file
@@ -306,6 +310,7 @@ fn worker_audio_path(folder: &Path, file: &str, source: &str) -> Result<PathBuf,
     Ok(path)
 }
 
+/// Read one bounded protocol request, distinguishing clean EOF from malformed input.
 pub(super) fn read_request(reader: &mut impl BufRead) -> Result<Option<Request>, String> {
     let bytes = bounded_line(reader, MAX_REQUEST)?;
     bytes
@@ -315,6 +320,7 @@ pub(super) fn read_request(reader: &mut impl BufRead) -> Result<Option<Request>,
         .transpose()
 }
 
+/// Read a line without allowing an unterminated protocol message to allocate without limit.
 fn bounded_line(reader: &mut impl BufRead, limit: usize) -> Result<Option<Vec<u8>>, String> {
     let mut line = Vec::with_capacity(1024);
     let count = reader
@@ -330,6 +336,7 @@ fn bounded_line(reader: &mut impl BufRead, limit: usize) -> Result<Option<Vec<u8
     Ok(Some(line))
 }
 
+/// Serialize a bounded worker reply and flush it to the supervising process.
 pub(super) fn send_reply(writer: &mut impl Write, reply: Reply) -> Result<(), String> {
     let bytes = serde_json::to_vec(&reply).map_err(|_| "Recognition reply could not be encoded")?;
     if bytes.len() > MAX_REPLY {
@@ -347,6 +354,7 @@ pub(super) struct Worker {
     input: ChildStdin,
     replies: Receiver<Result<Reply, String>>,
     protocol_fault: Arc<AtomicBool>,
+    transient_failure: std::cell::Cell<bool>,
     stdout_thread: Option<JoinHandle<()>>,
     stderr_thread: Option<JoinHandle<()>>,
     absolute_deadline: Option<Instant>,
@@ -491,6 +499,7 @@ impl Worker {
             input,
             replies,
             protocol_fault,
+            transient_failure: std::cell::Cell::new(false),
             stdout_thread: Some(stdout_thread),
             stderr_thread: Some(stderr_thread),
             absolute_deadline,
@@ -503,6 +512,7 @@ impl Worker {
         Ok(worker)
     }
 
+    /// Wait for a worker reply with bounded diagnostics and explicit transient process-loss classification.
     fn receive(&self, timeout: Duration) -> Result<Reply, String> {
         let deadline = self.absolute_deadline.map_or_else(
             || Instant::now() + timeout,
@@ -517,6 +527,7 @@ impl Worker {
                 return Err("Optional speaker analysis cancelled; recording and original transcripts are unchanged".into());
             }
             if Instant::now() >= deadline {
+                self.transient_failure.set(true);
                 return Err("Recognition worker deadline elapsed; saved audio is retained".into());
             }
             if self.protocol_fault.load(Ordering::Acquire) {
@@ -526,6 +537,12 @@ impl Worker {
             }
             match self.replies.recv_timeout(Duration::from_millis(100)) {
                 Ok(result) => {
+                    if result
+                        .as_ref()
+                        .is_err_and(|error| error == "Recognition process exited before its reply")
+                    {
+                        self.transient_failure.set(true);
+                    }
                     let reply = result?;
                     if !reply.ok {
                         return Err(reply.error.unwrap_or_else(|| {
@@ -535,20 +552,24 @@ impl Worker {
                     return Ok(reply);
                 }
                 Err(mpsc::RecvTimeoutError::Disconnected) => {
-                    return Err("Recognition reply channel closed".into())
+                    self.transient_failure.set(true);
+                    return Err("Recognition reply channel closed".into());
                 }
                 Err(mpsc::RecvTimeoutError::Timeout) if Instant::now() >= deadline => {
+                    self.transient_failure.set(true);
                     return Err(
                         "Recognition worker exceeded its time limit; saved audio is retained"
                             .into(),
-                    )
+                    );
                 }
                 Err(mpsc::RecvTimeoutError::Timeout) => {}
             }
         }
     }
 
+    /// Send one request and read its reply; protocol/provider/storage failures are not treated as transport loss.
     pub(super) fn call(&mut self, request: Request) -> Result<Reply, String> {
+        self.transient_failure.set(false);
         let timeout = if matches!(
             &request,
             Request::SpeakerIdentity { .. } | Request::BatchSection { .. }
@@ -566,7 +587,10 @@ impl Worker {
             .write_all(&bytes)
             .and_then(|_| self.input.write_all(b"\n"))
             .and_then(|_| self.input.flush())
-            .map_err(|_| "Recognition child input closed")?;
+            .map_err(|_| {
+                self.transient_failure.set(true);
+                "Recognition child input closed"
+            })?;
         self.receive(Duration::from_secs(timeout))
     }
 }
@@ -642,32 +666,45 @@ pub(crate) fn spawn_batch(
     stop: Arc<AtomicBool>,
 ) -> RecognitionWorker {
     let handle = thread::spawn(move || {
-        let mut worker = None;
-        let result = run_batch(&store, &stop, |part, previous| {
-            let worker = match &mut worker {
-                Some(worker) => worker,
-                slot @ None => slot.insert(Worker::start(
-                    &model,
-                    &backend,
-                    store.folder(),
-                    "batch",
-                    true,
-                    None,
-                )?),
-            };
-            let audio_only = |part: &AudioPart| {
-                let mut audio = part.clone();
-                audio.text = None;
-                audio.committed_text.clear();
-                audio.tentative_text.clear();
-                audio.error = None;
-                audio
-            };
-            worker.call(Request::BatchSection {
-                part: audio_only(part),
-                previous: previous.map(|part| Box::new(audio_only(part))),
-            })
-        });
+        let result = retry_batch(
+            || {
+                let mut worker = None;
+                let mut retryable = false;
+                let attempt_result = run_batch(&store, &stop, |part, previous| {
+                    let worker = match &mut worker {
+                        Some(worker) => worker,
+                        slot @ None => slot.insert(Worker::start(
+                            &model,
+                            &backend,
+                            store.folder(),
+                            "batch",
+                            true,
+                            None,
+                        )?),
+                    };
+                    let audio_only = |part: &AudioPart| {
+                        let mut audio = part.clone();
+                        audio.text = None;
+                        audio.committed_text.clear();
+                        audio.tentative_text.clear();
+                        audio.error = None;
+                        audio
+                    };
+                    let reply = worker.call(Request::BatchSection {
+                        part: audio_only(part),
+                        previous: previous.map(|part| Box::new(audio_only(part))),
+                    });
+                    retryable = worker.transient_failure.get();
+                    reply
+                });
+                drop(worker);
+                (attempt_result, retryable)
+            },
+            || {
+                let _ = store.notice("Der Batch-Erkennungsprozess wurde unterbrochen und wird erneut gestartet. Gesicherte Abschnitte bleiben erhalten. / Batch recognition is restarting; saved sections are retained.");
+                thread::sleep(Duration::from_millis(500));
+            },
+        );
         if let Err(error) = result {
             let _ = store.notice(&format!("Batch transcription stopped: {error}. Saved audio and text are retained. Retry from history."));
         }
@@ -678,6 +715,23 @@ pub(crate) fn spawn_batch(
     }
 }
 
+/// Retry transport/process loss at most twice, preserving the store's durable cursor.
+/// Provider rejections, bad protocol and storage failures never qualify for retry.
+fn retry_batch(
+    mut attempt: impl FnMut() -> (Result<(), String>, bool),
+    mut before_retry: impl FnMut(),
+) -> Result<(), String> {
+    for index in 0..3 {
+        let (result, transient) = attempt();
+        if result.is_ok() || !transient || index == 2 {
+            return result;
+        }
+        before_retry();
+    }
+    unreachable!("the final attempt always returns")
+}
+
+/// Process closed track heads in time order, publishing each result before advancing the durable cursor.
 fn run_batch(
     store: &SessionStore,
     stop: &AtomicBool,
@@ -737,6 +791,7 @@ fn run_batch(
 
 // Only drop a strong, bounded suffix/prefix match. With weak matches keep
 // the recognized text so an uncertain stitch cannot silently delete speech.
+/// Remove only a strong bounded overlap supported by context; retain uncertain repeated speech.
 fn trim_batch_overlap(previous: &str, current: &str, overlap_words: usize) -> String {
     let word = |value: &str| {
         value
@@ -1436,36 +1491,50 @@ mod tests {
         store.set_status("recorded").unwrap();
         let original = store.snapshot().unwrap();
         let mut seen = Vec::new();
-        assert!(run_batch(&store, &AtomicBool::new(true), |part, _| {
-            seen.push(part.file.clone());
-            if seen.len() == 2 {
-                return Err("synthetic worker failure".into());
-            }
-            Ok(Reply {
-                full: "First track.".into(),
-                committed: "First track.".into(),
-                ..Reply::default()
-            })
-        })
-        .is_err());
-        let saved = store.snapshot().unwrap();
-        assert_eq!(
-            saved
-                .parts
-                .iter()
-                .filter(|part| part.status == "complete")
-                .count(),
-            1
-        );
-        run_batch(&store, &AtomicBool::new(true), |part, _| {
-            assert_eq!(part.file, seen[1]);
-            Ok(Reply {
-                full: "Second track.".into(),
-                committed: "Second track.".into(),
-                ..Reply::default()
-            })
-        })
+        let mut attempts = 0;
+        retry_batch(
+            || {
+                attempts += 1;
+                let result = run_batch(&store, &AtomicBool::new(true), |part, _| {
+                    seen.push(part.file.clone());
+                    if seen.len() == 2 {
+                        return Err("synthetic pipe failure".into());
+                    }
+                    Ok(Reply {
+                        full: if seen.len() == 1 {
+                            "First track."
+                        } else {
+                            "Second track."
+                        }
+                        .into(),
+                        committed: if seen.len() == 1 {
+                            "First track."
+                        } else {
+                            "Second track."
+                        }
+                        .into(),
+                        ..Reply::default()
+                    })
+                });
+                (result, true)
+            },
+            || {
+                let saved = store.snapshot().unwrap();
+                assert_eq!(
+                    saved
+                        .parts
+                        .iter()
+                        .filter(|part| part.status == "complete")
+                        .count(),
+                    1
+                );
+            },
+        )
         .unwrap();
+        assert_eq!(attempts, 2);
+        assert_eq!(seen.len(), 3);
+        assert_eq!(seen[1], seen[2]);
+        assert_ne!(seen[0], seen[2]);
         let resumed = store.snapshot().unwrap();
         assert!(resumed.parts.iter().all(|part| part.status == "complete"));
         for part in &resumed.parts {
@@ -1479,6 +1548,48 @@ mod tests {
                 assert_eq!(part.text.as_deref(), Some("First track."));
             }
         }
+    }
+
+    #[test]
+    fn automatic_batch_retry_is_bounded_and_does_not_retry_permanent_errors() {
+        let mut calls = 0;
+        let mut restarts = 0;
+        retry_batch(
+            || {
+                calls += 1;
+                (
+                    if calls == 1 {
+                        Err("pipe closed".into())
+                    } else {
+                        Ok(())
+                    },
+                    true,
+                )
+            },
+            || restarts += 1,
+        )
+        .unwrap();
+        assert_eq!((calls, restarts), (2, 1));
+        calls = 0;
+        assert!(retry_batch(
+            || {
+                calls += 1;
+                (Err("no response".into()), true)
+            },
+            || {}
+        )
+        .is_err());
+        assert_eq!(calls, 3);
+        calls = 0;
+        assert!(retry_batch(
+            || {
+                calls += 1;
+                (Err("invalid audio hash".into()), false)
+            },
+            || panic!("must not restart")
+        )
+        .is_err());
+        assert_eq!(calls, 1);
     }
 
     #[test]

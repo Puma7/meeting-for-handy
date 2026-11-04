@@ -1,4 +1,5 @@
 // Stored heights remain preferences. Only the rendered column is fitted to its viewport.
+/** Fit preferred card heights into available space; preserve deliberate sizes and fill the column tail. */
 export function fitColumn(cards, availableHeight, requestedGap = 12) {
   if (!cards.length) return { heights: [], gap: requestedGap };
   const viewport = Math.max(

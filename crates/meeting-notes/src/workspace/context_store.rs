@@ -20,6 +20,7 @@ struct Entry {
     shared_notes: Option<Vec<SharedNote>>,
     overrides: Vec<Override>,
 }
+/// Acquire the short context-write lease without waiting behind inference.
 pub(crate) fn lock(folder: &Path) -> Result<File> {
     let f = store::open_lock(folder, "context.lock")?;
     f.try_lock_exclusive().map_err(|_| {
@@ -27,6 +28,7 @@ pub(crate) fn lock(folder: &Path) -> Result<File> {
     })?;
     Ok(f)
 }
+/// Replay contiguous human-context revisions; reject gaps or invalid entries without rewriting them.
 pub(crate) fn read(folder: &Path, fallback: &WorkspaceContext) -> Result<WorkspaceContext> {
     store::check_directory(folder)?;
     let mut paths = fs::read_dir(folder)?
@@ -73,6 +75,7 @@ pub(crate) fn read(folder: &Path, fallback: &WorkspaceContext) -> Result<Workspa
     }
     Ok(context)
 }
+/// Append a durable context revision only when its base matches; retain every earlier human override.
 pub(crate) fn update(
     folder: &Path,
     incoming: &WorkspaceContext,

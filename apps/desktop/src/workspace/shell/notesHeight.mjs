@@ -1,4 +1,5 @@
 export const defaultNotesHeight = 114;
+/** Calculate a notes-pane ceiling that leaves room for the meeting content. */
 export function notesHeightLimit(viewportHeight, availableHeight = Infinity) {
   return Math.max(
     96,
@@ -9,6 +10,7 @@ export function notesHeightLimit(viewportHeight, availableHeight = Infinity) {
     ),
   );
 }
+/** Constrain a stored or requested notes height to the available viewport. */
 export function clampNotesHeight(
   height,
   viewportHeight,
@@ -22,6 +24,7 @@ export function clampNotesHeight(
     ),
   );
 }
+/** Convert upward pointer movement into a taller notes pane within viewport bounds. */
 export function draggedNotesHeight(
   startHeight,
   startY,
@@ -35,6 +38,7 @@ export function draggedNotesHeight(
     availableHeight,
   );
 }
+/** Read a bounded height preference; preserve unreadable existing preferences as blocked. */
 export function decodeNotesHeight(raw) {
   if (raw === null) return { height: defaultNotesHeight, blocked: false };
   try {
@@ -53,6 +57,7 @@ export function decodeNotesHeight(raw) {
   }
 }
 
+/** Record a deliberate user resize without treating responsive clamping as a new preference. */
 export function resizedNotesPreference(
   preferredHeight,
   renderedHeight,

@@ -1,3 +1,4 @@
+import { useWorkspaceText } from "./workspaceLocale.jsx";
 import { useRef, useState } from "react";
 import {
   ArrowDown,
@@ -13,6 +14,7 @@ import {
 import { IconButton } from "./ui.jsx";
 import { clampManualHeight, moduleName, modules } from "./overviewLayout.mjs";
 
+/** Render a dashboard card with compact controls, expansion and explicit layout-edit actions. */
 export function OverviewCard({
   card,
   renderedHeight,
@@ -33,10 +35,12 @@ export function OverviewCard({
   onExpand,
   onKeyMove,
 }) {
+  const t = useWorkspaceText();
   const pointer = useRef(null),
     menu = useRef(null),
     clickOrigin = useRef(null);
   const [menuPosition, setMenuPosition] = useState({ left: 10, top: 10 });
+  /** Toggle card actions while retaining the triggering button for focus restoration. */
   function toggleMenu(event) {
     const popup = menu.current;
     if (popup.matches(":popover-open")) {
@@ -71,7 +75,10 @@ export function OverviewCard({
           data-drop-position={target.edge}
           aria-hidden="true"
         >
-          <span>Hier einfügen: {moduleName(moving)}</span>
+          <span>
+            {t("Hier einfügen:")}
+            {t(moduleName(moving))}
+          </span>
         </div>
       )}
       {editing && (
@@ -79,7 +86,7 @@ export function OverviewCard({
           <button
             className="card-grab"
             data-handle-id={card.id}
-            aria-label={`${moduleName(card.id)} verschieben`}
+            aria-label={`${t(moduleName(card.id))} ${t("verschieben")}`}
             aria-pressed={moving === card.id}
             aria-describedby="layout-keyboard-help"
             {...gripEvents}
@@ -101,11 +108,11 @@ export function OverviewCard({
             onKeyDown={(event) => onKeyMove(event, card.id)}
           >
             <GripVertical size={14} />
-            <span>{moduleName(card.id)}</span>
+            <span>{t(moduleName(card.id))}</span>
           </button>
           <div className="card-placement-menu">
             <IconButton
-              label={`${moduleName(card.id)} anordnen`}
+              label={`${t(moduleName(card.id))} ${t("anordnen")}`}
               aria-haspopup="true"
               aria-controls={`placement-${card.id}`}
               onClick={toggleMenu}
@@ -119,17 +126,17 @@ export function OverviewCard({
               className="placement-popover"
               style={menuPosition}
             >
-              <span>Verschieben</span>
+              <span>{t("Verschieben")}</span>
               <div className="placement-directions">
                 {[
-                  ["up", ArrowUp, "Nach oben"],
-                  ["down", ArrowDown, "Nach unten"],
-                  ["left", ArrowLeft, "Spalte nach links"],
-                  ["right", ArrowRight, "Spalte nach rechts"],
+                  ["up", ArrowUp, t("Nach oben")],
+                  ["down", ArrowDown, t("Nach unten")],
+                  ["left", ArrowLeft, t("Spalte nach links")],
+                  ["right", ArrowRight, t("Spalte nach rechts")],
                 ].map(([direction, Symbol, label]) => (
                   <IconButton
                     key={direction}
-                    label={`${moduleName(card.id)}: ${label}`}
+                    label={`${t(moduleName(card.id))}: ${t(label)}`}
                     onClick={() => onMove(card.id, direction)}
                   >
                     <Symbol size={15} />
@@ -138,13 +145,13 @@ export function OverviewCard({
               </div>
               {autoFill ? (
                 <span className="auto-height-label">
-                  Höhe · bis zu den Notizen
+                  {t("Höhe · bis zu den Notizen")}
                 </span>
               ) : (
                 <label>
-                  Höhe
+                  {t("Höhe")}
                   <select
-                    aria-label={`${moduleName(card.id)} Kartenhöhe`}
+                    aria-label={`${t(moduleName(card.id))} Kartenhöhe`}
                     value={card.height}
                     onChange={(event) =>
                       onResize(card.id, Number(event.target.value))
@@ -156,9 +163,9 @@ export function OverviewCard({
                         <option key={value} value={value}>
                           {value} px
                           {value === 216
-                            ? " · Kompakt"
+                            ? t(" · Kompakt")
                             : value === 636
-                              ? " · Groß"
+                              ? t(" · Groß")
                               : ""}
                         </option>
                       ))}
@@ -166,31 +173,31 @@ export function OverviewCard({
                 </label>
               )}
               <label>
-                Modul
+                {t("Modul")}
                 <select
-                  aria-label={`${moduleName(card.id)} Modul austauschen`}
+                  aria-label={`${t(moduleName(card.id))} ${t("Modul austauschen")}`}
                   value={card.id}
                   onChange={(event) => onReplace(card.id, event.target.value)}
                 >
                   {availableModules.map(([id, label]) => (
                     <option key={id} value={id}>
-                      {label}
+                      {t(label)}
                     </option>
                   ))}
                 </select>
               </label>
-              <small>Bereits sichtbare Module tauschen den Platz.</small>
+              <small>{t("Bereits sichtbare Module tauschen den Platz.")}</small>
             </div>
           </div>
           <IconButton
-            label={`${moduleName(card.id)} aus Überblick entfernen`}
+            label={`${t(moduleName(card.id))} aus Überblick entfernen`}
             onClick={() => onHide(card.id)}
           >
             <X size={14} />
           </IconButton>
           <IconButton
-            label={`${moduleName(card.id)} vergrößern`}
-            onClick={() => onExpand(card.id, moduleName(card.id))}
+            label={`${t(moduleName(card.id))} vergrößern`}
+            onClick={() => onExpand(card.id, t(moduleName(card.id)))}
           >
             <Maximize2 size={14} />
           </IconButton>
@@ -201,7 +208,7 @@ export function OverviewCard({
         <div
           className="card-resize"
           role="separator"
-          aria-label={`${moduleName(card.id)} Höhe ändern`}
+          aria-label={`${t(moduleName(card.id))} Höhe ändern`}
           aria-orientation="horizontal"
           tabIndex={0}
           aria-valuenow={height}

@@ -273,6 +273,8 @@ class WindowsZipContract(unittest.TestCase):
             workspace.parent.mkdir(parents=True)
             original_jsx = b'export const title = <h1>Original</h1>;'
             workspace.write_bytes(original_jsx)
+            declaration = workspace.with_suffix('.d.mts')
+            declaration.write_bytes(b'export const title: string;')
             fingerprint = invoke('-SourceFingerprintOnly')
             self.assertEqual(fingerprint.returncode, 0, fingerprint.stderr)
             digest = lambda path: hashlib.sha256(path.read_bytes()).hexdigest()
@@ -289,6 +291,12 @@ class WindowsZipContract(unittest.TestCase):
             self.assertIn('exact current source tree', stale.stderr)
             self.assertFalse(archive.exists())
             workspace.write_bytes(original_jsx)
+            declaration.write_bytes(b'export const title: number;')
+            changed_declaration = invoke('-OutputDirectory', str(output))
+            self.assertNotEqual(changed_declaration.returncode, 0)
+            self.assertIn('exact current source tree', changed_declaration.stderr)
+            self.assertFalse(archive.exists())
+            declaration.write_bytes(b'export const title: string;')
             result = invoke('-OutputDirectory', str(output))
             self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
             with zipfile.ZipFile(archive) as package:

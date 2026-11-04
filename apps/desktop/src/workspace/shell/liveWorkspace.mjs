@@ -1,4 +1,5 @@
 // Explicit renderer/native DTOs. Private notes and preparation never enter this object.
+/** Create an empty renderer draft; private fields remain separate from shared provider context. */
 export function initialLiveState() {
   return {
     version: 1,
@@ -11,6 +12,7 @@ export function initialLiveState() {
     protocolRevision: 1,
   };
 }
+/** Validate cached drafts and block overwrites when an existing cache is unreadable. */
 export function loadLiveState(raw) {
   if (!raw) return { state: initialLiveState(), blocked: false };
   try {
@@ -35,6 +37,7 @@ export function loadLiveState(raw) {
     return { state: initialLiveState(), blocked: true };
   }
 }
+/** Project only explicitly shared topics, protocol notes and manual overrides into native DTOs. */
 export function sharedWorkspaceContext(state, revision = 0, overrides = []) {
   const protocol = Array.from(state.notes.protocol);
   const sharedNotes = [];
@@ -56,7 +59,35 @@ export function sharedWorkspaceContext(state, revision = 0, overrides = []) {
     overrides,
   };
 }
-export function workspaceStatusText(status) {
+/** Describe current inference progress in the chosen UI language without implying recording failure. */
+export function workspaceStatusText(status, language = "de") {
+  if (language === "en") {
+    if (!status) return "Local analysis is off";
+    if (status.status === "updating") {
+      const seconds = Math.floor((status.updateElapsedMs || 0) / 1000);
+      return (
+        "Analysis running · " +
+        Math.floor(seconds / 60) +
+        ":" +
+        String(seconds % 60).padStart(2, "0") +
+        (status.updateElapsedMs >= status.intervalMs
+          ? " · new text follows afterwards"
+          : "")
+      );
+    }
+    if (status.waitingForTranscript)
+      return "Waiting for transcription capacity";
+    if (status.refreshRequested) return "Refresh queued";
+    if (status.running) return "Collecting new text";
+    return (
+      {
+        finished: "Analysis saved",
+        partial: "Partial analysis saved",
+        failed: "Check analysis",
+        stopped: "Analysis stopped",
+      }[status.status] || "Local analysis is off"
+    );
+  }
   if (!status) return "Lokale Auswertung ist aus";
   if (status.status === "updating") {
     const seconds = Math.floor((status.updateElapsedMs || 0) / 1000);
@@ -75,6 +106,7 @@ export function workspaceStatusText(status) {
     }[status.status] || "Lokale Auswertung ist aus"
   );
 }
+/** Filter active entities by kind and search while preserving native stable identities. */
 export function stableVisibleItems(workspace, kind, query = "") {
   const needle = query.trim().toLocaleLowerCase();
   return (workspace?.entities || [])
@@ -89,6 +121,7 @@ export function stableVisibleItems(workspace, kind, query = "") {
 
 // Native shared inputs are authoritative across restarts. Preserve any divergent
 // local draft as a note-history snapshot instead of silently erasing either copy.
+/** Restore authoritative native shared inputs while retaining a divergent local protocol in history. */
 export function restoreSharedContext(local, native, runId) {
   if (
     !native ||
@@ -127,6 +160,7 @@ export function restoreSharedContext(local, native, runId) {
   };
 }
 
+/** Compare released context fields so unchanged polling does not create redundant revisions. */
 export function sameSharedContext(a, b) {
   const canonical = (value) =>
     Array.isArray(value)

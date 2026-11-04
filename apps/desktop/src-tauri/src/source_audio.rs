@@ -5,6 +5,7 @@ use std::sync::Arc;
 const PREVIEW_SECONDS: usize = 30;
 
 #[tauri::command]
+/// Verify source ownership before reading a bounded original audio preview.
 pub(crate) async fn get_source_audio(
     service: tauri::State<'_, Arc<Service>>,
     id: String,
@@ -21,7 +22,7 @@ pub(crate) async fn get_source_audio(
             .iter()
             .find(|part| part.file == file)
             .ok_or("Audiostelle nicht gefunden. / Audio section not found.")?;
-        let pcm = meeting_core::read_closed_audio(&folder, part).map_err(|_| {
+        let pcm = meeting_core::read_closed_audio_preview(&folder, part).map_err(|_| {
             "Bestätigter Ton ist lokal nicht verfügbar. / Confirmed audio is unavailable locally."
         })?;
         Ok(tauri::ipc::Response::new(encode_preview(&pcm)))
@@ -30,6 +31,7 @@ pub(crate) async fn get_source_audio(
     .map_err(|_| "Audiovorschau fehlgeschlagen. / Audio preview failed.")?
 }
 
+/// Encode only the bounded PCM excerpt, retaining source sample rate and channel format.
 fn encode_preview(pcm: &[f32]) -> Vec<u8> {
     let sample_rate = meeting_core::SAMPLE_RATE;
     let pcm = &pcm[..pcm.len().min(sample_rate as usize * PREVIEW_SECONDS)];

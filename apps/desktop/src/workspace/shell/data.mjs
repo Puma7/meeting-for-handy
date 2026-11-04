@@ -174,6 +174,7 @@ export const impulses = [
   },
 ];
 
+/** Create the explicit demo fixture; this sample state is never used as a native meeting result. */
 export function initialState() {
   return {
     version: 1,
@@ -212,11 +213,13 @@ export function initialState() {
   };
 }
 
+/** Format section seconds as a bounded minute/second label without claiming word timestamps. */
 export function formatTime(seconds) {
   const value = Math.max(0, Math.floor(Number.isFinite(seconds) ? seconds : 0));
   return `${String(Math.floor(value / 60)).padStart(2, "0")}:${String(value % 60).padStart(2, "0")}`;
 }
 
+/** Build the synthetic demo state using only fixture sections already available at the chosen time. */
 export function snapshotAt(time) {
   const available = transcript.filter((row) => row.end <= time + 0.001);
   const has = (id) => available.some((row) => row.id === id);
@@ -259,6 +262,7 @@ export function snapshotAt(time) {
   return { available, facts, has };
 }
 
+/** Filter a copied transcript by source, query and section interval before applying display order. */
 export function filterTranscript(
   rows,
   {
@@ -296,6 +300,7 @@ export function filterTranscript(
     .sort((a, b) => (ascending ? a.start - b.start : b.start - a.start));
 }
 
+/** Validate saved prototype preferences and preserve unreadable browser bytes by blocking autosave. */
 export function decodeSaved(raw) {
   if (!raw) return { state: initialState(), blocked: false };
   try {
@@ -323,6 +328,7 @@ export function decodeSaved(raw) {
   }
 }
 
+/** Apply only the documented synthetic approval example; this is not a real model inference. */
 export function simulateMatch(topics, time = duration) {
   const evidence = transcript.find(
     (row) => row.id === "T06" && row.end <= time + 0.001,
@@ -344,6 +350,7 @@ export function simulateMatch(topics, time = duration) {
   );
 }
 
+/** Hide demo evidence that had not yet occurred at the selected timeline position. */
 export function topicsAt(topics, time) {
   return topics.map((topic) =>
     topic.source && !snapshotAt(time).has(topic.source)
@@ -358,6 +365,7 @@ export function topicsAt(topics, time) {
   );
 }
 
+/** Return source-linked fixture answers only from currently available synthetic transcript rows. */
 export function demoAnswer(question, time = duration) {
   const text = question.toLocaleLowerCase("de");
   if (/privat|notiz/.test(text))

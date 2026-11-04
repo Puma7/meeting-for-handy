@@ -1,3 +1,4 @@
+import { useWorkspaceText } from "./workspaceLocale.jsx";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
   ChevronDown,
@@ -16,7 +17,9 @@ import {
   resizedNotesPreference,
 } from "./notesHeight.mjs";
 
+/** Keep private notes separate from released protocol text and allow viewport-bounded resizing. */
 export function Notes({ ctx }) {
+  const t = useWorkspaceText();
   const [kind, setKind] = useState("private");
   const [open, setOpen] = useState(true);
   const key = ctx.storageKey ? `${ctx.storageKey}.notes-height.v1` : null;
@@ -77,10 +80,12 @@ export function Notes({ ctx }) {
       }
     }
   }, [key, preferredHeight, heightBlocked]);
+  /** Restore the notes preference when a pointer resize is cancelled. */
   function cancelResize() {
     pointer.current = null;
     setDraftHeight(null);
   }
+  /** Resize notes from the keyboard while retaining enough meeting workspace. */
   function resizeKey(event) {
     const values = {
       ArrowUp: height + 24,
@@ -106,7 +111,7 @@ export function Notes({ ctx }) {
   return (
     <section
       className={`notes-dock notes-resizable ${open ? "notes-open" : ""}`}
-      aria-label="Notizblock"
+      aria-label={t("Notizblock")}
       ref={dock}
       style={{ "--notes-height": `${height}px` }}
     >
@@ -114,14 +119,16 @@ export function Notes({ ctx }) {
         <div
           className="notes-size-grip"
           role="separator"
-          aria-label="Notizbereich Höhe ändern"
+          aria-label={t("Notizbereich Höhe ändern")}
           aria-describedby="notes-resize-help"
           aria-orientation="horizontal"
           tabIndex={0}
           aria-valuenow={height}
           aria-valuemin={96}
           aria-valuemax={maximum}
-          title="Notizen nach oben größer ziehen · Doppelklick: Standardhöhe"
+          title={t(
+            "Notizen nach oben größer ziehen · Doppelklick: Standardhöhe",
+          )}
           onPointerDown={(event) => {
             if (event.button !== 0) return;
             event.preventDefault();
@@ -158,8 +165,9 @@ export function Notes({ ctx }) {
         </div>
       )}
       <span id="notes-resize-help" className="sr-only">
-        Nach oben größer ziehen. Pfeil hoch oder runter ändert die Höhe. Pos1:
-        klein, Ende: groß. Doppelklick: Standardhöhe.
+        {t(
+          "Nach oben größer ziehen. Pfeil hoch oder runter ändert die Höhe. Pos1: klein, Ende: groß. Doppelklick: Standardhöhe.",
+        )}
         {heightBlocked &&
           " Die Höhe bleibt nur für diese Ansicht erhalten; der frühere Browserstand wird bewahrt."}
       </span>
@@ -170,7 +178,7 @@ export function Notes({ ctx }) {
           onClick={() => setOpen(!open)}
         >
           <Pencil size={14} />
-          <b>Notizen</b>
+          <b>{t("Notizen")}</b>
           {open ? <ChevronDown size={14} /> : <ChevronUp size={14} />}
         </button>
         <div className="segmented notes-tabs">
@@ -183,7 +191,7 @@ export function Notes({ ctx }) {
             }}
           >
             <LockKeyhole size={12} />
-            Privat
+            {t("Privat")}
           </button>
           <button
             className={kind === "protocol" ? "active" : ""}
@@ -193,17 +201,17 @@ export function Notes({ ctx }) {
               setOpen(true);
             }}
           >
-            Fürs Protokoll
+            {t("Fürs Protokoll")}
           </button>
         </div>
         <span className="notes-privacy">
           {kind === "private" ? (
             <>
               <LockKeyhole size={11} />
-              Nicht im Protokoll
+              {t("Nicht im Protokoll")}
             </>
           ) : (
-            "Eigene Protokollnotiz"
+            t("Eigene Protokollnotiz")
           )}
         </span>
         <button
@@ -211,38 +219,42 @@ export function Notes({ ctx }) {
           disabled={ctx.chatAvailable === false}
           title={
             ctx.chatAvailable === false
-              ? "Chat wird gesondert angeschlossen. Die lokale Kachelauswertung ist davon unabhängig."
+              ? t(
+                  "Chat wird gesondert angeschlossen. Die lokale Kachelauswertung ist davon unabhängig.",
+                )
               : undefined
           }
           onClick={() => ctx.openModal({ type: "chat" })}
         >
           <Sparkles size={13} />
-          Meeting fragen
+          {t("Meeting fragen")}
         </button>
       </div>
       {open && (
         <div className="notes-input-wrap">
           <textarea
-            aria-label={kind === "private" ? "Private Notiz" : "Protokollnotiz"}
+            aria-label={
+              kind === "private" ? t("Private Notiz") : "Protokollnotiz"
+            }
             aria-describedby="notes-enter-help"
             rows={2}
             maxLength={12000}
             placeholder={
               kind === "private"
-                ? "Was möchtest du für dich festhalten?"
-                : "Was soll im Protokoll stehen?"
+                ? t("Was möchtest du für dich festhalten?")
+                : t("Was soll im Protokoll stehen?")
             }
             value={ctx.state.notes[kind]}
             onChange={(event) => ctx.setNote(kind, event.target.value)}
             onBlur={() => ctx.commitNote(kind)}
           />
           <span id="notes-enter-help" className="notes-key-hint">
-            Enter: neue Zeile
+            {t("Enter: neue Zeile")}
           </span>
           <span className="save-status">
             {ctx.storageBlocked
-              ? "Nur für diese Ansicht"
-              : "Im Browser gesichert"}
+              ? t("Nur für diese Ansicht")
+              : t("Im Browser gesichert")}
           </span>
         </div>
       )}

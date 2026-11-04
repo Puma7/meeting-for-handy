@@ -70,7 +70,9 @@ fn main() -> meeting_core::Result<()> {
         store.append_transcript(TranscriptCheckpoint{sequence:0,at:String::new(),file:part.file.clone(),model_id:"synthetic-no-asr".into(),full:"Robin sagt: Ich schreibe den Bericht bis Freitag. Zum Budget fehlt noch eine Zusage.".into(),committed:"Robin sagt: Ich schreibe den Bericht bis Freitag. Zum Budget fehlt noch eine Zusage.".into(),tentative:String::new(),processed_samples:part.confirmed_sample_count,final_text:true,revision_after_restart:false})?;
     }
     store.set_status("recorded")?;
-    let reopened = store.snapshot()?;
+    let folder = store.folder().to_path_buf();
+    drop(store);
+    let reopened = SessionStore::open(&folder)?.snapshot()?;
     let counts = ["system", "microphone"].map(|source| {
         reopened
             .parts

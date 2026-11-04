@@ -278,6 +278,11 @@ it.each(["failed", "cancelled", "workspace cache failure"] as const)(
     } as unknown as DesktopApi;
     const cache = `handymeeting.workspace.v1.${meeting.id}`;
     const otherCache = `handymeeting.workspace.v1.${retained[0].id}`;
+    const heightKey = cache + ".notes-height.v1";
+    localStorage.setItem(
+      heightKey,
+      JSON.stringify({ version: 1, height: 200 }),
+    );
     localStorage.setItem(cache, "synthetic private workspace");
     localStorage.setItem(otherCache, "synthetic retained workspace");
     render(<App api={api} />);

@@ -13,19 +13,34 @@ const MAX_MANIFEST_BYTES: u64 = 32 * 1024 * 1024;
 const MAX_JOURNAL_LINE: usize = 2 * 1024 * 1024;
 /// Optional audio analysis may read only a closed, digest-verified bounded section.
 pub fn read_closed_audio(folder: &Path, part: &AudioPart) -> Result<Vec<f32>> {
+    read_closed_audio_bounded(folder, part, 120, u64::from(SAMPLE_RATE) * 120)
+}
+
+/// Verify the full closed section but allocate only its first thirty seconds.
+pub fn read_closed_audio_preview(folder: &Path, part: &AudioPart) -> Result<Vec<f32>> {
+    read_closed_audio_bounded(folder, part, 300, u64::from(SAMPLE_RATE) * 30)
+}
+
+fn read_closed_audio_bounded(
+    folder: &Path,
+    part: &AudioPart,
+    max_seconds: u64,
+    sample_limit: u64,
+) -> Result<Vec<f32>> {
     reject_link(folder)?;
     validate_part(part)?;
     if !part.audio_closed
         || part.confirmed_sample_count == 0
-        || part.confirmed_sample_count > u64::from(SAMPLE_RATE) * 120
+        || part.confirmed_sample_count > u64::from(SAMPLE_RATE) * max_seconds
     {
         return Err("Speaker analysis needs a closed audio section of at most two minutes".into());
     }
     let path = safe_audio_path(folder, &part.file)?;
     crate::pcm::verify_confirmed(&path, part)?;
-    let mut pcm = Vec::with_capacity(part.confirmed_sample_count as usize);
-    while pcm.len() < part.confirmed_sample_count as usize {
-        let count = (part.confirmed_sample_count as usize - pcm.len()).min(SAMPLE_RATE as usize);
+    let samples = part.confirmed_sample_count.min(sample_limit) as usize;
+    let mut pcm = Vec::with_capacity(samples);
+    while pcm.len() < samples {
+        let count = (samples - pcm.len()).min(SAMPLE_RATE as usize);
         let next = crate::read_pcm_samples(&path, pcm.len() as u64, count)?;
         if next.len() != count {
             return Err("Confirmed audio ended early".into());
@@ -1533,5 +1548,38 @@ mod tests {
         let reopened = SessionStore::open(&folder).unwrap().snapshot().unwrap();
         assert_eq!(reopened.parts[0].confirmed_sample_count, 3200);
         assert_eq!(reopened.parts[0].text.as_deref(), Some("Parked words"));
+    }
+}
+
+#[cfg(test)]
+mod preview_regressions {
+    use super::*;
+    #[test]
+    fn preview_of_a_three_minute_section_checks_even_the_unreturned_tail() {
+        let dir = tempfile::tempdir().unwrap();
+        let store =
+            SessionStore::create(dir.path(), "Synthetic preview", "m", "out", None).unwrap();
+        store.inner.lock().unwrap().data.chunk_seconds = 180;
+        let mut writer = crate::PcmWriter::new(store.clone(), "system").unwrap();
+        for _ in 0..36 {
+            writer
+                .append(&vec![1234_i16; SAMPLE_RATE as usize * 5])
+                .unwrap();
+        }
+        writer.finish().unwrap();
+        let part = store.snapshot().unwrap().parts[0].clone();
+        assert!(read_closed_audio(store.folder(), &part).is_err());
+        let pcm = read_closed_audio_preview(store.folder(), &part).unwrap();
+        assert_eq!(pcm.len(), SAMPLE_RATE as usize * 30);
+        assert!(pcm.iter().all(|sample| *sample == 1234.0 / 32768.0));
+        use std::io::{Seek, SeekFrom};
+        let mut file = OpenOptions::new()
+            .write(true)
+            .open(store.audio_path(&part).unwrap())
+            .unwrap();
+        file.seek(SeekFrom::End(-2)).unwrap();
+        file.write_all(&4321_i16.to_le_bytes()).unwrap();
+        file.sync_all().unwrap();
+        assert!(read_closed_audio_preview(store.folder(), &part).is_err());
     }
 }

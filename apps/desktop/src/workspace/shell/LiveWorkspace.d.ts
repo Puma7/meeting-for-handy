@@ -17,5 +17,7 @@ export function LiveWorkspace(props: {
   onToggleMute?: () => void;
   muted?: boolean;
   captureError?: string | null;
+  actionError?: string | null;
+  onDismissError?: () => void;
   language?: "de" | "en";
 }): ReactElement;

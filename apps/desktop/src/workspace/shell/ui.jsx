@@ -1,3 +1,4 @@
+import { useWorkspaceText } from "./workspaceLocale.jsx";
 import { useEffect, useRef } from "react";
 import {
   Maximize2,
@@ -10,6 +11,7 @@ import {
 } from "lucide-react";
 import { transcript, formatTime } from "./data.mjs";
 
+/** Render a compact accessible action with a readable name and native tooltip. */
 export function IconButton({ label, children, className = "", ...props }) {
   return (
     <button
@@ -24,6 +26,7 @@ export function IconButton({ label, children, className = "", ...props }) {
   );
 }
 
+/** Display a status label without relying on color alone. */
 export function Status({ kind = "open", children }) {
   const Symbol =
     kind === "done"
@@ -41,6 +44,7 @@ export function Status({ kind = "open", children }) {
   );
 }
 
+/** Render a named module and optional controls consistently across overview and dedicated tabs. */
 export function Panel({
   title,
   subtitle,
@@ -50,6 +54,7 @@ export function Panel({
   actions,
   className = "",
 }) {
+  const t = useWorkspaceText();
   return (
     <section className={`panel ${className}`} aria-label={title}>
       <div className="panel-heading">
@@ -72,6 +77,7 @@ export function Panel({
   );
 }
 
+/** Expose an original-evidence action with a readable source label. */
 export function SourceButton({ id, onOpen, text = false }) {
   const row = transcript.find((item) => item.id === id);
   if (!row) return null;
@@ -88,6 +94,7 @@ export function SourceButton({ id, onOpen, text = false }) {
   );
 }
 
+/** Show the literal quote and explicitly separate it from the model's interpretation. */
 export function Quote({ id, onOpen }) {
   const row = transcript.find((item) => item.id === id);
   return row ? (
@@ -98,7 +105,9 @@ export function Quote({ id, onOpen }) {
   ) : null;
 }
 
+/** Manage a source/detail dialog with focus return to its connected opener. */
 export function Modal({ title, onClose, children, wide = false }) {
+  const t = useWorkspaceText();
   const ref = useRef(null);
   useEffect(() => {
     const dialog = ref.current;
@@ -124,7 +133,7 @@ export function Modal({ title, onClose, children, wide = false }) {
     >
       <div className="modal-heading">
         <h2>{title}</h2>
-        <IconButton label="Dialog schließen" onClick={onClose}>
+        <IconButton label={t("Dialog schließen")} onClick={onClose}>
           <X size={19} />
         </IconButton>
       </div>
@@ -133,6 +142,7 @@ export function Modal({ title, onClose, children, wide = false }) {
   );
 }
 
+/** Format a source section interval without presenting section times as word timestamps. */
 export function TimeLabel({ row }) {
   return (
     <span className="time-label">

@@ -1,3 +1,4 @@
+import { useWorkspaceText, WorkspaceLanguage } from "./workspaceLocale.jsx";
 import { workspaceStorageKey } from "../workspaceStorage";
 import { Fragment, useEffect, useRef, useState } from "react";
 import {
@@ -55,7 +56,17 @@ const statusName = {
   unclear: "Zuordnung prüfen",
 };
 
-export function LiveWorkspace({
+/** Provide the application language to the isolated live-workspace renderer. */
+export function LiveWorkspace(props) {
+  return (
+    <WorkspaceLanguage.Provider value={props.language ?? "de"}>
+      <WorkspaceContents {...props} />
+    </WorkspaceLanguage.Provider>
+  );
+}
+
+/** Coordinate native progress, durable shared inputs and local UI state without exposing private notes. */
+function WorkspaceContents({
   adapter,
   meeting,
   onBack,
@@ -73,8 +84,11 @@ export function LiveWorkspace({
   onToggleMute,
   muted = false,
   captureError,
+  actionError,
+  onDismissError,
   language = "de",
 }) {
+  const t = useWorkspaceText();
   const layoutCatalogKey = "handymeeting.workspace.layout-catalog.v1";
   const [catalog, setCatalog] = useState(() => {
     const fallback = { defaultId: null, custom: [], names: {} };
@@ -117,11 +131,12 @@ export function LiveWorkspace({
   const variant =
     catalog.custom.find(({ id }) => id === layoutId)?.base ?? layoutId;
   const layoutChoices = [
-    { id: "verlauf", label: catalog.names.verlauf || "Verlauf-Layout" },
-    { id: "regie", label: catalog.names.regie || "Regie-Layout" },
+    { id: "verlauf", label: catalog.names.verlauf || t("Verlauf-Layout") },
+    { id: "regie", label: catalog.names.regie || t("Regie-Layout") },
     ...catalog.custom.map(({ id }) => ({ id, label: catalog.names[id] })),
   ];
   const layoutPrefix = "handymeeting.workspace.user-layout.v1.";
+  /** Select a named layout while retaining independently saved arrangements. */
   function chooseLayout(id) {
     setLayoutId(id);
     if (id === "regie" || id === "verlauf") {
@@ -132,6 +147,7 @@ export function LiveWorkspace({
       }
     }
   }
+  /** Apply explicit user layout actions and report invalid or conflicting names. */
   function manageLayout(action, name, layout) {
     if (
       action !== "default" &&
@@ -141,7 +157,7 @@ export function LiveWorkspace({
           label.toLocaleLowerCase() === name.toLocaleLowerCase(),
       )
     )
-      return "Dieser Layoutname ist bereits vergeben.";
+      return t("Dieser Layoutname ist bereits vergeben.");
     const id = action === "copy" ? `custom-${crypto.randomUUID()}` : layoutId;
     const next = {
       defaultId: action === "default" ? id : catalog.defaultId,
@@ -160,7 +176,7 @@ export function LiveWorkspace({
         );
       localStorage.setItem(layoutCatalogKey, JSON.stringify(next));
     } catch {
-      return "Layout konnte nicht gespeichert werden.";
+      return t("Layout konnte nicht gespeichert werden.");
     }
     setCatalog(next);
     if (action === "copy") chooseLayout(id);
@@ -249,6 +265,7 @@ export function LiveWorkspace({
       polling.current = false;
     }
   }
+  /** Publish released inputs using the current native revision, preserving concurrent edits. */
   function syncContext(extra) {
     const runId = contextRun.current;
     const send = async () => {
@@ -307,6 +324,7 @@ export function LiveWorkspace({
       }
   }, [state, storageKey, storageBlocked, storageReady]);
   const mutate = (action) => setState((previous) => action(previous));
+  /** Run one user-requested native action and refresh its authoritative status. */
   async function action(fn) {
     if (busy) return;
     setBusy(true);
@@ -320,10 +338,11 @@ export function LiveWorkspace({
       setBusy(false);
     }
   }
+  /** Append a human status override using the entity's current stable revision. */
   async function override(item, value) {
     if (!context.current) {
       setError(
-        "Für diese Änderung zuerst den gespeicherten Meetingstand öffnen.",
+        t("Für diese Änderung zuerst den gespeicherten Meetingstand öffnen."),
       );
       return;
     }
@@ -343,6 +362,7 @@ export function LiveWorkspace({
     if (selectedFile) openTranscript(selectedFile);
   }, [selectedFile]);
 
+  /** Navigate to the original transcript slice referenced by a selected source. */
   function openTranscript(file) {
     setFocusedFile(file);
     setPanelViews((previous) => ({
@@ -397,7 +417,7 @@ export function LiveWorkspace({
                 {
                   id: `note-${Date.now()}`,
                   at: new Date().toISOString(),
-                  label: "Notizstand gesichert",
+                  label: t("Notizstand gesichert"),
                   noteKind: kind,
                   content: v.notes[kind],
                 },
@@ -405,6 +425,7 @@ export function LiveWorkspace({
             },
       ),
   };
+  /** Open an original source quote with explicit recognition-revision context. */
   function quote(item) {
     return (
       <div className="live-evidence">
@@ -421,6 +442,7 @@ export function LiveWorkspace({
       </div>
     );
   }
+  /** Render a module with the same native state and source actions as its dedicated tab. */
   function renderPanel(panel, expanded = false) {
     if (panel === "topics")
       return (
@@ -431,7 +453,7 @@ export function LiveWorkspace({
           override={override}
           full={expanded}
           onExpand={() =>
-            setModal({ type: "panel", panel, title: "Vorbereitung" })
+            setModal({ type: "panel", panel, title: t("Vorbereitung") })
           }
         />
       );
@@ -450,12 +472,12 @@ export function LiveWorkspace({
             type: "panel",
             panel,
             title: {
-              summary: "Live-Überblick",
-              relevant: "Jetzt relevant",
-              changes: "Änderungen im Gespräch",
-              impulses: "Gesprächsimpulse",
-              details: "Details",
-              transcript: "Transkript",
+              summary: t("Live-Überblick"),
+              relevant: t("Jetzt relevant"),
+              changes: t("Änderungen im Gespräch"),
+              impulses: t("Gesprächsimpulse"),
+              details: t("Details"),
+              transcript: t("Transkript"),
             }[panel],
           })
         }
@@ -483,7 +505,7 @@ export function LiveWorkspace({
       <div className="prototype-toolbar">
         <button className="text-button" onClick={onBack}>
           <ArrowLeft size={14} />
-          Zur Standardansicht
+          {t("Zur Standardansicht")}
         </button>
         <div className="live-update-bar">
           {(onStopRecording ||
@@ -494,11 +516,11 @@ export function LiveWorkspace({
               {onStopRecording ||
               ["recording", "streaming"].includes(meeting.status)
                 ? captureError
-                  ? "Aufnahme prüfen"
+                  ? t("Aufnahme prüfen")
                   : paused
-                    ? "Aufnahme pausiert"
-                    : "Aufnahme läuft"
-                : "Erkennung holt nach"}
+                    ? t("Aufnahme pausiert")
+                    : t("Aufnahme läuft")
+                : t("Erkennung holt nach")}
             </span>
           )}
           {meeting.modelId === "parakeet-ultra" &&
@@ -520,7 +542,7 @@ export function LiveWorkspace({
               disabled={stopping}
               onClick={onStopRecording}
             >
-              Aufnahme beenden
+              {t("Aufnahme beenden")}
             </button>
           )}
           {onTogglePause && (
@@ -530,7 +552,7 @@ export function LiveWorkspace({
               disabled={stopping}
               onClick={onTogglePause}
             >
-              {paused ? "Aufnahme fortsetzen" : "Aufnahme pausieren"}
+              {paused ? t("Aufnahme fortsetzen") : t("Aufnahme pausieren")}
             </button>
           )}
           {onToggleMute && (
@@ -540,18 +562,20 @@ export function LiveWorkspace({
               disabled={stopping}
               onClick={onToggleMute}
             >
-              {muted ? "Mikrofon aktivieren" : "Mikrofon stummschalten"}
+              {muted ? t("Mikrofon aktivieren") : t("Mikrofon stummschalten")}
             </button>
           )}
           {(meeting.captureIncomplete || meeting.warnings?.length > 0) && (
             <button type="button" className="subtle-button" onClick={onBack}>
-              Aufnahme prüfen
+              {t("Aufnahme prüfen")}
             </button>
           )}
           {onModelSettings && (
             <IconButton
-              label="Textmodell einrichten"
-              title="Öffnet die Einstellungen für Anbieter und Modell der Meeting-Auswertung."
+              label={t("Textmodell einrichten")}
+              title={t(
+                "Öffnet die Einstellungen für Anbieter und Modell der Meeting-Auswertung.",
+              )}
               onClick={onModelSettings}
             >
               <Settings2 size={16} />
@@ -559,23 +583,23 @@ export function LiveWorkspace({
           )}
           <span role="status">
             {classicRunning
-              ? "Auswertung läuft in der bisherigen Ansicht."
+              ? t("Auswertung läuft in der bisherigen Ansicht.")
               : storageReady
                 ? mode === "cloud" && !status?.running
-                  ? "Cloud-Modell in den Einstellungen ausgewählt"
-                  : workspaceStatusText(status)
-                : "Gespeicherte Auswertung wird geladen …"}
+                  ? t("Cloud-Modell in den Einstellungen ausgewählt")
+                  : workspaceStatusText(status, language)
+                : t("Gespeicherte Auswertung wird geladen …")}
             {lastEvidenceEnd > 0 &&
-              ` · Belege bis ${formatTime(lastEvidenceEnd / 1000)}`}
+              ` · ${t("Belege bis")} ${formatTime(lastEvidenceEnd / 1000)}`}
             {status?.running &&
               status.pendingChars > 0 &&
-              ` · ${status.pendingChars.toLocaleString(language)} Zeichen noch nicht ausgewertet`}
+              ` · ${status.pendingChars.toLocaleString(language)} ${t("Zeichen noch nicht ausgewertet")}`}
           </span>
           <label>
-            Intervall{" "}
+            {t("Intervall")}{" "}
             <select
-              aria-label="Auswertungsintervall"
-              title="Legt fest, wie oft die KI den Überblick aktualisiert."
+              aria-label={t("Auswertungsintervall")}
+              title={t("Legt fest, wie oft die KI den Überblick aktualisiert.")}
               disabled={!storageReady || classicRunning}
               value={minutes}
               onChange={(e) => {
@@ -585,23 +609,25 @@ export function LiveWorkspace({
                   void action(() => adapter.interval(value * 60000));
               }}
             >
-              <option value={2}>2 Min.</option>
-              <option value={3}>3 Min.</option>
+              <option value={2}>{t("2 Min.")}</option>
+              <option value={3}>{t("3 Min.")}</option>
             </select>
           </label>
-          {classicRunning ? null : status?.running ? (
+          {status?.running ? (
             <>
               <button
-                disabled={busy || status.refreshRequested}
+                disabled={busy || classicRunning || status.refreshRequested}
                 className="subtle-button"
                 onClick={() => action(() => adapter.refresh())}
               >
                 <RefreshCw size={13} />
-                {status.refreshRequested ? "Vorgemerkt" : "Aktualisieren"}
+                {status.refreshRequested ? t("Vorgemerkt") : t("Aktualisieren")}
               </button>
               <IconButton
-                label="Nur Auswertung beenden"
-                title="Stoppt die KI-Auswertung. Eine laufende Aufnahme geht weiter."
+                label={t("Nur Auswertung beenden")}
+                title={t(
+                  "Stoppt die KI-Auswertung. Eine laufende Aufnahme geht weiter.",
+                )}
                 disabled={busy}
                 onClick={() => action(() => adapter.stop())}
               >
@@ -637,14 +663,16 @@ export function LiveWorkspace({
               }
             >
               {mode === "cloud"
-                ? "Erweiterte Auswertung nur lokal verfügbar"
-                : "Lokale Auswertung starten"}
+                ? t("Erweiterte Auswertung nur lokal verfügbar")
+                : t("Lokale Auswertung starten")}
             </button>
           )}
         </div>
         <IconButton
           label={
-            dark ? "Helles Design aktivieren" : "Dunkles Design aktivieren"
+            dark
+              ? t("Helles Design aktivieren")
+              : t("Dunkles Design aktivieren")
           }
           onClick={() => onThemeChange?.(dark ? "light" : "dark")}
         >
@@ -667,12 +695,26 @@ export function LiveWorkspace({
               )}
               {storageBlocked && (
                 <div className="state-banner warning">
-                  Der lokale Notizstand ist nicht lesbar oder beschreibbar.
-                  Vorhandene Daten bleiben erhalten; neue Änderungen nur in
-                  diesem Fenster.
+                  {t(
+                    "Der lokale Notizstand ist nicht lesbar oder beschreibbar. Vorhandene Daten bleiben erhalten; neue Änderungen nur in diesem Fenster.",
+                  )}
                 </div>
               )}
-              <nav className="tabs" role="tablist" aria-label="Meetingbereiche">
+              {actionError && (
+                <div role="alert" className="state-banner warning">
+                  <span>{actionError}</span>
+                  <button type="button" onClick={onDismissError}>
+                    {language === "en"
+                      ? "Dismiss message"
+                      : "Meldung schließen"}
+                  </button>
+                </div>
+              )}
+              <nav
+                className="tabs"
+                role="tablist"
+                aria-label={t("Meetingbereiche")}
+              >
                 {tabs.map(([id, name]) => (
                   <button
                     role="tab"
@@ -680,13 +722,13 @@ export function LiveWorkspace({
                     aria-selected={tab === id}
                     onClick={() => setTab(id)}
                   >
-                    {name}
+                    {t(name)}
                   </button>
                 ))}
               </nav>
               <main
                 role="tabpanel"
-                aria-label={tabs.find(([id]) => id === tab)?.[1]}
+                aria-label={t(tabs.find(([id]) => id === tab)?.[1])}
                 className={`workspace-content tab-${tab}`}
               >
                 {tab === "overview" ? (
@@ -702,15 +744,17 @@ export function LiveWorkspace({
                     isDefaultLayout={catalog.defaultId === layoutId}
                     layoutPicker={
                       <select
-                        aria-label="Überblick-Layout"
-                        title="Zwischen deinen gespeicherten Kachelanordnungen wechseln"
+                        aria-label={t("Überblick-Layout")}
+                        title={t(
+                          "Zwischen deinen gespeicherten Kachelanordnungen wechseln",
+                        )}
                         value={layoutId}
                         onChange={(event) => chooseLayout(event.target.value)}
                       >
                         {layoutChoices.map(({ id, label }) => (
                           <option key={id} value={id}>
-                            {label}
-                            {catalog.defaultId === id ? " · Standard" : ""}
+                            {t(label)}
+                            {catalog.defaultId === id ? t(" · Standard") : ""}
                           </option>
                         ))}
                       </select>
@@ -726,9 +770,9 @@ export function LiveWorkspace({
                     className="preparation-layout workspace-editors"
                   >
                     {renderPanel("topics", true)}
-                    <Panel title="Meine Vorbereitung">
+                    <Panel title={t("Meine Vorbereitung")}>
                       <label>
-                        Mein Ziel
+                        {t("Mein Ziel")}
                         <textarea
                           rows={4}
                           value={state.preparation.goal}
@@ -744,7 +788,7 @@ export function LiveWorkspace({
                         />
                       </label>
                       <label>
-                        Private Vorbereitung
+                        {t("Private Vorbereitung")}
                         <textarea
                           rows={6}
                           value={state.preparation.agenda}
@@ -760,8 +804,9 @@ export function LiveWorkspace({
                         />
                       </label>
                       <p className="muted">
-                        Nur freigegebene Gesprächspunkte und Protokollnotizen
-                        gehen an das Modell.
+                        {t(
+                          "Nur freigegebene Gesprächspunkte und Protokollnotizen gehen an das Modell.",
+                        )}
                       </p>
                     </Panel>
                   </fieldset>
@@ -779,12 +824,12 @@ export function LiveWorkspace({
               </main>
               {storageReady && <Notes ctx={ctx} />}
               <div className="app-footnote">
-                {originals.length} Originalstände gesichert
+                {originals.length} {t("Originalstände gesichert")}
                 {workspace?.contextExcludedIds?.length
-                  ? ` · ${workspace.contextExcludedIds.length} frühere Einträge nur im Verlauf`
+                  ? ` · ${workspace.contextExcludedIds.length} ${t("frühere Einträge nur im Verlauf")}`
                   : ""}{" "}
-                · {status?.view?.model || "kein Textmodell aktiv"} · KI-Entwürfe
-                mit Originalbelegen
+                · {status?.view?.model || t("kein Textmodell aktiv")}{" "}
+                {t("· KI-Entwürfe mit Originalbelegen")}
               </div>
             </div>
           </div>
@@ -797,23 +842,26 @@ export function LiveWorkspace({
       )}
       {modal?.type === "source" && (
         <Modal
-          title="Originalbeleg"
+          title={t("Originalbeleg")}
           onClose={() => setModal(modal.back || null)}
         >
           {source ? (
             <>
               <div className="source-meta">
-                {source.source === "microphone" ? "Mikrofon" : "Computerton"} ·{" "}
+                {source.source === "microphone"
+                  ? t("Mikrofon")
+                  : t("Computerton")}{" "}
+                ·{" "}
                 {workspace?.supersededSources?.includes(source.id) &&
-                  "Früherer Transkriptstand · "}
+                  t("Früherer Transkriptstand · ")}
                 {formatTime(source.startMs / 1000)}–
-                {formatTime(source.endMs / 1000)} · Abschnittszeiten
+                {formatTime(source.endMs / 1000)} {t("· Abschnittszeiten")}
               </div>
               <blockquote className="source-quote">{source.text}</blockquote>
               {sourceParts.length === 1 && (
                 <div className="source-actions">
                   <button onClick={() => openTranscript(sourceParts[0].file)}>
-                    Im Transkript ansehen
+                    {t("Im Transkript ansehen")}
                   </button>
                   {adapter.sourceAudio && (
                     <SourceAudioPreview
@@ -831,7 +879,9 @@ export function LiveWorkspace({
               )}
             </>
           ) : (
-            <p>Der Originalabschnitt ist in diesem Stand nicht verfügbar.</p>
+            <p>
+              {t("Der Originalabschnitt ist in diesem Stand nicht verfügbar.")}
+            </p>
           )}
         </Modal>
       )}
@@ -839,85 +889,95 @@ export function LiveWorkspace({
   );
 }
 
+/** Edit local preparation topics and explicitly control which topics enter model context. */
 function LiveTopics({ ctx, entities, quote, override, full, onExpand }) {
+  const t = useWorkspaceText();
   const [view, patch] = usePanelSettings(ctx, "topics", {
     draft: "",
     filter: "all",
   });
-  const topics = ctx.state.topics.map((t) => ({
-    ...t,
-    native: t.shared ? entities.find((e) => e.id === t.id) : undefined,
+  const topics = ctx.state.topics.map((topic) => ({
+    ...topic,
+    native: topic.shared ? entities.find((e) => e.id === topic.id) : undefined,
   }));
-  const done = topics.filter((t) => t.native?.status === "discussed").length;
+  const done = topics.filter(
+    (topic) => topic.native?.status === "discussed",
+  ).length;
   function change(fn) {
     ctx._mutate?.(fn);
   }
   return (
     <Panel
-      title="Vorbereitung"
-      subtitle={`${topics.length - done} offen`}
+      title={t("Vorbereitung")}
+      subtitle={`${topics.length - done} ${t("offen")}`}
       icon={ListChecks}
       onExpand={full ? undefined : onExpand}
     >
       <div className="topic-list scroll-region">
         {!topics.length && (
           <p className="empty-inline">
-            Eigene Gesprächspunkte vor dem Meeting ergänzen.
+            {t("Eigene Gesprächspunkte vor dem Meeting ergänzen.")}
           </p>
         )}
-        {topics.map((t) => (
-          <article className="topic-row" key={t.id}>
+        {topics.map((topic) => (
+          <article className="topic-row" key={topic.id}>
             <div className="topic-line">
               <div className="result-title">
                 {" "}
                 <button
                   className="topic-name"
-                  aria-expanded={view.expanded === t.id}
+                  aria-expanded={view.expanded === topic.id}
                   onClick={() =>
-                    patch({ expanded: view.expanded === t.id ? null : t.id })
+                    patch({
+                      expanded: view.expanded === topic.id ? null : topic.id,
+                    })
                   }
                 >
-                  {t.text}
+                  {topic.text}
                 </button>
                 <Status
-                  kind={t.native?.status === "discussed" ? "done" : "open"}
+                  kind={topic.native?.status === "discussed" ? "done" : "open"}
                 >
-                  {t.native
-                    ? `${statusName[t.native.status]}${t.native.humanLocked ? " · manuell" : ""}`
-                    : "Noch nicht abgeglichen"}
+                  {topic.native
+                    ? `${t(statusName[topic.native.status])}${topic.native.humanLocked ? t(" · manuell") : ""}`
+                    : t("Noch nicht abgeglichen")}
                 </Status>{" "}
               </div>
               <label>
                 <input
                   type="checkbox"
-                  checked={Boolean(t.shared)}
+                  checked={Boolean(topic.shared)}
                   onChange={(e) =>
                     change((v) => ({
                       ...v,
                       topics: v.topics.map((x) =>
-                        x.id === t.id ? { ...x, shared: e.target.checked } : x,
+                        x.id === topic.id
+                          ? { ...x, shared: e.target.checked }
+                          : x,
                       ),
                     }))
                   }
                 />
-                Freigeben
+                {t("Freigeben")}
               </label>
             </div>
-            {view.expanded === t.id && t.native && (
+            {view.expanded === topic.id && topic.native && (
               <>
-                {quote(t.native)}
+                {quote(topic.native)}
                 <button
                   className="text-button"
                   onClick={() =>
                     override(
-                      t.native,
-                      t.native.status === "discussed" ? "open" : "discussed",
+                      topic.native,
+                      topic.native.status === "discussed"
+                        ? "open"
+                        : "discussed",
                     )
                   }
                 >
-                  {t.native.status === "discussed"
-                    ? "Wieder öffnen"
-                    : "Als besprochen markieren"}
+                  {topic.native.status === "discussed"
+                    ? t("Wieder öffnen")
+                    : t("Als besprochen markieren")}
                 </button>
               </>
             )}
@@ -947,24 +1007,25 @@ function LiveTopics({ ctx, entities, quote, override, full, onExpand }) {
           }}
         >
           <input
-            aria-label="Neuer Gesprächspunkt"
+            aria-label={t("Neuer Gesprächspunkt")}
             maxLength={180}
             value={view.draft || ""}
             onChange={(e) => patch({ draft: e.target.value })}
-            placeholder="Eigenen Gesprächspunkt ergänzen …"
+            placeholder={t("Eigenen Gesprächspunkt ergänzen …")}
           />
-          <IconButton type="submit" label="Gesprächspunkt hinzufügen">
+          <IconButton type="submit" label={t("Gesprächspunkt hinzufügen")}>
             <Plus size={16} />
           </IconButton>
         </form>
       )}
       <div className="panel-foot">
-        Nur freigegebene Gesprächspunkte werden automatisch abgeglichen.
+        {t("Nur freigegebene Gesprächspunkte werden automatisch abgeglichen.")}
       </div>
     </Panel>
   );
 }
 
+/** Render source-linked overview, details, prompts or history without inventing missing evidence. */
 function LivePanel({
   ctx,
   panel,
@@ -975,6 +1036,7 @@ function LivePanel({
   full,
   onExpand,
 }) {
+  const t = useWorkspaceText();
   const [view, patch] = usePanelSettings(ctx, panel, {
     query: "",
     ascending: true,
@@ -983,12 +1045,12 @@ function LivePanel({
     minutes: "all",
   });
   const titles = {
-    summary: "Live-Überblick",
-    details: "Wichtige Details",
-    impulses: "Gesprächsimpulse",
-    relevant: "Jetzt relevant",
-    changes: "Änderungen im Gespräch",
-    transcript: "Transkript",
+    summary: t("Live-Überblick"),
+    details: t("Wichtige Details"),
+    impulses: t("Gesprächsimpulse"),
+    relevant: t("Jetzt relevant"),
+    changes: t("Änderungen im Gespräch"),
+    transcript: t("Transkript"),
   };
   const icons = {
     summary: FileText,
@@ -1080,7 +1142,7 @@ function LivePanel({
           view.eventStatus === "all" ||
           event.status === view.eventStatus) &&
         (!needle ||
-          `${event.text} ${statusName[event.status] || event.status}`
+          `${event.text} ${t(statusName[event.status]) || event.status}`
             .toLocaleLowerCase()
             .includes(needle)),
     )
@@ -1105,12 +1167,12 @@ function LivePanel({
       actions={
         panel === "impulses" && (
           <label className="count-select">
-            Anzahl
+            {t("Anzahl")}
             <input
               type="number"
               min="1"
               max={impulseTotal || 1}
-              aria-label="Anzahl Gesprächsimpulse"
+              aria-label={t("Anzahl Gesprächsimpulse")}
               disabled={!impulseTotal}
               value={view.countInput ?? impulseLimit}
               onChange={(e) => {
@@ -1127,7 +1189,10 @@ function LivePanel({
                 if (e.key === "Enter") e.currentTarget.blur();
               }}
             />
-            <span>von {impulseTotal}</span>
+            <span>
+              {t("von")}
+              {impulseTotal}
+            </span>
           </label>
         )
       }
@@ -1138,7 +1203,7 @@ function LivePanel({
             <Search size={14} />
             <input
               aria-label={`${titles[panel]} durchsuchen`}
-              placeholder="Suchen …"
+              placeholder={t("Suchen …")}
               value={view.query || ""}
               onChange={(e) => patch({ query: e.target.value })}
             />
@@ -1147,37 +1212,40 @@ function LivePanel({
             <>
               {" "}
               <select
-                aria-label="Transkriptspur"
+                aria-label={t("Transkriptspur")}
                 value={view.track || "all"}
                 onChange={(e) => patch({ track: e.target.value })}
               >
-                <option value="all">Beide Spuren</option>
-                <option value="system">Computerton</option>
-                <option value="microphone">Mikrofon</option>
+                <option value="all">{t("Beide Spuren")}</option>
+                <option value="system">{t("Computerton")}</option>
+                <option value="microphone">{t("Mikrofon")}</option>
               </select>
               <select
-                aria-label="Transkriptzeitraum"
+                aria-label={t("Transkriptzeitraum")}
                 value={view.minutes || "all"}
                 onChange={(e) => patch({ minutes: e.target.value })}
               >
-                <option value="all">Gesamt</option>
+                <option value="all">{t("Gesamt")}</option>
                 {[5, 10, 15, 30, 60].map((value) => (
                   <option key={value} value={value}>
-                    Letzte {value} Min.
+                    {t("Letzte")}
+                    {value} {t("Min.")}
                   </option>
                 ))}
-                <option value="custom">Individueller Zeitraum</option>
+                <option value="custom">{t("Individueller Zeitraum")}</option>
               </select>
               <button
                 type="button"
                 className="subtle-button sort-toggle"
                 aria-label={
-                  view.ascending === false ? "Neueste zuerst" : "Älteste zuerst"
+                  view.ascending === false
+                    ? t("Neueste zuerst")
+                    : t("Älteste zuerst")
                 }
                 title={
                   view.ascending === false
-                    ? "Neueste zuerst · Reihenfolge umkehren"
-                    : "Älteste zuerst · Reihenfolge umkehren"
+                    ? t("Neueste zuerst · Reihenfolge umkehren")
+                    : t("Älteste zuerst · Reihenfolge umkehren")
                 }
                 onClick={() => patch({ ascending: view.ascending === false })}
               >
@@ -1189,14 +1257,14 @@ function LivePanel({
             <>
               {" "}
               <select
-                aria-label="Verlauf nach Status filtern"
+                aria-label={t("Verlauf nach Status filtern")}
                 value={view.eventStatus || "all"}
                 onChange={(e) => patch({ eventStatus: e.target.value })}
               >
-                <option value="all">Alle Status</option>
+                <option value="all">{t("Alle Status")}</option>
                 {Object.entries(statusName).map(([id, label]) => (
                   <option key={id} value={id}>
-                    {label}
+                    {t(label)}
                   </option>
                 ))}
               </select>
@@ -1204,12 +1272,14 @@ function LivePanel({
                 type="button"
                 className="subtle-button sort-toggle"
                 aria-label={
-                  view.ascending === false ? "Neueste zuerst" : "Älteste zuerst"
+                  view.ascending === false
+                    ? t("Neueste zuerst")
+                    : t("Älteste zuerst")
                 }
                 title={
                   view.ascending === false
-                    ? "Neueste zuerst · Reihenfolge umkehren"
-                    : "Älteste zuerst · Reihenfolge umkehren"
+                    ? t("Neueste zuerst · Reihenfolge umkehren")
+                    : t("Älteste zuerst · Reihenfolge umkehren")
                 }
                 onClick={() => patch({ ascending: view.ascending === false })}
               >
@@ -1222,7 +1292,7 @@ function LivePanel({
       {panel === "transcript" && custom && (
         <div className="custom-time-range">
           <label>
-            Von (Min.)
+            {t("Von (Min.)")}
             <input
               type="number"
               min="0"
@@ -1232,7 +1302,7 @@ function LivePanel({
             />
           </label>
           <label>
-            Bis (Min.)
+            {t("Bis (Min.)")}
             <input
               type="number"
               min="0"
@@ -1242,7 +1312,9 @@ function LivePanel({
             />
           </label>
           {invalidRange && (
-            <span role="status">Das Ende muss nach dem Anfang liegen.</span>
+            <span role="status">
+              {t("Das Ende muss nach dem Anfang liegen.")}
+            </span>
           )}
         </div>
       )}
@@ -1256,8 +1328,8 @@ function LivePanel({
                 tabIndex={p.file && p.file === ctx.focusedFile ? -1 : undefined}
               >
                 <div className="transcript-meta">
-                  {p.source === "microphone" ? "Mikrofon" : "Computerton"} ·{" "}
-                  {formatTime(p.startSample / 16000)}
+                  {p.source === "microphone" ? t("Mikrofon") : t("Computerton")}{" "}
+                  · {formatTime(p.startSample / 16000)}
                 </div>
                 <p>{p.text}</p>
               </article>
@@ -1276,7 +1348,8 @@ function LivePanel({
                             : "open"
                         }
                       >
-                        {statusName[e.status]}
+                        {t(statusName[e.status])}
+                        {e.human ? t(" · manuell") : ""}
                       </Status>
                     </div>
                     {quote(e)}
@@ -1288,10 +1361,14 @@ function LivePanel({
                   {panel === "summary" &&
                     index === 0 &&
                     relevant.length > 0 && (
-                      <h3 className="overview-section-title">Jetzt relevant</h3>
+                      <h3 className="overview-section-title">
+                        {t("Jetzt relevant")}
+                      </h3>
                     )}
                   {panel === "summary" && index === relevant.length && (
-                    <h3 className="overview-section-title">Bisheriger Stand</h3>
+                    <h3 className="overview-section-title">
+                      {t("Bisheriger Stand")}
+                    </h3>
                   )}
                   <article
                     className={`impulse-row ${item.status === "discussed" ? "impulse-done" : ""}`}
@@ -1308,14 +1385,15 @@ function LivePanel({
                               : "open"
                         }
                       >
-                        {statusName[item.status]}
-                        {item.humanLocked ? " · manuell" : ""}
+                        {t(statusName[item.status])}
+                        {item.humanLocked ? t(" · manuell") : ""}
                       </Status>
                     </div>
                     {item.kind === "task" && (
                       <small>
-                        Zuständig: {item.owner || "nicht benannt"} · Termin:{" "}
-                        {item.due || "nicht benannt"}
+                        {t("Zuständig:")}
+                        {item.owner || t("nicht benannt")} {t("· Termin:")}{" "}
+                        {item.due || t("nicht benannt")}
                       </small>
                     )}
                     {quote(item)}
@@ -1341,8 +1419,8 @@ function LivePanel({
                         >
                           <Bookmark size={14} aria-hidden="true" />
                           {ctx.state.impulseStates[item.id]?.saved
-                            ? "Gemerkt"
-                            : "Merken"}
+                            ? t("Gemerkt")
+                            : t("Merken")}
                         </button>
                         <button
                           className={`subtle-button impulse-status ${item.status === "discussed" ? "is-reopen" : "is-complete"}`}
@@ -1361,8 +1439,8 @@ function LivePanel({
                             <Check size={14} aria-hidden="true" />
                           )}
                           {item.status === "discussed"
-                            ? "Wieder öffnen"
-                            : "Besprochen"}
+                            ? t("Wieder öffnen")
+                            : t("Besprochen")}
                         </button>
                       </div>
                     )}
@@ -1371,17 +1449,19 @@ function LivePanel({
               ))}
         {panel === "transcript" && !transcriptRows.length && (
           <p className="empty-inline">
-            Für diese Auswahl kein bestätigter Transkriptabschnitt.
+            {t("Für diese Auswahl kein bestätigter Transkriptabschnitt.")}
           </p>
         )}
         {panel !== "transcript" &&
           !(panel === "changes" ? timeline.length : items.length) && (
             <p className="empty-inline">
               {workspace
-                ? "Für diese Auswahl kein gespeicherter Eintrag."
+                ? t("Für diese Auswahl kein gespeicherter Eintrag.")
                 : panel === "changes"
-                  ? "Hier erscheinen belegte Entwicklungen und Statusänderungen. Der Wortlaut steht im Transkript."
-                  : "Noch keine geprüfte lokale Auswertung."}
+                  ? t(
+                      "Hier erscheinen belegte Entwicklungen und Statusänderungen. Der Wortlaut steht im Transkript.",
+                    )
+                  : t("Noch keine geprüfte lokale Auswertung.")}
             </p>
           )}
       </div>

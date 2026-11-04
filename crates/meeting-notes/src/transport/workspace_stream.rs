@@ -6,6 +6,7 @@ use std::{
     sync::{Arc, Mutex, MutexGuard, OnceLock},
 };
 static ROUTES: OnceLock<Mutex<HashMap<String, Arc<Mutex<()>>>>> = OnceLock::new();
+/// Share a bounded per-server queue across loopback aliases; discard unused route entries.
 pub(super) fn route_gate(base: &Url) -> Result<Arc<Mutex<()>>> {
     let host = base.host_str().unwrap_or_default();
     let host = if ["localhost", "127.0.0.1", "[::1]", "::1"].contains(&host) {
@@ -22,13 +23,14 @@ pub(super) fn route_gate(base: &Url) -> Result<Arc<Mutex<()>>> {
         .get_or_init(Mutex::default)
         .lock()
         .map_err(|_| anyhow::anyhow!("Modellwarteschlange ist gesperrt."))?;
-    routes.retain(|_, route| Arc::strong_count(route) > 1 || route.is_poisoned());
+    routes.retain(|_, route| Arc::strong_count(route) > 1);
     ensure!(
         routes.len() < 128 || routes.contains_key(&key),
         "Zu viele Modellrouten."
     );
     Ok(Arc::clone(routes.entry(key).or_default()))
 }
+/// Wait cancellably for the route; a panic by a previous holder does not disable future requests.
 pub(super) fn enter<'a>(
     gate: &'a Mutex<()>,
     control: &AnalysisControl,
@@ -40,11 +42,12 @@ pub(super) fn enter<'a>(
             Err(std::sync::TryLockError::WouldBlock) => {
                 std::thread::sleep(Duration::from_millis(20))
             }
-            Err(_) => bail!("Modellwarteschlange ist gesperrt."),
+            Err(std::sync::TryLockError::Poisoned(poisoned)) => return Ok(poisoned.into_inner()),
         }
     }
 }
 impl TextClient {
+    /// Stream local structured text with proxy/redirect blocks and explicit terminal validation.
     pub(crate) fn workspace_json(
         &self,
         system: &str,
@@ -125,6 +128,7 @@ struct StreamAnswer {
     text: String,
 }
 impl StreamAnswer {
+    /// Initialize a native-Ollama or OpenAI-compatible stream decoder with no accepted terminal result.
     fn new(native: bool) -> Self {
         Self {
             native,
@@ -132,6 +136,7 @@ impl StreamAnswer {
             text: String::new(),
         }
     }
+    /// Decode one bounded event, rejecting tool calls, ambiguous choices and incomplete completions.
     fn line(&mut self, line: &str) -> Result<()> {
         let line = line.trim();
         if line.is_empty() || line.starts_with(':') || (!self.native && line == "data: [DONE]") {
@@ -197,6 +202,7 @@ impl StreamAnswer {
         }
         Ok(())
     }
+    /// Return text only after a successful terminal stop; length stops remain retryable budget errors.
     fn finish(self) -> Result<String> {
         ensure!(self.complete && !self.text.trim().is_empty(),"KI-Antwort wurde nicht vollständig abgeschlossen. Der letzte gültige Stand bleibt erhalten.");
         Ok(self.text)
@@ -219,5 +225,23 @@ mod tests {
     #[test]
     fn length_and_tools_are_rejected() {
         for line in ["{\"message\":{\"content\":\"{}\"},\"done\":true,\"done_reason\":\"length\"}","{\"message\":{\"content\":\"{}\",\"tool_calls\":[]},\"done\":true,\"done_reason\":\"stop\"}"]{assert!(StreamAnswer::new(true).line(line).is_err());}
+    }
+}
+
+#[cfg(test)]
+mod gate_tests {
+    use super::*;
+    #[test]
+    fn panic_in_a_route_guard_does_not_disable_later_requests() {
+        let gate = Arc::new(Mutex::new(()));
+        let poisoned = Arc::clone(&gate);
+        let _ = std::thread::spawn(move || {
+            let _guard = poisoned.lock().unwrap();
+            panic!("Synthetic panic while holding a stateless route");
+        })
+        .join();
+        let guard = enter(&gate, &AnalysisControl::default()).unwrap();
+        drop(guard);
+        assert!(enter(&gate, &AnalysisControl::default()).is_ok());
     }
 }

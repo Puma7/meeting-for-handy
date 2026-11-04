@@ -44,6 +44,79 @@ impl WorkspaceRunner {
         })
     }
 
+    /// Explicit model changes retain human-confirmed entries and their immutable
+    /// evidence. Other model drafts are recomputed in the new run.
+    pub fn inherit_manual(&mut self, previous: &WorkspaceState) -> Result<()> {
+        if self.state.revision != 0 {
+            return Ok(());
+        }
+        let context = self
+            .context
+            .lock()
+            .map_err(|_| anyhow::anyhow!("Meetingkontext ist gesperrt."))?
+            .clone();
+        let selected: Vec<_> = previous
+            .entities
+            .iter()
+            .filter(|entity| entity.human_locked)
+            .filter(|entity| !previous.context_excluded_ids.contains(&entity.id))
+            .filter(|entity| {
+                entity.kind != "agenda"
+                    || context
+                        .agenda
+                        .iter()
+                        .any(|a| a.id == entity.id && a.text == entity.text)
+            })
+            .cloned()
+            .collect();
+        if selected.is_empty() {
+            return Ok(());
+        }
+        let mut next = self.state.clone();
+        next.apply_context(&context)?;
+        for entity in selected {
+            next.entities.retain(|old| old.id != entity.id);
+            next.entities.push(entity);
+        }
+        let ids: HashSet<_> = next
+            .entities
+            .iter()
+            .map(|entity| entity.id.clone())
+            .collect();
+        next.events = previous
+            .events
+            .iter()
+            .filter(|event| ids.contains(&event.entity_id))
+            .cloned()
+            .collect();
+        let source_ids: HashSet<_> = next
+            .entities
+            .iter()
+            .flat_map(|entity| entity.evidence.iter())
+            .chain(next.events.iter().flat_map(|event| event.evidence.iter()))
+            .map(|evidence| evidence.source_id.clone())
+            .collect();
+        let originals: Vec<_> = previous
+            .originals
+            .iter()
+            .filter(|source| source_ids.contains(&source.id))
+            .cloned()
+            .collect();
+        ensure!(
+            originals.len() == source_ids.len(),
+            "Originalbelege der manuellen Änderungen fehlen."
+        );
+        next.originals = originals.clone();
+        next.context = context.clone();
+        self.commit(
+            next,
+            originals,
+            vec![],
+            &AnalysisControl::default(),
+            &context,
+        )
+    }
+
     pub fn pending(&self, texts: &[LiveText]) -> Vec<LiveSource> {
         *self.observed.borrow_mut() = Some(live::pending(&[], texts));
         let latest = self.active_sources();
@@ -256,6 +329,7 @@ impl WorkspaceRunner {
         let mut committed_changes = Vec::new();
         // One coordinated transaction with two small tasks. A small local model should not
         // have to classify obligations and generate/resolve questions in the same output.
+        let mut overview_selection: Option<Vec<String>> = None;
         for phase in ["tasks", "facts", "reconcile"] {
             let frontier: Vec<Entity> = next
                 .entities
@@ -280,7 +354,7 @@ impl WorkspaceRunner {
             } else {
                 frontier.chunks(6).map(|g| (g.to_vec(), true)).collect()
             };
-            while let Some((mut group, seeds)) = groups.pop_front() {
+            'groups: while let Some((mut group, seeds)) = groups.pop_front() {
                 let base_group = group.clone();
                 control.check()?;
                 if ["facts", "reconcile"].contains(&phase) && seeds {
@@ -333,10 +407,16 @@ impl WorkspaceRunner {
                 }
                 let mut schema: serde_json::Value =
                     serde_json::from_str(include_str!("response.schema.json"))?;
-                let evidence_options = req.transcript_sources.iter().map(|source| serde_json::json!({
-                    "type":"object", "additionalProperties":false, "required":["sourceId","quote"],
-                    "properties":{"sourceId":{"type":"string","enum":[source.id]},"quote":{"type":"string","enum":quote_options(&source.text)}}
-                })).collect::<Vec<_>>();
+                let evidence_options = req.transcript_sources.iter().filter_map(|source| {
+                    let quotes = quote_options(&source.text);
+                    (!quotes.is_empty()).then(|| serde_json::json!({
+                        "type":"object", "additionalProperties":false, "required":["sourceId","quote"],
+                        "properties":{"sourceId":{"type":"string","enum":[source.id]},"quote":{"type":"string","enum":quotes}}
+                    }))
+                }).collect::<Vec<_>>();
+                if evidence_options.is_empty() {
+                    continue;
+                }
                 schema["properties"]["changes"]["items"]["properties"]["evidence"]["items"] =
                     serde_json::json!({"anyOf":evidence_options});
                 schema["properties"]["changes"]["items"]["properties"]["relatedEntityIds"]
@@ -426,14 +506,43 @@ impl WorkspaceRunner {
                     } else {
                         "\nDie vorherige Antwort wurde vollständig verworfen. Erzeuge den Auftrag erneut: ausschließlich Typen dieser Phase; jede proposalId innerhalb der Antwort genau einmal (p_1, p_2, ...); targetId/revision nur aus state oder null; neue Aufgaben nur aus window.requiredSourceIds; alle Belege wörtlich aus transcriptSources; relatedEntityIds immer []; keine fehlende Zusage als Aufgabe. Keine zuvor ungültige Antwort wird übernommen."
                     };
-                    let answer = client.workspace_json(
+                    let answer = match client.workspace_json(
                         &format!("{PROMPT}\n{extra}{repair}"),
                         &input,
                         schema.clone(),
                         control,
-                    )?;
+                    ) {
+                        Ok(answer) => answer,
+                        Err(error)
+                            if matches!(
+                                error.downcast_ref::<crate::transport::BudgetError>(),
+                                Some(crate::transport::BudgetError::Context)
+                            ) =>
+                        {
+                            if seeds && ["facts", "reconcile"].contains(&phase) {
+                                groups.push_front((base_group, false));
+                                continue 'groups;
+                            }
+                            if base_group.len() > 1 {
+                                let at = base_group.len() / 2;
+                                groups.push_front((base_group[at..].to_vec(), false));
+                                groups.push_front((base_group[..at].to_vec(), false));
+                                continue 'groups;
+                            }
+                            return Err(error);
+                        }
+                        Err(error) => return Err(error),
+                    };
                     match validate::apply(&mut next, &req, &answer) {
                         Ok(events) => {
+                            if phase == "facts" {
+                                let selected = overview_selection.get_or_insert_with(Vec::new);
+                                for id in &next.overview_refs {
+                                    if !selected.contains(id) {
+                                        selected.push(id.clone());
+                                    }
+                                }
+                            }
                             committed_changes.extend(events);
                             break;
                         }
@@ -449,7 +558,9 @@ impl WorkspaceRunner {
                 }
             }
         }
-        if next.overview_refs.is_empty() {
+        if let Some(selected) = overview_selection {
+            next.overview_refs = selected;
+        } else if next.overview_refs.is_empty() {
             next.overview_refs = next
                 .entities
                 .iter()

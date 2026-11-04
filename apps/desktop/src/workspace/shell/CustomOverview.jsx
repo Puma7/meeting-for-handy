@@ -1,3 +1,4 @@
+import { useWorkspaceText } from "./workspaceLocale.jsx";
 import { Fragment, useEffect, useReducer, useRef, useState } from "react";
 import {
   Check,
@@ -28,6 +29,7 @@ import {
   toggleCard,
 } from "./overviewLayout.mjs";
 
+/** Apply layout operations immutably while preserving valid card identities and column bounds. */
 function reducer(state, action) {
   if (action.type === "restore") return action.state;
   if (action.type === "undo")
@@ -40,6 +42,7 @@ function reducer(state, action) {
     : { layout, past: [...state.past.slice(-29), state.layout] };
 }
 
+/** Render the configurable dashboard with pointer/keyboard movement and independent card resizing. */
 export function CustomOverview({
   variant,
   storageKey,
@@ -51,6 +54,8 @@ export function CustomOverview({
   layoutLabel,
   isDefaultLayout,
 }) {
+  const t = useWorkspaceText();
+  /** Merge visible presets with retained preferences without duplicate card identifiers. */
   function combineCards(layout) {
     if (!mergeRelevant) return layout;
     const hasSummary = layout.cards.some(({ id }) => id === "summary");
@@ -86,10 +91,11 @@ export function CustomOverview({
   const [editing, setEditing] = useState(false);
   const [layoutName, setLayoutName] = useState("");
   const [layoutMessage, setLayoutMessage] = useState("");
+  /** Persist a completed layout edit and report storage failure instead of silently losing it. */
   function saveLayout(action) {
     const name = layoutName.trim();
     if (action !== "default" && !name) {
-      setLayoutMessage("Bitte einen Layoutnamen eingeben.");
+      setLayoutMessage(t("Bitte einen Layoutnamen eingeben."));
       return;
     }
     const error = manageLayout(action, name, layout);
@@ -97,8 +103,8 @@ export function CustomOverview({
       setLayoutName("");
       setLayoutMessage(
         action === "default"
-          ? "Standardlayout gespeichert."
-          : "Layout gespeichert.",
+          ? t("Standardlayout gespeichert.")
+          : t("Layout gespeichert."),
       );
     } else {
       setLayoutMessage(error);
@@ -127,32 +133,37 @@ export function CustomOverview({
   function update(fn) {
     dispatch({ type: "update", update: fn });
   }
+  /** Restore keyboard focus to the moved card after the DOM order changes. */
   function focusGrip(id) {
     requestAnimationFrame(() =>
       grid.current?.querySelector(`[data-handle-id="${id}"]`)?.focus(),
     );
   }
+  /** Apply a destination and announce the card's new location for assistive technology. */
   function move(id, direction) {
     update((previous) => stepCard(previous, id, direction));
     setTarget(null);
-    setAnnouncement(`${moduleName(id)} verschoben.`);
+    setAnnouncement(`${t(moduleName(id))} ${t("verschoben.")}`);
     focusGrip(id);
   }
+  /** Begin a card move with the current origin retained for cancellation. */
   function lift(id) {
     if (!moving && id) lifted.current = state;
     setMoving(id);
     setTarget(null);
     setAnnouncement(
       id
-        ? `${moduleName(id)} aufgenommen. Mit Pfeiltasten verschieben, Enter zum Ablegen, Escape zum Abbrechen.`
-        : "Modul abgelegt.",
+        ? `${t(moduleName(id))} ${t("aufgenommen. Mit Pfeiltasten verschieben, Enter zum Ablegen, Escape zum Abbrechen.")}`
+        : t("Modul abgelegt."),
     );
   }
+  /** Clear drag state and restore focus without changing the completed layout. */
   function end() {
     setMoving(null);
     setTarget(null);
     lifted.current = null;
   }
+  /** Update the visible insertion marker for the current drop target. */
   function hover(id, column, anchorId, edge) {
     const next = insertionTarget(layout, id, column, anchorId, edge);
     setTarget((previous) =>
@@ -164,9 +175,10 @@ export function CustomOverview({
     );
     if (next)
       setAnnouncement(
-        `${moduleName(id)}: ${edge === "before" ? "oberhalb" : "unterhalb"} ${anchorId ? moduleName(anchorId) : "am Spaltenende"}, Spalte ${column + 1}.`,
+        `${t(moduleName(id))}: ${edge === "before" ? t("oberhalb") : t("unterhalb")} ${anchorId ? t(moduleName(anchorId)) : t("am Spaltenende")}, ${t("Spalte")} ${column + 1}.`,
       );
   }
+  /** Commit the currently resolved insertion target and finish the move. */
   function drop(column, anchorId = null, edge = "after", id = moving) {
     const destination = insertionTarget(layout, id, column, anchorId, edge);
     if (!destination) {
@@ -174,14 +186,18 @@ export function CustomOverview({
       return;
     }
     update((previous) => moveCard(previous, id, column, destination.beforeId));
-    setAnnouncement(`${moduleName(id)} in Spalte ${column + 1} abgelegt.`);
+    setAnnouncement(
+      `${t(moduleName(id))} ${t("in Spalte")} ${column + 1} ${t("abgelegt.")}`,
+    );
     focusGrip(id);
     end();
   }
+  /** Resolve a client-space pointer against currently rendered columns and cards. */
   function pointerDestination(event, id) {
     const columns = [
       ...grid.current.querySelectorAll(":scope > .overview-column"),
     ];
+    /** Check whether a pointer falls inside a measured client-space rectangle. */
     function inside(element) {
       const rect = element.getBoundingClientRect();
       return (
@@ -191,6 +207,7 @@ export function CustomOverview({
         event.clientY <= rect.bottom
       );
     }
+    /** Measure visible card rectangles used for between-card placement. */
     function cardRects(elements) {
       return elements.flatMap((element, column) =>
         [...element.children]
@@ -216,6 +233,7 @@ export function CustomOverview({
     };
   }
 
+  /** Bind pointer and keyboard move controls to one stable card identifier. */
   function gripEvents(id) {
     return {
       onPointerDown(event) {
@@ -258,12 +276,13 @@ export function CustomOverview({
       },
     };
   }
+  /** Resolve directional or confirmation keys without starting an unrelated native action. */
   function keyboardMove(event, id) {
     if (event.key === "Escape" && moving === id) {
       event.preventDefault();
       if (lifted.current) dispatch({ type: "restore", state: lifted.current });
       end();
-      setAnnouncement("Verschieben abgebrochen.");
+      setAnnouncement(t("Verschieben abgebrochen."));
       focusGrip(id);
     } else if (
       moving === id &&
@@ -302,20 +321,22 @@ export function CustomOverview({
       <div className="overview-toolbar">
         <div className="overview-toolbar-title">
           <LayoutGrid size={15} />
-          <b>{moving ? moduleName(moving) : "Dein Überblick"}</b>
+          <b>{moving ? t(moduleName(moving)) : t("Dein Überblick")}</b>
           <span>
-            {moving ? "wird verschoben" : `${layout.cards.length} Module`}
+            {moving
+              ? t("wird verschoben")
+              : `${layout.cards.length} ${t("Module")}`}
           </span>
         </div>
         <div className="overview-toolbar-actions">
           {layoutPicker}
           {editing && manageLayout && (
             <details className="module-picker layout-manager">
-              <summary>Layouts verwalten</summary>
+              <summary>{t("Layouts verwalten")}</summary>
               <div>
                 <b>{layoutLabel}</b>
                 <label>
-                  Layoutname{" "}
+                  {t("Layoutname")}{" "}
                   <input
                     value={layoutName}
                     maxLength={50}
@@ -323,17 +344,17 @@ export function CustomOverview({
                   />
                 </label>
                 <button type="button" onClick={() => saveLayout("copy")}>
-                  Als neues Layout speichern
+                  {t("Als neues Layout speichern")}
                 </button>
                 <button type="button" onClick={() => saveLayout("rename")}>
-                  Aktuelles Layout umbenennen
+                  {t("Aktuelles Layout umbenennen")}
                 </button>
                 <button
                   type="button"
                   disabled={isDefaultLayout}
                   onClick={() => saveLayout("default")}
                 >
-                  Als Standard öffnen
+                  {t("Als Standard öffnen")}
                 </button>
                 <p role="status">{layoutMessage}</p>
               </div>
@@ -343,7 +364,7 @@ export function CustomOverview({
             <>
               <select
                 className="column-count"
-                aria-label="Anzahl Spalten"
+                aria-label={t("Anzahl Spalten")}
                 value={layout.columns}
                 onChange={(event) => {
                   end();
@@ -354,17 +375,17 @@ export function CustomOverview({
               >
                 {[2, 3, 4].map((n) => (
                   <option key={n} value={n}>
-                    {n} Spalten
+                    {n} {t("Spalten")}
                   </option>
                 ))}
               </select>
               <details className="module-picker">
                 <summary>
                   <Plus size={14} />
-                  Module
+                  {t("Module")}
                 </summary>
                 <div>
-                  <b>Module im Überblick</b>
+                  <b>{t("Module im Überblick")}</b>
                   {availableModules.map(([id, label]) => (
                     <label key={id}>
                       <input
@@ -375,12 +396,13 @@ export function CustomOverview({
                           update((previous) => toggleCard(previous, id));
                         }}
                       />
-                      {label}
+                      {t(label)}
                     </label>
                   ))}
                   <p>
-                    Ausblenden ändert keine Meetinginhalte. Notizen bleiben
-                    unten.
+                    {t(
+                      "Ausblenden ändert keine Meetinginhalte. Notizen bleiben unten.",
+                    )}
                   </p>
                   <button
                     className="text-button layout-reset"
@@ -390,12 +412,12 @@ export function CustomOverview({
                     }}
                   >
                     <RotateCcw size={13} />
-                    Voreinstellung wiederherstellen
+                    {t("Voreinstellung wiederherstellen")}
                   </button>
                 </div>
               </details>
               <IconButton
-                label="Letzte Layoutänderung rückgängig"
+                label={t("Letzte Layoutänderung rückgängig")}
                 disabled={!state.past.length}
                 onClick={() => {
                   end();
@@ -405,20 +427,20 @@ export function CustomOverview({
                 <Undo2 size={15} />
               </IconButton>
               <details className="layout-help">
-                <summary aria-label="Hilfe zum Anordnen">
+                <summary aria-label={t("Hilfe zum Anordnen")}>
                   <CircleHelp size={16} />
                 </summary>
                 <div>
-                  <b>Deinen Überblick anordnen</b>
+                  <b>{t("Deinen Überblick anordnen")}</b>
                   <p>
-                    Am Griff ziehen. Die blaue Linie zeigt den Einfügeplatz
-                    ober- oder unterhalb einer Karte.
+                    {t(
+                      "Am Griff ziehen. Die blaue Linie zeigt den Einfügeplatz ober- oder unterhalb einer Karte.",
+                    )}
                   </p>
                   <p>
-                    Spaltentrenner und Kartenunterkante verändern die Größe. Die
-                    unterste Karte füllt automatisch bis zu den Notizen.
-                    Tastatur: Griff aktivieren, Pfeiltasten, Enter zum Ablegen,
-                    Escape zum Abbrechen.
+                    {t(
+                      "Spaltentrenner und Kartenunterkante verändern die Größe. Die unterste Karte füllt automatisch bis zu den Notizen. Tastatur: Griff aktivieren, Pfeiltasten, Enter zum Ablegen, Escape zum Abbrechen.",
+                    )}
                   </p>
                 </div>
               </details>
@@ -432,18 +454,20 @@ export function CustomOverview({
             }}
           >
             {editing ? <Check size={14} /> : <GripVertical size={14} />}
-            {editing ? "Fertig" : "Anordnen"}
+            {editing ? t("Fertig") : t("Anordnen")}
           </button>
         </div>
       </div>
       <p className="sr-only" id="layout-keyboard-help">
-        Griff aktivieren, mit Pfeiltasten verschieben, Enter zum Ablegen, Escape
-        zum Abbrechen.
+        {t(
+          "Griff aktivieren, mit Pfeiltasten verschieben, Enter zum Ablegen, Escape zum Abbrechen.",
+        )}
       </p>
       {blocked && (
         <p className="layout-storage-warning">
-          Anordnung nur für diese Ansicht. Der frühere Browserstand bleibt
-          unverändert.
+          {t(
+            "Anordnung nur für diese Ansicht. Der frühere Browserstand bleibt unverändert.",
+          )}
         </p>
       )}
       <p className="sr-only" role="status" aria-live="polite">
@@ -458,7 +482,7 @@ export function CustomOverview({
           <Fragment key={column}>
             <div
               className={`overview-column ${target?.column === column ? "column-targeted" : ""}`}
-              aria-label={`Überblick Spalte ${column + 1}`}
+              aria-label={`${t("Überblick Spalte")} ${column + 1}`}
               style={
                 fitted[column]
                   ? {
@@ -528,7 +552,8 @@ export function CustomOverview({
                     className="column-drop-zone drop-active"
                     onClick={() => drop(column)}
                   >
-                    Hier in Spalte {column + 1} ablegen
+                    {t("Hier in Spalte")}
+                    {column + 1} {t("ablegen")}
                   </button>
                 )}
             </div>
@@ -536,7 +561,7 @@ export function CustomOverview({
               <div
                 className="column-resize"
                 role="separator"
-                aria-label={`Spalten ${column + 1} und ${column + 2} Breite ändern`}
+                aria-label={`${t("Spalten")} ${column + 1} ${t("und")} ${column + 2} ${t("Breite ändern")}`}
                 aria-orientation="vertical"
                 tabIndex={0}
                 aria-valuenow={Math.round(widths[column])}

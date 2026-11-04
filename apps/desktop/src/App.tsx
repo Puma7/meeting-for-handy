@@ -1292,7 +1292,14 @@ export default function App({ api = desktopApi }: { api?: DesktopApi }) {
     setErasureRevision((value) => value + 1);
     let workspaceCleanupFailed = false;
     try {
-      localStorage.removeItem(workspaceStorageKey(id));
+      const base = workspaceStorageKey(id);
+      const keys = [];
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (key === base || key?.startsWith(base + ".")) keys.push(key);
+      }
+      // Enumerate first so removals cannot shift the next key past the cursor.
+      for (const key of keys) localStorage.removeItem(key);
     } catch {
       workspaceCleanupFailed = true;
     }
@@ -2086,7 +2093,9 @@ export default function App({ api = desktopApi }: { api?: DesktopApi }) {
               : undefined
           }
           muted={Boolean(app?.captureControl?.microphoneMuted)}
-          captureError={app?.error || error}
+          captureError={app?.error}
+          actionError={error}
+          onDismissError={() => setError(null)}
           stopping={isStopping}
           language={locale}
         />

@@ -2,6 +2,7 @@ use super::model::*;
 use anyhow::{ensure, Context, Result};
 use std::collections::{HashMap, HashSet};
 
+/// Validate a complete model bundle against its request and sources before mutating any state.
 pub(crate) fn apply(
     state: &mut WorkspaceState,
     request: &Request,
@@ -14,7 +15,7 @@ pub(crate) fn apply(
             && response.request_id == request.request_id,
         "Die Meetingantwort gehört nicht zu diesem Auftrag."
     );
-    if response.more_changes_possible || response.changes.len() >= 20 {
+    if response.more_changes_possible || response.changes.len() > 20 {
         return Err(crate::transport::BudgetError::Output.into());
     }
     ensure!(
@@ -205,11 +206,11 @@ pub(crate) fn apply(
                 if (existing
                     .owner
                     .as_ref()
-                    .is_some_and(|v| evidence.quote.contains(v))
+                    .is_some_and(|v| evidence.quote.to_lowercase().contains(&v.to_lowercase()))
                     || existing
                         .due
                         .as_ref()
-                        .is_some_and(|v| evidence.quote.contains(v)))
+                        .is_some_and(|v| evidence.quote.to_lowercase().contains(&v.to_lowercase())))
                     && !existing.evidence.contains(evidence)
                 {
                     existing.evidence.push(evidence.clone());
@@ -249,6 +250,7 @@ pub(crate) fn apply(
             .max()
             .unwrap_or(0);
         events.push(Event {
+            human: false,
             id: format!("v_{}", uuid::Uuid::new_v4().simple()),
             entity_id: target,
             revision: e.revision,
@@ -275,7 +277,7 @@ pub(crate) fn apply(
             refs.push(target);
         }
     }
-    if !refs.is_empty() {
+    if request.purpose != "reconcile" {
         next.overview_refs = refs;
     }
     next.events.extend(events.clone());
@@ -378,6 +380,7 @@ pub(super) fn completion_quote_allowed(quote: &str) -> bool {
     })
 }
 
+/// Detect an explicitly missing commitment so it cannot be promoted into an assigned task.
 fn missing_pledge(quote: &str) -> bool {
     let text = quote.to_lowercase();
     [
@@ -396,6 +399,7 @@ fn missing_pledge(quote: &str) -> bool {
     .iter()
     .any(|s| text.contains(s))
 }
+/// Require a positive obligation in the literal quote; a wish or missing approval is insufficient.
 pub(super) fn task_quote_allowed(quote: &str) -> bool {
     let text = quote.to_lowercase();
     !missing_pledge(quote)

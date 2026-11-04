@@ -7,7 +7,7 @@ import crypto from 'node:crypto';
 const ROOT = path.resolve(import.meta.dirname, '..');
 const SOURCE_ROOTS = ['crates', 'apps/desktop', 'src', 'scripts', 'platform', 'assets', 'licenses/rust', 'licenses/frontend', 'licenses/installer'];
 const SOURCE_FILES = ['Cargo.toml', 'Cargo.lock', '.gitattributes', '.cargo/config.toml', 'rust-toolchain.toml', 'verify.ps1', 'global.json', 'NuGet.config', 'LICENSE', 'THIRD_PARTY_NOTICES.txt', '.github/workflows/rust.yml', '.github/workflows/rust-portable.yml', '.github/workflows/rust-release.yml'];
-const EXTENSIONS = new Set(['.rs', '.toml', '.lock', '.json', '.ts', '.tsx', '.jsx', '.css', '.html', '.svg', '.png', '.ico', '.md', '.txt', '.ps1', '.mjs', '.sh', '.py', '.swift', '.yml', '.yaml', '.config', '.manifest', '.cs', '.csproj', '.xaml', '.axaml', '.props', '.targets', '.nsi']);
+const EXTENSIONS = new Set(['.rs', '.toml', '.lock', '.json', '.ts', '.tsx', '.mts', '.jsx', '.css', '.html', '.svg', '.png', '.ico', '.md', '.txt', '.ps1', '.mjs', '.sh', '.py', '.swift', '.yml', '.yaml', '.config', '.manifest', '.cs', '.csproj', '.xaml', '.axaml', '.props', '.targets', '.nsi']);
 const EXCLUDED = /(^|\/)(node_modules|target|dist|bin|obj|\.build|\.vite|test-results|playwright-report)(\/|$)/i;
 const GENERATED = /^apps\/desktop\/src-tauri\/(gen|generated-schemas)(\/|$)/i;
 const CHECKS = ['legacy', 'artifact-guards', 'distribution-guards', 'cargo-format', 'frontend-tests', 'frontend-build', 'rust-tests', 'rust-clippy'];
@@ -19,22 +19,30 @@ const ARCHIVE_HASH = '272eb97795048ccb557c85bb9dd44c9e530e1c928443114c39816a8a5f
 const SDK = '.build/rust-native-0.4.1';
 const EXE = '.build/rust-target/x86_64-pc-windows-msvc/release/HandyMeeting.exe';
 
+/** Stop artifact publication immediately when an integrity precondition fails. */
 function insist(condition, message) { if (!condition) throw new Error(message); }
+/** Normalize a relative manifest path for consistent cross-platform fingerprints. */
 function unix(value) { return value.split(path.sep).join('/'); }
+/** Resolve an artifact path only beneath the intended isolated project root. */
 function inside(root, relative) {
   const result = path.resolve(root, relative);
   insist(result.startsWith(path.resolve(root) + path.sep), 'Artifact path escapes its project directory.');
   return result;
 }
+/** Distinguish an absent artifact from other filesystem failures. */
 async function exists(file) { try { await fs.lstat(file); return true; } catch (error) { if (error.code === 'ENOENT') return false; throw error; } }
+/** Reject symlinks and non-files before hashing or reading an artifact. */
 async function regular(file) { const info = await fs.lstat(file); insist(!info.isSymbolicLink() && info.isFile(), 'Artifact must be a regular file.'); return info; }
+/** Stream the SHA-256 of a regular file without loading its entire contents. */
 async function sha(file) {
   await regular(file);
   const hash = crypto.createHash('sha256');
   for await (const chunk of createReadStream(file, { highWaterMark: 65536 })) hash.update(chunk);
   return hash.digest('hex');
 }
+/** Read bounded regular JSON metadata, failing closed on malformed input. */
 async function json(file) { const info = await regular(file); insist(info.size <= 32 * 1024 * 1024, 'Artifact JSON exceeds its size limit.'); return JSON.parse(await fs.readFile(file, 'utf8')); }
+/** Publish durable metadata with either no-clobber creation or an atomic temporary file. */
 async function writeJson(file, value, immutable = false) {
   await fs.mkdir(path.dirname(file), { recursive: true });
   const body = JSON.stringify(value, null, 2) + '\n';
@@ -44,6 +52,7 @@ async function writeJson(file, value, immutable = false) {
   try { await handle.writeFile(body); await handle.sync(); } finally { await handle.close(); }
   await fs.rename(temporary, file);
 }
+/** Read the pinned workspace version used to bind artifact receipts. */
 async function version(root = ROOT) {
   const config = await json(inside(root, 'apps/desktop/src-tauri/tauri.conf.json'));
   const frontend = await json(inside(root, 'apps/desktop/package.json'));
@@ -52,6 +61,7 @@ async function version(root = ROOT) {
   insist(/^\d+\.\d+\.\d+(-[A-Za-z0-9.-]+)?$/.test(config.version) && match?.[1] === config.version && frontend.version === config.version, 'Cargo, frontend and Tauri versions must agree.');
   return config.version;
 }
+/** Enumerate allowed source files while excluding generated build and dependency directories. */
 async function walk(directory) {
   if (!await exists(directory)) return [];
   const result = [];
@@ -63,9 +73,11 @@ async function walk(directory) {
   }
   return result;
 }
+/** Hash the allowlisted source inventory, including TypeScript module declarations. */
 async function sourceFingerprint(root = ROOT) {
   const names = new Map();
   for (const relative of SOURCE_FILES) if (await exists(inside(root, relative))) names.set(relative, inside(root, relative));
+  /** Read the current source inventory in a deterministic order for artifact identity checks. */
   async function scan(directory) {
     if (!await exists(directory)) return;
     for (const entry of await fs.readdir(directory, { withFileTypes: true })) {
@@ -83,10 +95,13 @@ async function sourceFingerprint(root = ROOT) {
   const canonical = files.map(file => `${file.path}\t${file.sha256}\t${file.bytes}`).join('\n');
   return { sha256: crypto.createHash('sha256').update(canonical).digest('hex'), files };
 }
+/** Reject a receipt whose recorded source identity differs from the current source tree. */
 function sameSource(receipt, source) { insist(receipt.sourceFingerprintSHA256 === source.sha256, 'Source changed since checks began. Start a new check run on stable source.'); }
+/** Require every named verification receipt before accepting an artifact manifest. */
 function requireChecks(receipt) {
   for (const name of receipt.requiredChecks) insist(receipt.checks?.[name]?.reportedExitCode === 0, `Missing or failed separate tool check: ${name}`);
 }
+/** Verify the required license notice material before preparing distribution metadata. */
 async function notices() {
   for (const [directory, lock, field] of [['licenses/rust/x86_64-pc-windows-msvc', 'Cargo.lock', 'CargoLockSHA256'], ['licenses/frontend', 'apps/desktop/package-lock.json', 'PackageLockSHA256']]) {
     const manifest = await json(inside(ROOT, directory + '/manifest.json'));
@@ -100,6 +115,7 @@ async function notices() {
     }
   }
 }
+/** Verify the pinned native SDK identity rather than trusting an arbitrary local runtime. */
 async function sdk() {
   const value = await json(inside(ROOT, SDK + '/SDK_PROVENANCE.json'));
   insist(value.Version === '0.4.1' && value.ArchiveSha256?.toLowerCase() === ARCHIVE_HASH, 'Prepared SDK provenance differs from the reviewed native release.');
@@ -116,6 +132,7 @@ async function sdk() {
   for (const file of actual) insist(file.isFile() && await sha(inside(ROOT, SDK + '/bin/' + file.name)) === expected.get(file.name.toLowerCase()), 'A prepared SDK DLL changed.');
   return value;
 }
+/** Bind a fresh verification session to the current source and output directory. */
 async function beginCheck(skipLegacy) {
   const source = await sourceFingerprint();
   const run = '.build/rust-check-runs/' + new Date().toISOString().replace(/[:.]/g, '-') + '-' + crypto.randomUUID();
@@ -124,6 +141,7 @@ async function beginCheck(skipLegacy) {
   await writeJson(inside(ROOT, CURRENT_CHECK), receipt);
   return { success: false, runDirectory: run, requiredChecks: receipt.requiredChecks, sourceFingerprintSHA256: source.sha256 };
 }
+/** Record one completed check in the active verification session. */
 async function recordCheck(name, rawExitCode) {
   const receipt = await json(inside(ROOT, CURRENT_CHECK));
   insist(!receipt.success, 'This verification run is already complete.');
@@ -139,18 +157,21 @@ async function recordCheck(name, rawExitCode) {
   insist(exit === 0, `Separate tool check failed: ${name} (${exit}).`);
   return { success: true, check: name, reportedExitCode: exit };
 }
+/** Finish verification only after all required checks and source identity still match. */
 async function finishCheck() {
   const receipt = await json(inside(ROOT, CURRENT_CHECK));
   sameSource(receipt, await sourceFingerprint()); requireChecks(receipt); await notices(); await sdk();
   if (!receipt.success) { receipt.success = true; receipt.finishedAtUtc = new Date().toISOString(); await writeJson(inside(ROOT, receipt.runDirectory + '/verification.json'), receipt, true); await writeJson(inside(ROOT, CURRENT_CHECK), receipt); }
   return { success: true, sourceFingerprintSHA256: receipt.sourceFingerprintSHA256, legacyChecksExecuted: receipt.legacyChecksExecuted };
 }
+/** Load a verified source receipt and reject changes made after its checks. */
 async function checkedSource() {
   const receipt = await json(inside(ROOT, CURRENT_CHECK));
   insist(receipt.success, 'Finish the separately executed tool checks first.');
   requireChecks(receipt); sameSource(receipt, await sourceFingerprint()); await notices(); await sdk();
   return receipt;
 }
+/** Bind release verification to the exact checked executable and source identity. */
 async function beginReleaseCheck() {
   const checked = await checkedSource();
   const output = '.build/rust-release-checks-' + crypto.randomUUID();
@@ -158,9 +179,11 @@ async function beginReleaseCheck() {
   await writeJson(inside(ROOT, CURRENT_RELEASE_CHECK), receipt);
   return receipt;
 }
+/** Validate a payload filename before including it in distribution metadata. */
 function payloadName(name) {
   insist(!path.isAbsolute(name) && !name.includes('..') && !name.includes(':') && !/(^|[\\/])(Sessions|data|models)([\\/]|$)/i.test(name) && !/\.(wav|pcm|mp3|gguf|pfx|p12|key)$/i.test(name), 'Private or unsafe program payload path rejected.');
 }
+/** Publish bytes only when an existing destination is identical, preserving mismatching evidence. */
 async function putSame(file, bytes) {
   await fs.mkdir(path.dirname(file), { recursive: true });
   if (await exists(file)) { insist(await sha(file) === crypto.createHash('sha256').update(bytes).digest('hex'), 'An existing version contains different bytes. Preserve it and increment the version.'); return; }
@@ -207,6 +230,7 @@ async function stage() {
   await writeJson(inside(ROOT, CURRENT_RELEASE), release);
   return { success: true, programDirectory, executableSHA256: release.executableSHA256, sourceFingerprintSHA256: release.sourceFingerprintSHA256 };
 }
+/** Exercise artifact guard failures against isolated synthetic manifests; never publish a real release. */
 async function selfTest() {
   const directory = inside(ROOT, '.build/artifact-guards-' + crypto.randomUUID());
   await fs.mkdir(path.join(directory, 'crates/example/src'), { recursive: true });
@@ -215,8 +239,13 @@ async function selfTest() {
   const workspace = path.join(directory, 'apps/desktop/src/workspace/Meeting.jsx');
   await fs.mkdir(path.dirname(workspace), { recursive: true });
   await fs.writeFile(workspace, 'export const title = <h1>Original</h1>;\n');
+  const declaration = path.join(directory, 'apps/desktop/src/workspace/Meeting.d.mts');
+  await fs.writeFile(declaration, 'export interface Meeting { id: string }\n');
   const first = await sourceFingerprint(directory);
   const again = await sourceFingerprint(directory); insist(first.sha256 === again.sha256, 'Fingerprint is not deterministic.');
+  await fs.writeFile(declaration, 'export interface Meeting { id: number }\n');
+  insist((await sourceFingerprint(directory)).sha256 !== first.sha256, 'A changed .mts declaration escaped the fingerprint.');
+  await fs.writeFile(declaration, 'export interface Meeting { id: string }\n');
   await fs.writeFile(workspace, 'export const title = <h1>Changed</h1>;\n');
   insist((await sourceFingerprint(directory)).sha256 !== first.sha256, 'A changed workspace JSX file escaped the fingerprint.');
   await fs.writeFile(workspace, 'export const title = <h1>Original</h1>;\n');
@@ -231,7 +260,7 @@ async function selfTest() {
   const retained = path.join(directory, 'retained.txt'); await putSame(retained, Buffer.from('original'));
   let overwriteRejected = false; try { await putSame(retained, Buffer.from('different')); } catch { overwriteRejected = true; }
   insist(overwriteRejected && await fs.readFile(retained, 'utf8') === 'original', 'An existing artifact was overwritten.');
-  const result = { success: true, checks: 10, synthetic: true, commandsExecuted: false, networkUsed: false, outputDirectory: unix(path.relative(ROOT, directory)) };
+  const result = { success: true, checks: 11, synthetic: true, commandsExecuted: false, networkUsed: false, outputDirectory: unix(path.relative(ROOT, directory)) };
   await writeJson(path.join(directory, 'result.json'), result, true); return result;
 }
 

@@ -250,6 +250,17 @@ impl Snapshot {
     }
 }
 
+/// Batch workers service both inputs; their unfinished audio has the same priority
+/// over text-model inference as an unfinished dedicated recognition worker.
+fn mark_recognizing_track(tracks: &mut [bool; 2], source: &str) {
+    match source {
+        "system" => tracks[0] = true,
+        "microphone" => tracks[1] = true,
+        "batch" => *tracks = [true; 2],
+        _ => {}
+    }
+}
+
 impl Service {
     /// A snapshot of one meeting for the live worker. It prefers the stores the application
     /// already holds. A meeting that left both slots has finished; its last snapshot is reused
@@ -265,11 +276,7 @@ impl Service {
                     let mut recognizing_tracks = [false; 2];
                     for worker in &a.workers {
                         if !worker.handle.is_finished() {
-                            match worker.source.as_str() {
-                                "system" => recognizing_tracks[0] = true,
-                                "microphone" => recognizing_tracks[1] = true,
-                                _ => {}
-                            }
+                            mark_recognizing_track(&mut recognizing_tracks, &worker.source);
                         }
                     }
                     (a.store.clone(), recognizing_tracks)
@@ -398,11 +405,25 @@ impl LiveNotes {
         prefer_workspace: bool,
     ) -> AppResult<LiveNotesStatus> {
         validate_id(meeting_id)?;
-        if let Some(job) = self.lock()?.as_ref().filter(|j| {
-            j.meeting_id == meeting_id
-                && (!prefer_workspace || j.running() || j.workspace_folder.is_some())
-        }) {
-            return Ok(job.status());
+        let active = self
+            .lock()?
+            .as_ref()
+            .filter(|j| {
+                j.meeting_id == meeting_id
+                    && (!prefer_workspace || j.running() || j.workspace_folder.is_some())
+            })
+            .map(|job| (job.status(), job.workspace_folder.is_some()));
+        if let Some((mut status, workspace_job)) = active {
+            if prefer_workspace && !workspace_job {
+                // Preserve the active job's controls while the advanced view displays
+                // its own saved cards. No workspace context writer is advertised.
+                if let Ok(Some(saved)) =
+                    live::read_latest_workspace(&live_root(service, meeting_id), meeting_id)
+                {
+                    status.view = Some(saved);
+                }
+            }
+            return Ok(status);
         }
         let root = live_root(service, meeting_id);
         let saved = if prefer_workspace {
@@ -801,15 +822,10 @@ impl Worker {
                 .unwrap_or((Duration::ZERO, None));
             self.set(|s| s.pending_chars = pending_chars);
             let recognition_defer = snapshot.recognition_needs_priority();
-            let memory_defer = runner.workspace_context().is_some()
-                && !crate::system_load::workspace_memory_ready();
-            let defer = recognition_defer || memory_defer;
+            // Local-model load admission verifies current memory at the actual load.
+            // A model already resident can process text without waiting for load headroom.
+            let defer = recognition_defer;
             self.set(|s| s.waiting_for_transcript = recognition_defer);
-            if memory_defer {
-                self.set(|s|s.error=Some("Die lokale Auswertung wartet auf freien Arbeitsspeicher. Aufnahme und gesicherte Daten bleiben erhalten.".into()));
-            } else {
-                self.set(|s| {if s.error.as_deref()==Some("Die lokale Auswertung wartet auf freien Arbeitsspeicher. Aufnahme und gesicherte Daten bleiben erhalten."){s.error=None;}});
-            }
             if defer {
                 let since = deferred_since.get_or_insert_with(Instant::now);
                 if recognition_defer && since.elapsed() >= Duration::from_secs(120) {
@@ -962,6 +978,18 @@ mod tests {
     use meeting_core::SessionStore;
 
     /// A transient native preload refusal must leave the worker alive until explicit cancellation.
+
+    #[test]
+    fn batch_worker_claims_recognition_priority_on_both_tracks() {
+        let mut tracks = [false; 2];
+        mark_recognizing_track(&mut tracks, "batch");
+        assert_eq!(tracks, [true, true]);
+        let mut tracks = [false; 2];
+        mark_recognizing_track(&mut tracks, "system");
+        assert_eq!(tracks, [true, false]);
+        mark_recognizing_track(&mut tracks, "microphone");
+        assert_eq!(tracks, [true, true]);
+    }
     #[test]
     fn transient_preload_failure_keeps_the_live_loop_and_anchor_available() {
         use std::io::{Read, Write};
@@ -1073,6 +1101,68 @@ mod tests {
         assert_eq!(error.as_deref(), Some("Kurzfassung fehlgeschlagen."));
     }
 
+    #[test]
+    fn classic_job_controls_and_saved_workspace_are_both_visible() {
+        let root = fixture_root("classic-and-workspace");
+        let service = Service::new(root.clone()).unwrap();
+        let meeting_id = "d".repeat(32);
+        let connection = meeting_notes::Connection {
+            endpoint: "http://127.0.0.1:1235/v1/".into(),
+            model: "saved-model".into(),
+            mode: "local".into(),
+            cloud_consent: false,
+            api_key: String::new(),
+        };
+        let saved = LiveRunner::start(
+            &live_root(&service, &meeting_id),
+            &meeting_id,
+            connection,
+            "en",
+        )
+        .unwrap()
+        .with_workspace(Default::default())
+        .unwrap();
+        let saved_id = saved.run().id.clone();
+        drop(saved);
+        *service.live_notes.lock().unwrap() = Some(Job {
+            workspace_folder: None,
+            workspace_context: None,
+            meeting_id: meeting_id.clone(),
+            control: AnalysisControl::default(),
+            manual: Arc::new(AtomicBool::new(false)),
+            interval_ms: Arc::new(AtomicU64::new(DEFAULT_INTERVAL_MS)),
+            shared: Arc::new(Mutex::new(Shared {
+                status: "waiting".into(),
+                update_started: None,
+                waiting_for_transcript: false,
+                error: None,
+                pending_chars: 200,
+                last_update: Instant::now(),
+                last_trigger: None,
+                retry_at: None,
+                view: None,
+            })),
+            worker: None,
+            models: crate::model_sessions::Models::default(),
+        });
+        let advanced = service
+            .live_notes
+            .status_with_preference(&service, &meeting_id, true)
+            .unwrap();
+        assert!(advanced.running);
+        assert_eq!(
+            advanced.view.unwrap().run_id.as_deref(),
+            Some(saved_id.as_str())
+        );
+        assert!(advanced.workspace_context.is_none());
+        assert!(service
+            .live_notes
+            .status(&service, &meeting_id)
+            .unwrap()
+            .view
+            .is_none());
+        service.live_notes.stop().unwrap();
+    }
     #[test]
     fn terminal_status_never_reports_waiting_for_transcript() {
         let shared = Arc::new(Mutex::new(Shared {

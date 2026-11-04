@@ -38,6 +38,7 @@ export interface WorkspaceState {
   events: {
     id: string;
     entityId: string;
+    human?: boolean;
     revision: number;
     atMs: number;
     text: string;
@@ -55,6 +56,7 @@ export interface WorkspaceState {
     text: string;
   }[];
 }
+/** Mount an isolated workspace and adapt desktop APIs without giving text models session or audio objects. */
 export default function WorkspaceBridge({
   api,
   meeting,
@@ -85,6 +87,8 @@ export default function WorkspaceBridge({
   onToggleMute?: () => void;
   muted?: boolean;
   captureError?: string | null;
+  actionError?: string | null;
+  onDismissError?: () => void;
   language?: "de" | "en";
 }) {
   const host = useRef<HTMLDivElement>(null);

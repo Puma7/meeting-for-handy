@@ -11,6 +11,7 @@ use std::{
 
 const MAX_FILE_BYTES: u64 = 2_000_000;
 
+/// Reject linked or non-directory workspace roots before accessing saved revisions.
 pub(super) fn check_directory(folder: &Path) -> Result<()> {
     let metadata = fs::symlink_metadata(folder)?;
     ensure!(
@@ -20,6 +21,7 @@ pub(super) fn check_directory(folder: &Path) -> Result<()> {
     Ok(())
 }
 
+/// Open a regular coordination file without truncating an existing owner's bytes.
 pub(super) fn open_lock(folder: &Path, name: &str) -> Result<File> {
     check_directory(folder)?;
     let path = folder.join(name);
@@ -38,6 +40,7 @@ pub(super) fn open_lock(folder: &Path, name: &str) -> Result<File> {
         .open(path)?)
 }
 
+/// Read at most one bounded regular revision file; reject links and oversized input.
 pub(super) fn read_bounded(path: &Path) -> Result<Vec<u8>> {
     let metadata = fs::symlink_metadata(path)?;
     ensure!(
@@ -77,11 +80,12 @@ pub(crate) struct Delta {
     processed: Vec<LiveSource>,
 }
 impl Delta {
+    /// Build an append-only delta, including new human events independently of model output.
     pub fn between(
         old: &WorkspaceState,
         new: &WorkspaceState,
         originals: Vec<Source>,
-        events: Vec<Event>,
+        _events: Vec<Event>,
     ) -> Self {
         Self {
             superseded_sources: new.superseded_sources.clone(),
@@ -98,13 +102,19 @@ impl Delta {
                 .filter(|e| !old.entities.iter().any(|o| o == *e))
                 .cloned()
                 .collect(),
-            events,
+            events: new
+                .events
+                .iter()
+                .filter(|event| !old.events.iter().any(|prior| prior.id == event.id))
+                .cloned()
+                .collect(),
             overview_refs: new.overview_refs.clone(),
             originals,
             processed: new.processed[old.processed.len()..].to_vec(),
         }
     }
 }
+/// Hold the exclusive inference-writer lease and replay its existing durable state.
 pub(crate) fn load(folder: &Path) -> Result<(File, WorkspaceState)> {
     fs::create_dir_all(folder)?;
     let lock = open_lock(folder, "writer.lock")?;
@@ -112,6 +122,7 @@ pub(crate) fn load(folder: &Path) -> Result<(File, WorkspaceState)> {
         .context("Eine andere Auswertung verwendet diesen Meetingstand.")?;
     Ok((lock, read(folder)?))
 }
+/// Reconstruct workspace state from contiguous immutable revisions; never repair damaged input silently.
 pub(crate) fn read(folder: &Path) -> Result<WorkspaceState> {
     check_directory(folder)?;
     let mut paths = fs::read_dir(folder)?
@@ -155,6 +166,7 @@ pub(crate) fn read(folder: &Path) -> Result<WorkspaceState> {
     }
     Ok(state)
 }
+/// Sync a bounded delta and publish it without replacing any existing revision.
 pub(crate) fn append(folder: &Path, delta: &Delta) -> Result<()> {
     // Same-directory durable temp + no-clobber publication. A partial temp is never replayed.
     let mut temp = tempfile::NamedTempFile::new_in(folder)?;

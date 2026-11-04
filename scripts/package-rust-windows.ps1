@@ -23,7 +23,7 @@ function SourceFingerprint {
         foreach ($file in Get-ChildItem -LiteralPath $directory -File -Recurse -Force) {
             $name = [IO.Path]::GetRelativePath($root,$file.FullName).Replace('\','/')
             if ($name -match '(^|/)(node_modules|target|dist|bin|obj|\.build|\.vite|test-results|playwright-report)(/|$)' -or $file.Extension -eq '.tsbuildinfo' -or $name -match '^apps/desktop/src-tauri/(gen|generated-schemas)(/|$)') { continue }
-            if ($file.Extension -in @('.rs','.toml','.lock','.json','.ts','.tsx','.jsx','.css','.html','.svg','.png','.ico','.md','.txt','.ps1','.mjs','.sh','.py','.swift','.yml','.yaml','.config','.manifest','.cs','.csproj','.xaml','.axaml','.props','.targets','.nsi')) { $inputs[$name] = $file }
+            if ($file.Extension -in @('.rs','.toml','.lock','.json','.ts','.tsx','.mts','.jsx','.css','.html','.svg','.png','.ico','.md','.txt','.ps1','.mjs','.sh','.py','.swift','.yml','.yaml','.config','.manifest','.cs','.csproj','.xaml','.axaml','.props','.targets','.nsi')) { $inputs[$name] = $file }
         }
     }
     $names = [string[]]@($inputs.Keys); [Array]::Sort($names,[StringComparer]::Ordinal)

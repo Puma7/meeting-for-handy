@@ -243,7 +243,8 @@ fn revoked_notes_exclude_derived_items_but_preserve_history() {
 }
 #[test]
 fn a_status_update_retains_literal_owner_and_due_evidence() {
-    let (mut state, mut req, answer) = setup();
+    let (mut state, mut req, mut answer) = setup();
+    answer["changes"][0]["due"] = json!("Morgen");
     validate::apply(&mut state, &req, &answer.to_string()).unwrap();
     req.state = state.entities.clone();
     req.transcript_sources.push(Source {
@@ -262,7 +263,7 @@ fn a_status_update_retains_literal_owner_and_due_evidence() {
     changed["changes"][0]["evidence"] =
         json!([{"sourceId":"s_done","quote":"Der Entwurf ist erledigt."}]);
     validate::apply(&mut state, &req, &changed.to_string()).unwrap();
-    assert_eq!(state.entities[0].due.as_deref(), Some("morgen"));
+    assert_eq!(state.entities[0].due.as_deref(), Some("Morgen"));
     assert_eq!(state.entities[0].evidence.len(), 2);
 }
 
@@ -737,4 +738,274 @@ fn a_reshared_agenda_topic_starts_open_without_reusing_old_evidence() {
     assert_eq!(state.entities[0].status, "open");
     assert!(!state.entities[0].human_locked);
     assert!(state.entities[0].evidence.is_empty());
+}
+
+#[test]
+fn later_chunk_reversion_is_a_fresh_source_and_old_ids_survive() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut runner = WorkspaceRunner::open(dir.path()).unwrap();
+    let first = "a".repeat(1600);
+    let mut text = LiveText {
+        key: "multi-part".into(),
+        track: "system".into(),
+        start_ms: 0,
+        end_ms: 30000,
+        text: format!("{first}Original second chunk."),
+    };
+    let old = runner.pending(&[text.clone()]);
+    runner.state.processed.extend(old.clone());
+    text.text = format!("{first}Corrected second chunk.");
+    runner
+        .state
+        .processed
+        .extend(runner.pending(&[text.clone()]));
+    text.text = format!("{first}Original second chunk.");
+    let reverted = runner.pending(&[text]);
+    assert_eq!(reverted.len(), 1);
+    assert_eq!(reverted[0].chunk, 2);
+    assert_eq!(reverted[0].text, old[1].text);
+    assert_ne!(reverted[0].id, old[1].id);
+    assert!(runner
+        .state
+        .processed
+        .iter()
+        .any(|source| source.id == old[1].id));
+}
+
+#[test]
+fn an_explicit_empty_fact_overview_clears_old_selection() {
+    let (mut state, mut req, mut answer) = setup();
+    validate::apply(&mut state, &req, &answer.to_string()).unwrap();
+    assert_eq!(state.overview_refs.len(), 1);
+    req.purpose = "facts".into();
+    answer["changes"] = json!([]);
+    answer["overviewRefs"] = json!([]);
+    validate::apply(&mut state, &req, &answer.to_string()).unwrap();
+    assert!(state.overview_refs.is_empty());
+    assert_eq!(state.entities.len(), 1);
+}
+
+#[test]
+fn human_status_change_is_a_durable_history_event_and_is_not_repeated() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut state, req, answer) = setup();
+    validate::apply(&mut state, &req, &answer.to_string()).unwrap();
+    let (writer, old) = store::load(dir.path()).unwrap();
+    state.revision = 1;
+    store::append(
+        dir.path(),
+        &store::Delta::between(
+            &old,
+            &state,
+            req.transcript_sources.clone(),
+            state.events.clone(),
+        ),
+    )
+    .unwrap();
+    let old = state.clone();
+    let context = WorkspaceContext {
+        revision: 1,
+        overrides: vec![Override {
+            id: state.entities[0].id.clone(),
+            expected_revision: 1,
+            status: "completed".into(),
+            saved: false,
+        }],
+        ..Default::default()
+    };
+    state.apply_context(&context).unwrap();
+    assert_eq!(state.events.len(), old.events.len() + 1);
+    assert_eq!(state.events.last().unwrap().status, "completed");
+    state.apply_context(&context).unwrap();
+    assert_eq!(state.events.len(), old.events.len() + 1);
+    state.revision = 2;
+    store::append(
+        dir.path(),
+        &store::Delta::between(&old, &state, vec![], vec![]),
+    )
+    .unwrap();
+    drop(writer);
+    let (_, reopened) = store::load(dir.path()).unwrap();
+    assert_eq!(reopened.events.len(), state.events.len());
+}
+
+#[test]
+fn new_model_run_inherits_manual_state_and_preserves_its_evidence() {
+    let (mut previous, req, answer) = setup();
+    validate::apply(&mut previous, &req, &answer.to_string()).unwrap();
+    previous.originals = req.transcript_sources.clone();
+    previous.entities[0].human_locked = true;
+    previous.entities[0].revision = 2;
+    previous.entities[0].status = "discussed".into();
+    let dir = tempfile::tempdir().unwrap();
+    let mut runner = WorkspaceRunner::open(dir.path()).unwrap();
+    runner.set_context(Default::default()).unwrap();
+    runner.inherit_manual(&previous).unwrap();
+    assert_eq!(runner.state.entities, previous.entities);
+    assert_eq!(runner.state.originals, previous.originals);
+    assert!(runner.state.processed.is_empty());
+    drop(runner);
+    let reopened = read_state(dir.path()).unwrap();
+    assert_eq!(reopened.entities, previous.entities);
+    assert_eq!(reopened.originals, previous.originals);
+}
+#[test]
+fn very_short_sources_are_saved_without_an_invalid_provider_schema() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut runner = WorkspaceRunner::open(dir.path()).unwrap();
+    runner.set_context(Default::default()).unwrap();
+    let texts = vec![LiveText {
+        key: "short".into(),
+        track: "system".into(),
+        start_ms: 0,
+        end_ms: 1000,
+        text: "Okay.".into(),
+    }];
+    let pending = runner.pending(&texts);
+    let client = TextClient::new(&crate::Connection {
+        endpoint: "http://127.0.0.1:1/v1/".into(),
+        model: "unreachable".into(),
+        mode: "local".into(),
+        cloud_consent: false,
+        api_key: String::new(),
+    })
+    .unwrap();
+    runner
+        .update(&client, &pending, &AnalysisControl::default(), "en")
+        .unwrap();
+    assert!(runner.pending(&texts).is_empty());
+    assert!(runner.state.entities.is_empty());
+    assert_eq!(runner.state.originals[0].text, "Okay.");
+}
+
+#[test]
+fn exactly_twenty_changes_fit_the_published_contract() {
+    let (mut state, mut req, mut answer) = setup();
+    req.purpose = "facts".into();
+    let change = answer["changes"][0].clone();
+    answer["overviewRefs"] = json!([]);
+    answer["changes"] = json!((0..20)
+        .map(|i| {
+            let mut item = change.clone();
+            item["proposalId"] = json!(format!("p_{i}"));
+            item["kind"] = json!("fact");
+            item["status"] = json!("recorded");
+            item["text"] = json!(format!("Recorded fact {}", char::from(b'a' + i)));
+            item["due"] = json!(null);
+            item
+        })
+        .collect::<Vec<_>>());
+    validate::apply(&mut state, &req, &answer.to_string()).unwrap();
+    assert_eq!(state.entities.len(), 20);
+}
+
+#[test]
+fn provider_context_rejection_shrinks_the_existing_frontier_before_sources() {
+    use std::{
+        io::{Read, Write},
+        net::TcpListener,
+        thread,
+    };
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let endpoint = format!("http://{}/v1/", listener.local_addr().unwrap());
+    let server = thread::spawn(move || {
+        let mut sizes = Vec::new();
+        loop {
+            let (mut stream, _) = listener.accept().unwrap();
+            stream
+                .set_read_timeout(Some(std::time::Duration::from_secs(3)))
+                .unwrap();
+            let mut bytes = Vec::new();
+            let mut buffer = [0; 8192];
+            let header = loop {
+                let n = stream.read(&mut buffer).unwrap();
+                assert!(n > 0 && bytes.len() < 500000);
+                bytes.extend_from_slice(&buffer[..n]);
+                if let Some(p) = bytes.windows(4).position(|v| v == b"\r\n\r\n") {
+                    break p + 4;
+                }
+            };
+            let size = String::from_utf8_lossy(&bytes[..header])
+                .lines()
+                .filter_map(|v| v.split_once(':'))
+                .find(|(k, _)| k.eq_ignore_ascii_case("content-length"))
+                .unwrap()
+                .1
+                .trim()
+                .parse::<usize>()
+                .unwrap();
+            while bytes.len() < header + size {
+                let n = stream.read(&mut buffer).unwrap();
+                assert!(n > 0);
+                bytes.extend_from_slice(&buffer[..n]);
+            }
+            let body: serde_json::Value =
+                serde_json::from_slice(&bytes[header..header + size]).unwrap();
+            let req: serde_json::Value =
+                serde_json::from_str(body["messages"][1]["content"].as_str().unwrap()).unwrap();
+            let count = req["state"].as_array().unwrap().len();
+            assert_eq!(
+                req["window"]["requiredSourceIds"].as_array().unwrap().len(),
+                1
+            );
+            sizes.push(count);
+            if count > 2 {
+                let payload = "{\"error\":{\"message\":\"context length exceeded\"}}";
+                write!(stream,"HTTP/1.1 400 Bad Request\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{payload}",payload.len()).unwrap();
+            } else {
+                let answer=json!({"contractVersion":CONTRACT_VERSION,"requestId":req["requestId"],"changes":[],"overviewRefs":[],"unresolvedContextIds":[],"moreChangesPossible":false}).to_string();
+                let payload = format!(
+                    "data: {}\n\ndata: {}\n\n",
+                    json!({"choices":[{"delta":{"content":answer},"finish_reason":null}]}),
+                    json!({"choices":[{"delta":{},"finish_reason":"stop"}]})
+                );
+                write!(stream,"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{payload}",payload.len()).unwrap();
+                if req["purpose"] == "reconcile" {
+                    break;
+                }
+            }
+            assert!(sizes.len() < 20);
+        }
+        sizes
+    });
+    let dir = tempfile::tempdir().unwrap();
+    let mut runner = WorkspaceRunner::open(dir.path()).unwrap();
+    runner.set_context(Default::default()).unwrap();
+    let (mut state, req, answer) = setup();
+    validate::apply(&mut state, &req, &answer.to_string()).unwrap();
+    let entity = state.entities[0].clone();
+    state.entities = (0..6)
+        .map(|i| {
+            let mut e = entity.clone();
+            e.id = format!("e_old_{i}");
+            e
+        })
+        .collect();
+    state.originals = req.transcript_sources;
+    runner.state = state;
+    let client = TextClient::new(&crate::Connection {
+        endpoint,
+        model: "synthetic".into(),
+        mode: "local".into(),
+        cloud_consent: false,
+        api_key: String::new(),
+    })
+    .unwrap();
+    let pending = runner.pending(&[LiveText {
+        key: "fresh".into(),
+        track: "system".into(),
+        start_ms: 3000,
+        end_ms: 6000,
+        text: "Ich schreibe den Bericht morgen.".into(),
+    }]);
+    assert_eq!(
+        runner
+            .update(&client, &pending, &AnalysisControl::default(), "en")
+            .unwrap(),
+        1
+    );
+    let sizes = server.join().unwrap();
+    assert!(sizes.starts_with(&[6, 3, 1, 2, 3, 1, 2]), "{sizes:?}");
+    assert_eq!(runner.state.processed.len(), 1);
+    assert_eq!(runner.state.entities.len(), 6);
 }

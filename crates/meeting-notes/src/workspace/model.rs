@@ -33,6 +33,7 @@ pub struct Override {
     pub saved: bool,
 }
 impl WorkspaceContext {
+    /// Validate shared text bounds, stable identifiers and permitted manual actions before publication.
     pub fn validate(&self) -> Result<()> {
         ensure!(
             self.agenda.len() <= 40
@@ -63,6 +64,7 @@ impl WorkspaceContext {
         Ok(())
     }
 }
+/// Accept only bounded application identifiers, never paths or arbitrary renderer keys.
 pub(crate) fn valid_id(id: &str, prefix: &str) -> bool {
     id.starts_with(prefix)
         && id.len() <= 96
@@ -87,6 +89,8 @@ pub struct Entity {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Event {
+    #[serde(default)]
+    pub human: bool,
     pub id: String,
     pub entity_id: String,
     pub revision: u64,
@@ -117,6 +121,7 @@ pub struct WorkspaceState {
     pub(crate) processed: Vec<crate::live::LiveSource>,
 }
 impl WorkspaceState {
+    /// Apply shared inputs and human overrides, preserving original evidence and deterministic history events.
     pub(crate) fn apply_context(&mut self, context: &WorkspaceContext) -> Result<()> {
         if self
             .context
@@ -195,6 +200,24 @@ impl WorkspaceState {
             e.status = action.status.clone();
             e.revision += 1;
             e.human_locked = true;
+            // The persisted override identifies this event deterministically even when
+            // a context journal is replayed before its next model-state checkpoint.
+            use sha2::{Digest, Sha256};
+            self.events.push(Event {
+                human: true,
+                id: format!("h_{:x}", Sha256::digest(key.as_bytes())),
+                entity_id: e.id.clone(),
+                revision: e.revision,
+                at_ms: self
+                    .originals
+                    .iter()
+                    .map(|source| source.end_ms)
+                    .max()
+                    .unwrap_or(0),
+                text: e.text.clone(),
+                status: e.status.clone(),
+                evidence: vec![],
+            });
             self.applied_overrides.push(key);
         }
         self.context = context.clone();
@@ -243,9 +266,11 @@ pub(crate) struct Request {
     output_budget: Budget,
 }
 impl Request {
+    /// Return the exact new-source identifiers the provider must examine in this window.
     pub fn required_source_ids(&self) -> &[String] {
         &self.window.required_source_ids
     }
+    /// Construct a path-free provider request containing only released context and selected literal sources.
     pub fn new(
         id: String,
         context: &WorkspaceContext,
@@ -320,6 +345,7 @@ pub(crate) struct Response {
     pub more_changes_possible: bool,
 }
 
+/// Serialize source DTOs without granting the provider audio or session-object access.
 fn serialize_sources<S: serde::Serializer>(
     sources: &[Source],
     serializer: S,
