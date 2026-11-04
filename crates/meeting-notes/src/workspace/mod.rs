@@ -45,22 +45,30 @@ impl WorkspaceRunner {
         })
     }
 
-    /// Explicit model changes retain human-confirmed entries and their immutable
-    /// evidence. Other model drafts are recomputed in the new run.
+    /// Import newer human confirmations on both fresh and resumed model runs,
+    /// retaining destination history and immutable original evidence.
     pub fn inherit_manual(&mut self, previous: &WorkspaceState) -> Result<()> {
-        if self.state.revision != 0 {
-            return Ok(());
-        }
         let context = self
             .context
             .lock()
             .map_err(|_| anyhow::anyhow!("Meetingkontext ist gesperrt."))?
             .clone();
-        let selected: Vec<_> = previous
+        let mut next = self.state.clone();
+        ensure!(
+            context_store::project(&self.folder, &mut next)? == context,
+            "Der Meetingkontext wurde inzwischen geändert. Aktuellen Stand verwenden."
+        );
+        let candidates: Vec<_> = previous
             .entities
             .iter()
             .filter(|entity| entity.human_locked)
             .filter(|entity| !previous.context_excluded_ids.contains(&entity.id))
+            .filter(|entity| {
+                !entity
+                    .evidence
+                    .iter()
+                    .any(|evidence| next.superseded_sources.contains(&evidence.source_id))
+            })
             .filter(|entity| {
                 entity.kind != "agenda"
                     || context
@@ -70,26 +78,44 @@ impl WorkspaceRunner {
             })
             .cloned()
             .collect();
-        if selected.is_empty() {
-            return Ok(());
-        }
-        let mut next = self.state.clone();
-        next.apply_context(&context)?;
-        for entity in selected {
+        let mut selected = HashSet::new();
+        for mut entity in candidates {
+            let incoming = previous.human_activity.get(&entity.id);
+            let current = next.human_activity.get(&entity.id);
+            if current.is_some_and(|at| incoming.is_none_or(|new| new <= at)) {
+                continue;
+            }
+            if let Some(old) = next.entities.iter().find(|old| old.id == entity.id) {
+                if incoming.is_none() && current.is_none() && old.human_locked {
+                    ensure!(old == &entity,
+                        "Die Reihenfolge älterer menschlicher Änderungen ist unbekannt. Den gewünschten Stand im aktuellen Lauf neu bestätigen.");
+                    continue;
+                }
+                entity.revision = entity.revision.max(
+                    old.revision
+                        .checked_add(1)
+                        .context("Zu viele manuelle Eintragsfassungen.")?,
+                );
+            }
+            if let Some(at) = incoming {
+                next.human_activity.insert(entity.id.clone(), *at);
+            }
+            selected.insert(entity.id.clone());
             next.entities.retain(|old| old.id != entity.id);
             next.entities.push(entity);
         }
-        let ids: HashSet<_> = next
-            .entities
-            .iter()
-            .map(|entity| entity.id.clone())
-            .collect();
-        next.events = previous
+        if selected.is_empty() {
+            return Ok(());
+        }
+        for event in previous
             .events
             .iter()
-            .filter(|event| ids.contains(&event.entity_id))
-            .cloned()
-            .collect();
+            .filter(|event| selected.contains(&event.entity_id))
+        {
+            if !next.events.iter().any(|old| old.id == event.id) {
+                next.events.push(event.clone());
+            }
+        }
         let source_ids: HashSet<_> = next
             .entities
             .iter()
@@ -97,24 +123,44 @@ impl WorkspaceRunner {
             .chain(next.events.iter().flat_map(|event| event.evidence.iter()))
             .map(|evidence| evidence.source_id.clone())
             .collect();
-        let originals: Vec<_> = previous
+        let mut originals = Vec::new();
+        for source in previous
             .originals
             .iter()
             .filter(|source| source_ids.contains(&source.id))
-            .cloned()
-            .collect();
+        {
+            if let Some(old) = next.originals.iter().find(|old| old.id == source.id) {
+                ensure!(
+                    old == source,
+                    "Originalbeleg hat eine widersprüchliche Identität."
+                );
+            } else {
+                next.originals.push(source.clone());
+                originals.push(source.clone());
+            }
+        }
         ensure!(
-            originals.len() == source_ids.len(),
+            source_ids
+                .iter()
+                .all(|id| next.originals.iter().any(|source| &source.id == id)),
             "Originalbelege der manuellen Änderungen fehlen."
         );
-        next.originals = originals.clone();
-        next.inherited_sources = previous
+        for source in previous
             .processed
             .iter()
             .chain(&previous.inherited_sources)
             .filter(|source| source_ids.contains(&source_id(source)))
-            .cloned()
-            .collect();
+        {
+            if !next
+                .processed
+                .iter()
+                .chain(&next.inherited_sources)
+                .any(|old| source_id(old) == source_id(source))
+            {
+                next.inherited_sources.push(source.clone());
+            }
+        }
+        next.context_updated_at = Some(chrono::Utc::now().fixed_offset());
         next.context = context.clone();
         self.commit(
             next,

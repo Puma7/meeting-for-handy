@@ -104,6 +104,9 @@ pub struct Event {
 pub struct WorkspaceState {
     #[serde(skip)]
     pub(crate) context_updated_at: Option<chrono::DateTime<chrono::FixedOffset>>,
+    #[serde(skip)]
+    pub(crate) human_activity:
+        std::collections::BTreeMap<String, chrono::DateTime<chrono::FixedOffset>>,
     #[serde(default)]
     pub superseded_sources: Vec<String>,
     #[serde(default, skip_serializing)]

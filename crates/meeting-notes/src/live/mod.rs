@@ -149,11 +149,11 @@ impl LiveRunner {
             self.run().mode == "local",
             "Automatische Kachelauswertung benötigt ein lokales Modell."
         );
-        let previous = read_latest_workspace(
+        let previous = read_latest_workspace_excluding(
             self.folder.parent().context("Live root missing")?,
             &self.state.run.meeting_id,
-        )?
-        .filter(|view| view.run_id.as_deref() != Some(self.state.run.id.as_str()));
+            Some(self.state.run.id.as_str()),
+        )?;
         let mut workspace =
             crate::workspace::WorkspaceRunner::open(&self.folder.join("workspace-v9"))?;
         workspace.set_context(context)?;
@@ -553,7 +553,9 @@ pub fn read_latest(root: &Path, meeting_id: &str) -> Result<Option<LiveView>> {
         }
     }
     if let Some((_, folder, mut view)) = newest {
-        view.last_request = diagnostics::latest(&folder);
+        if view.workspace.is_none() {
+            view.last_request = diagnostics::latest(&folder);
+        }
         view.damaged_runs = damaged;
         return Ok(Some(view));
     }
@@ -570,9 +572,19 @@ fn read_workspace_if_present(folder: &Path) -> Result<Option<crate::workspace::W
 
 /// Selects the latest readable workspace by activity without letting a classic run hide it.
 pub fn read_latest_workspace(root: &Path, meeting_id: &str) -> Result<Option<LiveView>> {
+    read_latest_workspace_excluding(root, meeting_id, None)
+}
+fn read_latest_workspace_excluding(
+    root: &Path,
+    meeting_id: &str,
+    excluded: Option<&str>,
+) -> Result<Option<LiveView>> {
     let (runs, mut damaged) = list_runs(root)?;
     let mut newest = None;
     for run in runs {
+        if excluded == Some(run.run.id.as_str()) {
+            continue;
+        }
         if run.run.meeting_id != meeting_id {
             damaged += 1;
             continue;
@@ -660,6 +672,10 @@ impl LiveView {
         self.updated_at = state.updated_at.clone();
         self.windows = state.revision as usize;
         self.summarized_sections = state.originals.len();
+        self.overview_pending = false;
+        self.overview_window = state.revision.try_into().unwrap_or(u32::MAX);
+        self.overview_updated_at = state.updated_at.clone();
+        self.last_request = None;
         let item = |e: &crate::workspace::Entity| {
             let evidence = e
                 .evidence

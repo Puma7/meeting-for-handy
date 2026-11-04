@@ -1027,3 +1027,21 @@ fn withdrawn_workspace_items_do_not_look_current_in_classic_overview() {
     assert_eq!(view.overview[0].text, "Original fact statement");
     assert_eq!(view.workspace.unwrap().entities.len(), 3); // Immutable history remains available.
 }
+
+#[test]
+fn workspace_projection_replaces_classic_overview_coverage_and_timestamp() {
+    let mut view = LiveView::damaged_only(0);
+    view.overview_pending = true;
+    view.overview_window = 7;
+    view.overview_updated_at = Some("2026-01-01T00:00:00Z".into());
+    let state = crate::workspace::WorkspaceState {
+        revision: 3,
+        updated_at: Some("2026-01-02T00:00:00Z".into()),
+        ..Default::default()
+    };
+    view.attach_workspace(state);
+    assert!(!view.overview_pending);
+    assert_eq!(view.overview_window, 3);
+    assert_eq!(view.overview_updated_at, view.updated_at);
+    assert!(view.overview.is_empty());
+}

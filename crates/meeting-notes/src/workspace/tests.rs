@@ -1691,3 +1691,174 @@ fn legacy_context_times_remain_readable_but_malformed_times_are_preserved_as_err
     assert!(update_context(dir.path(), &old.context).is_err());
     assert_eq!(std::fs::read(&path).unwrap(), bytes);
 }
+
+#[test]
+fn resuming_an_existing_model_imports_newer_human_confirmation_without_losing_its_history() {
+    let root = tempfile::tempdir().unwrap();
+    let connection = |model: &str| crate::Connection {
+        endpoint: "http://127.0.0.1:1/v1/".into(),
+        model: model.into(),
+        mode: "local".into(),
+        cloud_consent: false,
+        api_key: String::new(),
+    };
+    let first = crate::live::LiveRunner::start(root.path(), "meeting", connection("first"), "en")
+        .unwrap()
+        .with_workspace(Default::default())
+        .unwrap();
+    let folder = first.workspace_folder().unwrap();
+    drop(first);
+    let mut runner = WorkspaceRunner::open(&folder).unwrap();
+    let context = runner.context.lock().unwrap().clone();
+    let (mut state, mut req, mut answer) = setup();
+    req.purpose = "reconcile".into();
+    answer["changes"][0]["kind"] = json!("impulse");
+    answer["changes"][0]["text"] = json!("Who approves the draft?");
+    answer["changes"][0]["due"] = json!(null);
+    answer["overviewRefs"] = json!([]);
+    state.apply_context(&context).unwrap();
+    validate::apply(&mut state, &req, &answer.to_string()).unwrap();
+    let id = state.entities[0].id.clone();
+    runner
+        .commit(
+            state,
+            req.transcript_sources.clone(),
+            vec![],
+            &AnalysisControl::default(),
+            &context,
+        )
+        .unwrap();
+    drop(runner);
+    let mut action = read_state(&folder).unwrap().context;
+    action.overrides.push(Override {
+        id: id.clone(),
+        expected_revision: 1,
+        status: "open".into(),
+        saved: false,
+    });
+    update_context(&folder, &action).unwrap();
+    let second = crate::live::LiveRunner::start(root.path(), "meeting", connection("second"), "en")
+        .unwrap()
+        .with_workspace(Default::default())
+        .unwrap();
+    let second_folder = second.workspace_folder().unwrap();
+    let second_state = second.view().workspace.unwrap();
+    assert_eq!(second_state.entities[0].status, "open");
+    drop(second);
+    let mut action = second_state.context.clone();
+    action.overrides.push(Override {
+        id: id.clone(),
+        expected_revision: second_state.entities[0].revision,
+        status: "discussed".into(),
+        saved: false,
+    });
+    update_context(&second_folder, &action).unwrap();
+    let first = crate::live::LiveRunner::start(root.path(), "meeting", connection("first"), "en")
+        .unwrap()
+        .with_workspace(Default::default())
+        .unwrap();
+    let view = first.view();
+    let state = view.workspace.unwrap();
+    assert_eq!(
+        state.entities.iter().find(|e| e.id == id).unwrap().status,
+        "discussed"
+    );
+    assert!(view.questions.is_empty());
+    assert_eq!(state.events.iter().filter(|e| e.human).count(), 2);
+    assert_eq!(state.originals, req.transcript_sources);
+    drop(first);
+    assert_eq!(read_state(&folder).unwrap().entities[0].status, "discussed");
+}
+
+#[test]
+fn inheritance_uses_per_item_human_chronology_and_keeps_revisions_monotone() {
+    let (mut previous, req, answer) = setup();
+    validate::apply(&mut previous, &req, &answer.to_string()).unwrap();
+    previous.originals = req.transcript_sources.clone();
+    previous.entities[0].human_locked = true;
+    previous.entities[0].revision = 3;
+    let id = previous.entities[0].id.clone();
+    let at = |second| {
+        chrono::DateTime::parse_from_rfc3339(&format!("2026-01-01T00:00:{second:02}Z")).unwrap()
+    };
+    previous.human_activity.insert(id.clone(), at(1));
+    let dir = tempfile::tempdir().unwrap();
+    let mut runner = WorkspaceRunner::open(dir.path()).unwrap();
+    runner.set_context(Default::default()).unwrap();
+    runner.inherit_manual(&previous).unwrap();
+    let mut next = runner.state.clone();
+    next.entities[0].revision = 7;
+    next.entities[0].status = "discussed".into();
+    next.human_activity.insert(id.clone(), at(2));
+    let context = next.context.clone();
+    runner
+        .commit(next, vec![], vec![], &AnalysisControl::default(), &context)
+        .unwrap();
+    // A later unrelated note or model result cannot make the older open status newer.
+    previous.context_updated_at = Some(at(30));
+    previous.updated_at = Some(at(40).to_rfc3339());
+    let revision = runner.state.revision;
+    runner.inherit_manual(&previous).unwrap();
+    assert_eq!(runner.state.revision, revision);
+    assert_eq!(runner.state.entities[0].status, "discussed");
+    previous.human_activity.insert(id, at(3));
+    runner.inherit_manual(&previous).unwrap();
+    assert_eq!(runner.state.entities[0].status, "open");
+    assert_eq!(runner.state.entities[0].revision, 8);
+    drop(runner);
+    let reopened = read_state(dir.path()).unwrap();
+    assert_eq!(reopened.entities[0].revision, 8);
+    assert_eq!(reopened.human_activity.values().next(), Some(&at(3)));
+    assert_eq!(reopened.originals, previous.originals);
+}
+
+#[test]
+fn ambiguous_legacy_human_conflicts_require_confirmation_without_replacing_saved_bytes() {
+    let (mut previous, req, answer) = setup();
+    validate::apply(&mut previous, &req, &answer.to_string()).unwrap();
+    previous.originals = req.transcript_sources;
+    previous.entities[0].human_locked = true;
+    let dir = tempfile::tempdir().unwrap();
+    let mut runner = WorkspaceRunner::open(dir.path()).unwrap();
+    runner.set_context(Default::default()).unwrap();
+    runner.inherit_manual(&previous).unwrap();
+    let path = dir.path().join("revision-00000001.json");
+    let bytes = std::fs::read(&path).unwrap();
+    previous.entities[0].status = "discussed".into();
+    assert!(runner
+        .inherit_manual(&previous)
+        .unwrap_err()
+        .to_string()
+        .contains("neu bestätigen"));
+    assert_eq!(runner.state.entities[0].status, "open");
+    assert_eq!(std::fs::read(path).unwrap(), bytes);
+    assert!(!dir.path().join("revision-00000002.json").exists());
+}
+
+#[test]
+fn malformed_inherited_human_timestamps_preserve_the_unreadable_revision() {
+    let (mut previous, req, answer) = setup();
+    validate::apply(&mut previous, &req, &answer.to_string()).unwrap();
+    previous.originals = req.transcript_sources;
+    previous.entities[0].human_locked = true;
+    for field in ["humanActivity", "contextUpdatedAt"] {
+        let dir = tempfile::tempdir().unwrap();
+        let mut runner = WorkspaceRunner::open(dir.path()).unwrap();
+        runner.set_context(Default::default()).unwrap();
+        runner.inherit_manual(&previous).unwrap();
+        drop(runner);
+        let path = dir.path().join("revision-00000001.json");
+        let mut delta: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        delta[field] = if field == "humanActivity" {
+            json!({"e_one":"broken"})
+        } else {
+            json!("broken")
+        };
+        let bytes = serde_json::to_vec(&delta).unwrap();
+        std::fs::write(&path, &bytes).unwrap();
+        assert!(read_state(dir.path()).is_err());
+        assert!(WorkspaceRunner::open(dir.path()).is_err());
+        assert_eq!(std::fs::read(path).unwrap(), bytes);
+    }
+}

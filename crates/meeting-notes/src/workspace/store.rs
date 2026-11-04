@@ -80,6 +80,10 @@ pub(crate) struct Delta {
     processed: Vec<LiveSource>,
     #[serde(default)]
     inherited_sources: Vec<LiveSource>,
+    #[serde(default)]
+    human_activity: std::collections::BTreeMap<String, String>,
+    #[serde(default)]
+    context_updated_at: Option<String>,
 }
 impl Delta {
     /// Build an append-only delta, including new human events independently of model output.
@@ -114,6 +118,12 @@ impl Delta {
             originals,
             processed: new.processed[old.processed.len()..].to_vec(),
             inherited_sources: new.inherited_sources.clone(),
+            human_activity: new
+                .human_activity
+                .iter()
+                .map(|(id, at)| (id.clone(), at.to_rfc3339()))
+                .collect(),
+            context_updated_at: new.context_updated_at.map(|at| at.to_rfc3339()),
         }
     }
 }
@@ -167,6 +177,20 @@ pub(crate) fn read(folder: &Path) -> Result<WorkspaceState> {
         state.originals.extend(delta.originals);
         state.processed.extend(delta.processed);
         state.inherited_sources = delta.inherited_sources;
+        for (id, at) in delta.human_activity {
+            let at = chrono::DateTime::parse_from_rfc3339(&at)
+                .context("Zeitstempel der menschlichen Änderung ist beschädigt.")?;
+            state
+                .human_activity
+                .entry(id)
+                .and_modify(|old| *old = (*old).max(at))
+                .or_insert(at);
+        }
+        if let Some(at) = delta.context_updated_at {
+            let at = chrono::DateTime::parse_from_rfc3339(&at)
+                .context("Aktivitätszeit des Meetingstands ist beschädigt.")?;
+            state.context_updated_at = state.context_updated_at.max(Some(at));
+        }
     }
     Ok(state)
 }

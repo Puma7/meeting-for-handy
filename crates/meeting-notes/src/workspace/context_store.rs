@@ -35,13 +35,53 @@ pub(crate) fn read(folder: &Path, fallback: &WorkspaceContext) -> Result<Workspa
 /// Reconstruct every context-only transition after the model checkpoint, including withdrawn agenda entries and their human history.
 pub(crate) fn project(folder: &Path, state: &mut WorkspaceState) -> Result<WorkspaceContext> {
     let base = state.context.clone();
+    let mut prior_agenda: Option<Vec<Agenda>> = None;
+    let mut prior_overrides = 0;
     replay(folder, &base, |context, at| {
-        state.context_updated_at = state.context_updated_at.max(at);
+        record_activity(state, context, prior_agenda.as_deref(), prior_overrides, at);
         if context.revision > base.revision {
             state.apply_context(context)?;
         }
+        prior_agenda = Some(context.agenda.clone());
+        prior_overrides = context.overrides.len();
         Ok(())
     })
+}
+
+/// Retain per-entity human chronology independently of unrelated note or model activity.
+fn record_activity(
+    state: &mut WorkspaceState,
+    context: &WorkspaceContext,
+    prior_agenda: Option<&[Agenda]>,
+    prior_overrides: usize,
+    at: Option<chrono::DateTime<chrono::FixedOffset>>,
+) {
+    state.context_updated_at = state.context_updated_at.max(at);
+    let Some(at) = at else {
+        return;
+    };
+    let mut ids = context
+        .overrides
+        .iter()
+        .skip(prior_overrides)
+        .map(|action| action.id.clone())
+        .collect::<std::collections::BTreeSet<_>>();
+    if let Some(prior) = prior_agenda {
+        for entry in prior.iter().chain(&context.agenda) {
+            if prior.iter().find(|a| a.id == entry.id)
+                != context.agenda.iter().find(|a| a.id == entry.id)
+            {
+                ids.insert(entry.id.clone());
+            }
+        }
+    }
+    for id in ids {
+        state
+            .human_activity
+            .entry(id)
+            .and_modify(|old| *old = (*old).max(at))
+            .or_insert(at);
+    }
 }
 /// Accept only an uninterrupted suffix of human-only revisions; a revoked and restored shared input still invalidates inference.
 pub(crate) fn human_suffix(folder: &Path, expected: &WorkspaceContext) -> Result<WorkspaceContext> {
@@ -177,8 +217,12 @@ pub(crate) fn update(
         .map_err(|e| e.error)?;
     #[cfg(unix)]
     File::open(folder)?.sync_all()?;
-    state.context_updated_at = state
-        .context_updated_at
-        .max(chrono::DateTime::parse_from_rfc3339(&entry.created_at).ok());
+    record_activity(
+        &mut state,
+        &next,
+        (!reset).then_some(current.agenda.as_slice()),
+        if reset { 0 } else { current.overrides.len() },
+        chrono::DateTime::parse_from_rfc3339(&entry.created_at).ok(),
+    );
     Ok((next, state))
 }
