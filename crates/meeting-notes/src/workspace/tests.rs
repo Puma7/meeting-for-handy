@@ -1506,3 +1506,75 @@ fn acknowledged_open_questions_get_a_bounded_request_and_ignored_constraints_do_
         }
     }
 }
+
+#[test]
+fn numbered_human_agenda_can_change_status_without_generating_a_title_claim() {
+    for invalid in ["none", "many quotes", "invented quote", "rewrite title"] {
+        let (mut state, mut req, mut answer) = setup();
+        state
+            .apply_context(&WorkspaceContext {
+                agenda: vec![Agenda {
+                    id: "e_topic".into(),
+                    revision: 1,
+                    text: "1. Budget 2027".into(),
+                }],
+                ..Default::default()
+            })
+            .unwrap();
+        req.state = state.entities.clone();
+        req.purpose = "reconcile".into();
+        req.transcript_sources[0].text = "We discussed the budget.".into();
+        let change = &mut answer["changes"][0];
+        change["kind"] = json!("agenda");
+        change["targetId"] = json!("e_topic");
+        change["targetRevision"] = json!(1);
+        change["text"] = json!(null);
+        change["status"] = json!("discussed");
+        change["due"] = json!(null);
+        change["evidence"][0]["quote"] = json!("We discussed the budget.");
+        answer["overviewRefs"] = json!([]);
+        if invalid == "invented quote" {
+            answer["changes"][0]["evidence"][0]["quote"] = json!("We discussed an invented 42.");
+        }
+        if invalid == "rewrite title" {
+            answer["changes"][0]["text"] = json!("Changed human title");
+        }
+        if invalid == "many quotes" {
+            req.transcript_sources = (0..6)
+                .map(|i| Source {
+                    id: format!("s_{i}"),
+                    source: "system".into(),
+                    start_ms: i * 3000,
+                    end_ms: (i + 1) * 3000,
+                    text: format!("We discussed the budget topic {i}. {}", "a".repeat(400)),
+                })
+                .collect();
+            answer["changes"][0]["evidence"] = json!(req
+                .transcript_sources
+                .iter()
+                .map(|s| json!({"sourceId":s.id,"quote":s.text}))
+                .collect::<Vec<_>>());
+        }
+        let before = serde_json::to_vec(&state).unwrap();
+        let result = validate::apply(&mut state, &req, &answer.to_string());
+        assert_eq!(
+            result.is_ok(),
+            ["none", "many quotes"].contains(&invalid),
+            "{invalid}: {result:?}"
+        );
+        if ["none", "many quotes"].contains(&invalid) {
+            assert_eq!(state.entities[0].text, "1. Budget 2027");
+            assert_eq!(state.entities[0].status, "discussed");
+            assert_eq!(
+                state.entities[0].evidence.len(),
+                if invalid == "many quotes" { 6 } else { 1 }
+            );
+            assert!(state.entities[0].evidence.iter().all(|e| req
+                .transcript_sources
+                .iter()
+                .any(|s| s.id == e.source_id && s.text.contains(&e.quote))));
+        } else {
+            assert_eq!(serde_json::to_vec(&state).unwrap(), before);
+        }
+    }
+}

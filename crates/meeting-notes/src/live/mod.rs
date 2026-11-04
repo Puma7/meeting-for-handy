@@ -715,7 +715,7 @@ impl LiveView {
             .overview_refs
             .iter()
             .filter_map(|id| active.iter().find(|e| &e.id == id))
-            .filter(|e| e.status != "completed")
+            .filter(|e| !["completed", "withdrawn"].contains(&e.status.as_str()))
             .map(|e| item(e))
             .collect();
         self.workspace = Some(state);

@@ -127,7 +127,17 @@ pub(crate) fn apply(
             crate::Kind::Summary
         };
         let fact = crate::Fact {
-            text: text.clone(),
+            // Agenda titles are unchanged human input, not generated claims.
+            // Screen the status evidence itself, retaining every literal-source
+            // and metadata check without requiring title numbering in the quote.
+            text: if c.kind == "agenda" {
+                c.evidence
+                    .first()
+                    .map(|e| e.quote.clone())
+                    .unwrap_or_default()
+            } else {
+                text.clone()
+            },
             owner: c.owner.clone(),
             due: c.due.clone(),
             evidence: c.evidence.clone(),

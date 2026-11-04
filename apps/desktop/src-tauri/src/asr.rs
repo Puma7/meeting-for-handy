@@ -1717,6 +1717,10 @@ mod tests {
         command
     }
 
+    // These cases test protocol classification, not shell launch latency. Use the
+    // same ready budget as production; the dedicated stalled-start case stays at 2s.
+    const PROTOCOL_FIXTURE_READY_TIMEOUT: Duration = Duration::from_secs(180);
+
     #[test]
     fn batch_retries_transient_startup_but_not_protocol_or_model_failures() {
         #[cfg(windows)]
@@ -1751,7 +1755,7 @@ mod tests {
                         if script.to_ascii_lowercase().contains("sleep") {
                             Duration::from_secs(2)
                         } else {
-                            Duration::from_secs(10)
+                            PROTOCOL_FIXTURE_READY_TIMEOUT
                         },
                     ) {
                         Ok(_) => (Ok(()), false),
@@ -1829,7 +1833,7 @@ mod tests {
             protocol_test_child(&script),
             WorkerKind::Asr,
             None,
-            Duration::from_secs(5),
+            PROTOCOL_FIXTURE_READY_TIMEOUT,
         )
         .unwrap();
         let error = worker

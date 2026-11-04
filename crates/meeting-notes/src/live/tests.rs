@@ -994,3 +994,36 @@ fn workspace_view_survives_a_newer_classic_run_and_reports_damaged_workspace() {
         classic.run().model
     );
 }
+
+#[test]
+fn withdrawn_workspace_items_do_not_look_current_in_classic_overview() {
+    use crate::workspace::{Entity, WorkspaceState};
+    let mut view = LiveView::damaged_only(0);
+    let mut state = WorkspaceState::default();
+    for (kind, status) in [
+        ("task", "withdrawn"),
+        ("decision", "withdrawn"),
+        ("fact", "recorded"),
+    ] {
+        let id = format!("e_{kind}");
+        state.overview_refs.push(id.clone());
+        state.entities.push(Entity {
+            id,
+            revision: 2,
+            kind: kind.into(),
+            text: format!("Original {kind} statement"),
+            status: status.into(),
+            attention: "normal".into(),
+            owner: None,
+            due: None,
+            evidence: vec![],
+            human_locked: false,
+        });
+    }
+    view.attach_workspace(state);
+    assert!(view.tasks.is_empty());
+    assert!(view.decisions.is_empty());
+    assert_eq!(view.overview.len(), 1);
+    assert_eq!(view.overview[0].text, "Original fact statement");
+    assert_eq!(view.workspace.unwrap().entities.len(), 3); // Immutable history remains available.
+}

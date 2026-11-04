@@ -217,10 +217,13 @@ pub(crate) struct Snapshot {
     active: bool,
     /// Only living recognizers can consume compute for their own pending track.
     recognizing_tracks: [bool; 2],
+    /// Batch recognition can consume closed sections only.
+    batch_recognition: bool,
 }
 impl Snapshot {
     /// A living recognizer owns the compute budget while its track has over five seconds
-    /// unprocessed. Completed same-model parts, ended workers and archived meetings never
+    /// actionable audio unprocessed; batch sections must already be closed.
+    /// Completed same-model parts, ended workers and archived meetings never
     /// defer confirmed-text analysis, including after a resume with older progress counters.
     fn recognition_needs_priority(&self) -> bool {
         if !self.active {
@@ -228,6 +231,11 @@ impl Snapshot {
         }
         let mut tracks = [0_u64; 2];
         for part in &self.data.parts {
+            // An open batch section cannot be submitted yet. Its capture continues
+            // independently; only closed sections represent actionable ASR backlog.
+            if self.batch_recognition && !part.audio_closed {
+                continue;
+            }
             let same_model = part.model_id.as_deref() == Some(self.data.model_id.as_str());
             let pending = if same_model && part.status == "complete" {
                 0
@@ -250,8 +258,8 @@ impl Snapshot {
     }
 }
 
-/// Batch workers service both inputs; their unfinished audio has the same priority
-/// over text-model inference as an unfinished dedicated recognition worker.
+/// Batch workers service both inputs. Their closed pending sections retain priority;
+/// open sections awaiting closure do not yet represent actionable recognition work.
 fn mark_recognizing_track(tracks: &mut [bool; 2], source: &str) {
     match source {
         "system" => tracks[0] = true,
@@ -274,23 +282,26 @@ impl Service {
             (
                 inner.active.as_ref().map(|a| {
                     let mut recognizing_tracks = [false; 2];
+                    let mut batch_recognition = false;
                     for worker in &a.workers {
                         if !worker.handle.is_finished() {
                             mark_recognizing_track(&mut recognizing_tracks, &worker.source);
+                            batch_recognition |= worker.source == "batch";
                         }
                     }
-                    (a.store.clone(), recognizing_tracks)
+                    (a.store.clone(), recognizing_tracks, batch_recognition)
                 }),
                 inner.view.clone(),
             )
         };
-        if let Some((store, recognizing_tracks)) = active_store {
+        if let Some((store, recognizing_tracks, batch_recognition)) = active_store {
             if let Ok(data) = store.snapshot() {
                 if data.id == id {
                     return Ok(Snapshot {
                         data,
                         active: true,
                         recognizing_tracks,
+                        batch_recognition,
                     });
                 }
             }
@@ -302,6 +313,7 @@ impl Service {
                         data,
                         active: false,
                         recognizing_tracks: [false; 2],
+                        batch_recognition: false,
                     });
                 }
             }
@@ -311,6 +323,7 @@ impl Service {
                 data: data.clone(),
                 active: false,
                 recognizing_tracks: [false; 2],
+                batch_recognition: false,
             });
         }
         let folder = self.root.join("sessions").join(id);
@@ -321,6 +334,7 @@ impl Service {
                 data,
                 active: false,
                 recognizing_tracks: [false; 2],
+                batch_recognition: false,
             });
         }
         let store = meeting_core::SessionStore::open(&folder)
@@ -335,6 +349,7 @@ impl Service {
             data,
             active: false,
             recognizing_tracks: [false; 2],
+            batch_recognition: false,
         })
     }
 }
@@ -1429,6 +1444,7 @@ mod tests {
             data: data.clone(),
             active: true,
             recognizing_tracks: [true; 2],
+            batch_recognition: false,
         }
         .recognition_needs_priority());
         data.parts[0].processed_samples = 80_000;
@@ -1436,6 +1452,7 @@ mod tests {
             data: data.clone(),
             active: true,
             recognizing_tracks: [true; 2],
+            batch_recognition: false,
         }
         .recognition_needs_priority());
         data.parts[0].processed_samples = 160_000;
@@ -1443,6 +1460,7 @@ mod tests {
             data: data.clone(),
             active: true,
             recognizing_tracks: [true; 2],
+            batch_recognition: false,
         }
         .recognition_needs_priority());
         data.parts[0].model_id = Some("another-model".into());
@@ -1450,12 +1468,14 @@ mod tests {
             data: data.clone(),
             active: true,
             recognizing_tracks: [true; 2],
+            batch_recognition: false,
         }
         .recognition_needs_priority());
         assert!(!Snapshot {
             data,
             active: false,
             recognizing_tracks: [false; 2],
+            batch_recognition: false,
         }
         .recognition_needs_priority());
     }
@@ -1483,6 +1503,7 @@ mod tests {
                     data,
                     active: true,
                     recognizing_tracks: [true; 2],
+                    batch_recognition: false,
                 };
                 assert_eq!(
                     live_texts(&snapshot.data).0[0].text,
@@ -1939,5 +1960,43 @@ mod tests {
             1
         );
         let _ = std::fs::remove_dir_all(root);
+    }
+}
+
+#[cfg(test)]
+mod batch_admission_regression {
+    use super::*;
+    #[test]
+    fn closed_batch_backlog_yields_to_live_notes_between_six_second_cycles() {
+        // Accelerated six-minute, two-track scheduling simulation: no physical devices.
+        let rate = u64::from(meeting_core::SAMPLE_RATE);
+        for cycle in 1..=12_u64 {
+            for second in 0..30_u64 {
+                let parts = ["system", "microphone"].into_iter().flat_map(|source| {
+                    [serde_json::json!({"file":format!("{source}-closed.wav"),"source":source,"startSample":(cycle-1)*30*rate,"sampleCount":30*rate,"confirmedSampleCount":30*rate,"audioClosed":true,"processedSamples":if second>=6 {30*rate}else{0},"modelId":"batch-model","status":if second>=6 {"complete"}else{"pending"},"text":if second>=6 {Some("Confirmed new text.")}else{None}}),
+                     serde_json::json!({"file":format!("{source}-open.wav"),"source":source,"startSample":cycle*30*rate,"sampleCount":second*rate,"confirmedSampleCount":second*rate,"audioClosed":false,"processedSamples":0,"modelId":"batch-model","status":"pending"})]
+                }).collect::<Vec<_>>();
+                let data: SessionData=serde_json::from_value(serde_json::json!({"schemaVersion":2,"id":"a".repeat(32),"title":"Synthetic batch admission","startedAt":"2026-11-04T00:00:00Z","status":"recording","modelId":"batch-model","parts":parts})).unwrap();
+                let before = serde_json::to_vec(&data).unwrap();
+                let mut snapshot = Snapshot {
+                    data,
+                    active: true,
+                    recognizing_tracks: [true; 2],
+                    batch_recognition: true,
+                };
+                assert_eq!(
+                    snapshot.recognition_needs_priority(),
+                    second < 6,
+                    "cycle {cycle} second {second}"
+                );
+                assert_eq!(serde_json::to_vec(&snapshot.data).unwrap(), before);
+                if second >= 6 {
+                    assert_eq!(live_texts(&snapshot.data).0.len(), 2);
+                }
+                // Streaming can process an open section, so its original five-second protection remains.
+                snapshot.batch_recognition = false;
+                assert!(snapshot.recognition_needs_priority());
+            }
+        }
     }
 }
