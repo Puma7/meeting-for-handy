@@ -33,6 +33,15 @@ pub struct Override {
     pub saved: bool,
 }
 impl WorkspaceContext {
+    /// Reserve bounded request space for source text and the active frontier before accepting new shared inputs.
+    pub(crate) fn validate_request_budget(&self) -> Result<()> {
+        self.validate()?;
+        ensure!(
+            serde_json::to_string(&(&self.agenda, &self.shared_notes))?.chars().count() <= 8_000,
+            "Freigegebene Vorbereitung und Notizen sind zu groß. Bitte Text kürzen oder weniger Themen freigeben; private Entwürfe bleiben erhalten."
+        );
+        Ok(())
+    }
     /// Validate shared text bounds, stable identifiers and permitted manual actions before publication.
     pub fn validate(&self) -> Result<()> {
         ensure!(
@@ -153,7 +162,13 @@ impl WorkspaceState {
             let previously_shared = self.context.agenda.iter().any(|entry| entry.id == a.id);
             self.context_excluded_ids.retain(|id| id != &a.id);
             match self.entities.iter_mut().find(|e| e.id == a.id) {
-                Some(e) if e.text != a.text || !previously_shared => {
+                Some(e)
+                    if e.text != a.text
+                        || !previously_shared
+                        || e.evidence.iter().any(|evidence| {
+                            self.superseded_sources.contains(&evidence.source_id)
+                        }) =>
+                {
                     e.text = a.text.clone();
                     e.revision += 1;
                     e.status = "open".into();

@@ -1334,9 +1334,11 @@ mod tests {
         let context = runner.workspace_context().unwrap();
         let run_id = runner.run().id.clone();
         // A deterministic persisted model result: no network or user meeting is involved.
-        let entity = serde_json::json!({"id":"e_question","revision":1,"kind":"impulse","text":"Who confirms the budget?","status":"open","attention":"current","owner":null,"due":null,"evidence":[],"humanLocked":false});
+        let evidence =
+            serde_json::json!([{"sourceId":"s_budget","quote":"Who confirms the budget?"}]);
+        let entity = serde_json::json!({"id":"e_question","revision":1,"kind":"impulse","text":"Who confirms the budget?","status":"open","attention":"current","owner":null,"due":null,"evidence":evidence,"humanLocked":false});
         std::fs::write(folder.join("revision-00000001.json"), serde_json::to_vec(&serde_json::json!({
-            "schema": meeting_notes::workspace::PROMPT_VERSION,"revision":1,"updatedAt":null,"context":*context.lock().unwrap(),"entities":[entity],"events":[],"overviewRefs":[],"originals":[],"processed":[]
+            "schema": meeting_notes::workspace::PROMPT_VERSION,"revision":1,"updatedAt":null,"context":*context.lock().unwrap(),"entities":[entity],"events":[],"overviewRefs":[],"originals":[{"id":"s_budget","source":"microphone","startMs":0,"endMs":3000,"text":"Who confirms the budget?"}],"processed":[]
         })).unwrap()).unwrap();
         // Reopen so the retained job view uses the persisted checkpoint.
         drop(runner);

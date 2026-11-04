@@ -333,7 +333,7 @@ impl WorkspaceRunner {
             .lock()
             .map_err(|_| anyhow::anyhow!("Meetingkontext ist gesperrt."))?
             .clone();
-        context.validate()?;
+        context.validate_request_budget()?;
         let mut next = self.state.clone();
         let durable = context_store::project(&self.folder, &mut next)?;
         ensure!(
@@ -357,6 +357,9 @@ impl WorkspaceRunner {
                 next.context_excluded_ids.push(e.id.clone());
             }
         }
+        // Agenda titles remain shared human input, but assessments grounded in a
+        // superseded source must reopen before the reconciliation frontier is built.
+        next.apply_context(&context)?;
         next.overview_refs
             .retain(|id| !next.context_excluded_ids.contains(id));
         if window.is_empty() {
@@ -398,6 +401,7 @@ impl WorkspaceRunner {
         // One coordinated transaction with two small tasks. A small local model should not
         // have to classify obligations and generate/resolve questions in the same output.
         let mut overview_selection: Option<Vec<String>> = None;
+        let incoming_overview: HashSet<_> = next.overview_refs.iter().cloned().collect();
         for phase in ["tasks", "facts", "reconcile"] {
             let frontier: Vec<Entity> = next
                 .entities
@@ -406,7 +410,7 @@ impl WorkspaceRunner {
                 .filter(|e| match phase {
                     "tasks" => e.kind == "task" && e.status == "open",
                     "facts" => {
-                        (e.kind == "fact" && next.overview_refs.contains(&e.id))
+                        (e.kind == "fact" && incoming_overview.contains(&e.id))
                             || (e.kind == "decision" && e.status != "withdrawn")
                     }
                     _ => {

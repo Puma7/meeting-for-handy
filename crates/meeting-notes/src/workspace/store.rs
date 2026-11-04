@@ -192,7 +192,56 @@ pub(crate) fn read(folder: &Path) -> Result<WorkspaceState> {
             state.context_updated_at = state.context_updated_at.max(Some(at));
         }
     }
+    verify_saved_evidence(&state)?;
     Ok(state)
+}
+
+/// Recheck retained literal evidence without applying newer generation heuristics or rewriting old work.
+fn verify_saved_evidence(state: &WorkspaceState) -> Result<()> {
+    let mut ids = std::collections::HashSet::new();
+    ensure!(
+        state.originals.iter().all(|source| ids.insert(&source.id)),
+        "Originalbelege enthalten doppelte Quellenkennungen."
+    );
+    let mut tasks = Vec::new();
+    let mut statements = Vec::new();
+    for entity in &state.entities {
+        // An unassessed human agenda title, or its explicit human status, need not
+        // claim transcript evidence. Generated assessments retain the original contract.
+        if entity.kind == "agenda"
+            && entity.evidence.is_empty()
+            && (entity.status == "open" || entity.human_locked)
+        {
+            continue;
+        }
+        let facts = if entity.kind == "task" {
+            &mut tasks
+        } else {
+            &mut statements
+        };
+        facts.push(crate::Fact {
+            text: entity.text.clone(),
+            owner: entity.owner.clone(),
+            due: entity.due.clone(),
+            evidence: entity.evidence.clone(),
+        });
+    }
+    for event in &state.events {
+        if event.human && event.evidence.is_empty() {
+            continue;
+        }
+        statements.push(crate::Fact {
+            text: event.text.clone(),
+            owner: None,
+            due: None,
+            evidence: event.evidence.clone(),
+        });
+    }
+    // Build the original-source lookup once per kind, rather than once per
+    // historical entity/event on every read of a long meeting.
+    crate::validation::verify_facts(&tasks, &state.originals, &crate::Kind::Tasks)?;
+    crate::validation::verify_facts(&statements, &state.originals, &crate::Kind::Summary)?;
+    Ok(())
 }
 /// Sync a bounded delta and publish it without replacing any existing revision.
 pub(crate) fn append(folder: &Path, delta: &Delta) -> Result<()> {

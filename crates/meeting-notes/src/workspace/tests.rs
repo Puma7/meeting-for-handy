@@ -1862,3 +1862,331 @@ fn malformed_inherited_human_timestamps_preserve_the_unreadable_revision() {
         assert_eq!(std::fs::read(path).unwrap(), bytes);
     }
 }
+
+#[test]
+fn facts_frontier_survives_an_empty_tasks_phase_with_more_than_six_selected_facts() {
+    use std::{
+        io::{Read, Write},
+        net::TcpListener,
+        thread,
+        time::{Duration, Instant},
+    };
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    listener.set_nonblocking(true).unwrap();
+    let endpoint = format!("http://{}/v1/", listener.local_addr().unwrap());
+    let server = thread::spawn(move || {
+        let mut facts = HashSet::new();
+        let started = Instant::now();
+        loop {
+            assert!(
+                started.elapsed() < Duration::from_secs(10),
+                "synthetic request sequence did not finish"
+            );
+            let (mut stream, _) = match listener.accept() {
+                Ok(v) => v,
+                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                    thread::sleep(Duration::from_millis(5));
+                    continue;
+                }
+                Err(e) => panic!("{e}"),
+            };
+            // Windows may inherit the listener's nonblocking mode. Accepted
+            // synthetic HTTP streams use bounded blocking reads below.
+            stream.set_nonblocking(false).unwrap();
+            stream
+                .set_read_timeout(Some(Duration::from_secs(3)))
+                .unwrap();
+            let mut bytes = Vec::new();
+            let mut buffer = [0; 8192];
+            let header = loop {
+                let n = stream.read(&mut buffer).unwrap();
+                assert!(n > 0 && bytes.len() < 500000);
+                bytes.extend_from_slice(&buffer[..n]);
+                if let Some(at) = bytes.windows(4).position(|b| b == b"\r\n\r\n") {
+                    break at + 4;
+                }
+            };
+            let size = String::from_utf8_lossy(&bytes[..header])
+                .lines()
+                .filter_map(|l| l.split_once(':'))
+                .find(|(k, _)| k.eq_ignore_ascii_case("content-length"))
+                .unwrap()
+                .1
+                .trim()
+                .parse::<usize>()
+                .unwrap();
+            while bytes.len() < header + size {
+                let n = stream.read(&mut buffer).unwrap();
+                assert!(n > 0);
+                bytes.extend_from_slice(&buffer[..n]);
+            }
+            let body: serde_json::Value =
+                serde_json::from_slice(&bytes[header..header + size]).unwrap();
+            let req: serde_json::Value =
+                serde_json::from_str(body["messages"][1]["content"].as_str().unwrap()).unwrap();
+            if req["purpose"] == "facts" {
+                for entity in req["state"].as_array().unwrap() {
+                    if entity["kind"] == "fact" {
+                        facts.insert(entity["id"].as_str().unwrap().to_owned());
+                    }
+                }
+            }
+            let answer=json!({"contractVersion":CONTRACT_VERSION,"requestId":req["requestId"],"changes":[],"overviewRefs":[],"unresolvedContextIds":[],"moreChangesPossible":false}).to_string();
+            let payload = format!(
+                "data: {}\n\ndata: {}\n\n",
+                json!({"choices":[{"delta":{"content":answer},"finish_reason":null}]}),
+                json!({"choices":[{"delta":{},"finish_reason":"stop"}]})
+            );
+            write!(stream,"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{payload}",payload.len()).unwrap();
+            if req["purpose"] == "reconcile" {
+                break;
+            }
+        }
+        facts
+    });
+    let dir = tempfile::tempdir().unwrap();
+    let mut runner = WorkspaceRunner::open(dir.path()).unwrap();
+    runner.set_context(Default::default()).unwrap();
+    let (mut state, req, answer) = setup();
+    validate::apply(&mut state, &req, &answer.to_string()).unwrap();
+    let task = state.entities.remove(0);
+    state.originals = req.transcript_sources.clone();
+    for i in 0..8 {
+        let mut fact = task.clone();
+        fact.id = format!("e_fact_{i}");
+        fact.kind = "fact".into();
+        fact.status = "recorded".into();
+        fact.due = None;
+        state.overview_refs.push(fact.id.clone());
+        state.entities.push(fact);
+    }
+    state.overview_refs.retain(|id| id.starts_with("e_fact_"));
+    state.entities.push(task);
+    let context = runner.context.lock().unwrap().clone();
+    state.apply_context(&context).unwrap();
+    runner
+        .commit(
+            state,
+            req.transcript_sources,
+            vec![],
+            &AnalysisControl::default(),
+            &context,
+        )
+        .unwrap();
+    let client = TextClient::new(&crate::Connection {
+        endpoint,
+        model: "synthetic".into(),
+        mode: "local".into(),
+        cloud_consent: false,
+        api_key: String::new(),
+    })
+    .unwrap();
+    let pending = runner.pending(&[LiveText {
+        key: "fresh".into(),
+        track: "system".into(),
+        start_ms: 3000,
+        end_ms: 6000,
+        text: "Der Entwurf ist zur Prüfung bereit.".into(),
+    }]);
+    runner
+        .update(&client, &pending, &AnalysisControl::default(), "en")
+        .unwrap();
+    assert_eq!(
+        server.join().unwrap(),
+        (0..8).map(|i| format!("e_fact_{i}")).collect()
+    );
+}
+
+#[test]
+fn corrupt_persisted_entity_and_event_evidence_is_rejected_without_rewriting_files() {
+    for target in ["entities", "events"] {
+        for corruption in ["unknown-source", "nonliteral-quote", "changed-original"] {
+            let dir = tempfile::tempdir().unwrap();
+            let mut runner = WorkspaceRunner::open(dir.path()).unwrap();
+            runner.set_context(Default::default()).unwrap();
+            let (mut state, req, answer) = setup();
+            validate::apply(&mut state, &req, &answer.to_string()).unwrap();
+            let context = runner.context.lock().unwrap().clone();
+            state.apply_context(&context).unwrap();
+            runner
+                .commit(
+                    state,
+                    req.transcript_sources,
+                    vec![],
+                    &AnalysisControl::default(),
+                    &context,
+                )
+                .unwrap();
+            drop(runner);
+            assert!(read_state(dir.path()).is_ok());
+            let path = dir.path().join("revision-00000001.json");
+            let mut delta: serde_json::Value =
+                serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+            match corruption {
+                "unknown-source" => {
+                    delta[target][0]["evidence"][0]["sourceId"] = json!("s_missing")
+                }
+                "nonliteral-quote" => {
+                    delta[target][0]["evidence"][0]["quote"] =
+                        json!("This quote never appeared in the original.")
+                }
+                _ => delta["originals"][0]["text"] = json!("Entirely different original text."),
+            };
+            let bytes = serde_json::to_vec(&delta).unwrap();
+            std::fs::write(&path, &bytes).unwrap();
+            assert!(read_state(dir.path()).is_err(), "{target}: {corruption}");
+            assert!(WorkspaceRunner::open(dir.path()).is_err());
+            assert_eq!(std::fs::read(path).unwrap(), bytes);
+        }
+    }
+}
+
+#[test]
+fn oversized_shared_notes_are_rejected_before_publication_and_keep_the_prior_context() {
+    for escaped in [false, true] {
+        let dir = tempfile::tempdir().unwrap();
+        let runner = WorkspaceRunner::open(dir.path()).unwrap();
+        let (mut context, _) = update_context(dir.path(), &WorkspaceContext::default()).unwrap();
+        let path = dir.path().join("context-00000001.json");
+        let bytes = std::fs::read(&path).unwrap();
+        let text = if escaped {
+            "\"".repeat(1600)
+        } else {
+            "a".repeat(1600)
+        };
+        context.shared_notes = (0..if escaped { 12 } else { 20 })
+            .map(|i| SharedNote {
+                id: format!("h_note_{i}"),
+                revision: 1,
+                text: text.clone(),
+            })
+            .collect();
+        let draft = context.shared_notes.clone();
+        let error = update_context(dir.path(), &context).unwrap_err();
+        assert!(error.to_string().contains("kürzen"));
+        assert_eq!(context.shared_notes, draft);
+        assert_eq!(std::fs::read(path).unwrap(), bytes);
+        assert!(!dir.path().join("context-00000002.json").exists());
+        assert!(read_state(dir.path())
+            .unwrap()
+            .context
+            .shared_notes
+            .is_empty());
+        drop(runner);
+    }
+}
+
+#[test]
+fn oversized_legacy_shared_context_remains_readable_and_can_be_shortened() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("context-00000001.json");
+    let notes = (0..20)
+        .map(|i| SharedNote {
+            id: format!("h_old_{i}"),
+            revision: 1,
+            text: "x".repeat(1600),
+        })
+        .collect::<Vec<_>>();
+    let bytes = serde_json::to_vec(&json!({"createdAt":"2026-01-01T00:00:00Z","revision":1,"reset":true,"agenda":[],"sharedNotes":notes,"overrides":[]})).unwrap();
+    std::fs::write(&path, &bytes).unwrap();
+    let runner = WorkspaceRunner::open(dir.path()).unwrap();
+    let mut context = runner.context.lock().unwrap().clone();
+    assert_eq!(context.shared_notes.len(), 20);
+    assert_eq!(read_state(dir.path()).unwrap().context, context);
+    context.shared_notes[0].text = "Shorter released context".into();
+    context.shared_notes.truncate(1);
+    let (_, saved) = update_context(dir.path(), &context).unwrap();
+    assert_eq!(saved.context.shared_notes, context.shared_notes);
+    assert_eq!(std::fs::read(path).unwrap(), bytes);
+    assert_eq!(read_state(dir.path()).unwrap().context, saved.context);
+}
+
+#[test]
+fn removed_agenda_evidence_resets_active_assessment_but_preserves_history_after_reopen() {
+    for human in [false, true] {
+        let dir = tempfile::tempdir().unwrap();
+        let mut runner = WorkspaceRunner::open(dir.path()).unwrap();
+        runner
+            .set_context(WorkspaceContext {
+                agenda: vec![Agenda {
+                    id: "e_topic".into(),
+                    revision: 1,
+                    text: "Freigabe".into(),
+                }],
+                ..Default::default()
+            })
+            .unwrap();
+        let context = runner.context.lock().unwrap().clone();
+        let mut state = runner.state.clone();
+        state.apply_context(&context).unwrap();
+        let source = LiveText {
+            key: "part".into(),
+            track: "system".into(),
+            start_ms: 0,
+            end_ms: 3000,
+            text: "Wir haben die Freigabe besprochen.".into(),
+        };
+        let processed = live::pending(&[], &[source]);
+        let id = source_id(&processed[0]);
+        let original = Source {
+            id: id.clone(),
+            source: "system".into(),
+            start_ms: 0,
+            end_ms: 3000,
+            text: processed[0].text.clone(),
+        };
+        state.originals.push(original.clone());
+        state.processed = processed;
+        state.entities[0].status = "discussed".into();
+        state.entities[0].revision = 2;
+        state.entities[0].human_locked = human;
+        state.entities[0].evidence = vec![crate::Evidence {
+            source_id: id.clone(),
+            quote: original.text.clone(),
+        }];
+        state.events.push(Event {
+            human: false,
+            id: "v_prior".into(),
+            entity_id: "e_topic".into(),
+            revision: 2,
+            at_ms: 3000,
+            text: "Freigabe".into(),
+            status: "discussed".into(),
+            evidence: state.entities[0].evidence.clone(),
+        });
+        runner
+            .commit(
+                state,
+                vec![original],
+                vec![],
+                &AnalysisControl::default(),
+                &context,
+            )
+            .unwrap();
+        let prior = std::fs::read(dir.path().join("revision-00000001.json")).unwrap();
+        assert!(runner.pending(&[]).is_empty());
+        let client = TextClient::new(&crate::Connection {
+            endpoint: "http://127.0.0.1:1/v1/".into(),
+            model: "no-inference".into(),
+            mode: "local".into(),
+            cloud_consent: false,
+            api_key: String::new(),
+        })
+        .unwrap();
+        runner
+            .update(&client, &[], &AnalysisControl::default(), "en")
+            .unwrap();
+        drop(runner);
+        let state = read_state(dir.path()).unwrap();
+        assert_eq!(state.entities[0].status, "open");
+        assert!(!state.entities[0].human_locked);
+        assert!(state.entities[0].evidence.is_empty());
+        assert!(!state.context_excluded_ids.contains(&"e_topic".into()));
+        assert_eq!(state.events[0].status, "discussed");
+        assert_eq!(state.events[0].evidence[0].source_id, id);
+        assert_eq!(
+            std::fs::read(dir.path().join("revision-00000001.json")).unwrap(),
+            prior
+        );
+    }
+}

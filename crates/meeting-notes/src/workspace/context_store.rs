@@ -171,7 +171,7 @@ pub(crate) fn update(
     folder: &Path,
     incoming: &WorkspaceContext,
 ) -> Result<(WorkspaceContext, WorkspaceState)> {
-    incoming.validate()?;
+    incoming.validate_request_budget()?;
     let _guard = lock(folder)?;
     let mut state = store::read(folder)?;
     let current = project(folder, &mut state)?;
