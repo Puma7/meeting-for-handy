@@ -634,4 +634,4 @@ it("never attaches a revoked preview URL when retrying a media failure", async (
       Object.defineProperty(URL, "revokeObjectURL", originalRevoke);
     else Reflect.deleteProperty(URL, "revokeObjectURL");
   }
-});
+}, 5_000);
