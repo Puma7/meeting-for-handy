@@ -334,8 +334,8 @@ pub(crate) fn apply(
     Ok(events)
 }
 
-// Shared exact-word polarity screen. Completion keeps its existing rules;
-// withdrawal handles only the specific "nicht mehr needed" exception below.
+// Shared exact-word polarity screen. Apostrophes tokenize "we'll"/"we’ll"
+// into "we", "ll", so their future marker must be checked as well.
 const UNCERTAIN_TERMINAL_WORDS: &[&str] = &[
     "nicht",
     "kein",
@@ -367,6 +367,7 @@ const UNCERTAIN_TERMINAL_WORDS: &[&str] = &[
 ];
 
 const ADDITIONAL_UNCERTAIN_TERMINAL_WORDS: &[&str] = &[
+    "ll",
     "nobody",
     "noone",
     "keineswegs",
@@ -399,28 +400,70 @@ const ADDITIONAL_UNCERTAIN_TERMINAL_WORDS: &[&str] = &[
     "whether",
 ];
 
-/// A recorded decision needs affirmative decision wording in a single literal
-/// quote. Negated, conditional, future and merely similar words are insufficient.
+/// Require an affirmative decision assertion. Its infinitive/that-clause may
+/// itself be negative ("decided not to ..."); that does not negate the decision.
 pub(super) fn recorded_decision_quote_allowed(quote: &str) -> bool {
     let lower = quote.to_lowercase();
     let words: Vec<_> = lower
         .split(|c: char| !c.is_alphabetic())
         .filter(|w| !w.is_empty())
         .collect();
+    let german = words.iter().position(|word| {
+        ["entscheiden", "beschließen", "beschlossen", "entschieden"].contains(word)
+    });
+    let english = words.windows(2).position(|part| {
+        [
+            ["we", "decide"],
+            ["we", "decided"],
+            ["agreed", "to"],
+            ["agreed", "not"],
+        ]
+        .contains(&[part[0], part[1]])
+    });
+    let assertion_end = if let Some(index) = german {
+        let first_clause_words = lower
+            .split(',')
+            .next()
+            .unwrap_or_default()
+            .split(|c: char| !c.is_alphabetic())
+            .filter(|w| !w.is_empty())
+            .count();
+        if first_clause_words > index && first_clause_words < words.len() {
+            first_clause_words
+        } else if let Some(negation) = words.windows(2).position(|p| p == ["nicht", "zu"]) {
+            // ASR may omit the comma before an infinitive clause. Require an
+            // intervening object and an actual infinitive after "nicht zu".
+            if negation > index + 1 && words.len() > negation + 2 {
+                negation
+            } else {
+                words.len()
+            }
+        } else {
+            words.len()
+        }
+    } else if let Some(index) = english {
+        let predicate_end = index + 2 - usize::from(words[index] == "agreed");
+        let complement = &words[predicate_end..];
+        if complement.starts_with(&["to"])
+            || complement.starts_with(&["that"])
+            || complement.starts_with(&["not", "to"])
+        {
+            predicate_end
+        } else {
+            words.len()
+        }
+    } else {
+        return false;
+    };
     if quote.contains('?')
-        || words.iter().any(|word| {
+        || words[..assertion_end].iter().any(|word| {
             UNCERTAIN_TERMINAL_WORDS.contains(word)
                 || ADDITIONAL_UNCERTAIN_TERMINAL_WORDS.contains(word)
         })
     {
         return false;
     }
-    words
-        .iter()
-        .any(|word| ["entscheiden", "beschließen", "beschlossen", "entschieden"].contains(word))
-        || words.windows(2).any(|part| {
-            [["we", "decide"], ["we", "decided"], ["agreed", "to"]].contains(&[part[0], part[1]])
-        })
+    true
 }
 
 /// Require explicit withdrawal wording in one literal quote, not a negation,
@@ -514,9 +557,10 @@ pub(super) fn completion_quote_allowed(quote: &str) -> bool {
         .filter(|s| !s.is_empty())
         .collect();
     if quote.contains('?')
-        || words
-            .iter()
-            .any(|word| UNCERTAIN_TERMINAL_WORDS.contains(word))
+        || words.iter().any(|word| {
+            UNCERTAIN_TERMINAL_WORDS.contains(word)
+                || ADDITIONAL_UNCERTAIN_TERMINAL_WORDS.contains(word)
+        })
     {
         return false;
     }

@@ -1,6 +1,136 @@
 use super::*;
 
 #[test]
+fn review22_negative_decision_content_is_distinct_from_a_negated_assertion() {
+    for (quote, allowed) in [
+        ("We decided not to release on Friday.", true),
+        ("We agreed not to start the pilot.", true),
+        ("Wir haben beschlossen, den Piloten nicht zu starten.", true),
+        ("Wir haben beschlossen den Piloten nicht zu starten.", true),
+        ("Wir beschließen, dass wir den Piloten nicht starten.", true),
+        ("We did not decide to release on Friday.", false),
+        ("We haven't agreed not to start the pilot.", false),
+        (
+            "Wir haben nicht beschlossen, den Piloten zu starten.",
+            false,
+        ),
+        ("Wir beschließen nicht, den Piloten zu starten.", false),
+        ("Wir beschließen den Pilotstart nicht.", false),
+        ("If approved, we decided not to start the pilot.", false),
+    ] {
+        let (mut state, mut request, mut answer) = setup();
+        let before = serde_json::to_vec(&state).unwrap();
+        request.purpose = "facts".into();
+        request.transcript_sources[0].text = quote.into();
+        answer["changes"][0]["kind"] = json!("decision");
+        answer["changes"][0]["text"] = json!("Pilotstart");
+        answer["changes"][0]["status"] = json!("recorded");
+        answer["changes"][0]["due"] = json!(null);
+        answer["changes"][0]["evidence"][0]["quote"] = json!(quote);
+        let result = validate::apply(&mut state, &request, &answer.to_string());
+        if allowed {
+            result.unwrap_or_else(|e| panic!("{quote}: {e}"));
+            assert_eq!(state.entities[0].status, "recorded");
+        } else {
+            assert!(result.is_err(), "{quote}");
+            assert_eq!(serde_json::to_vec(&state).unwrap(), before, "{quote}");
+        }
+    }
+}
+
+#[test]
+fn review22_contracted_future_withdrawal_cannot_close_tasks_or_decisions() {
+    review22_status_cases(
+        "withdrawn",
+        &["task", "decision"],
+        &[
+            ("We'll cancel the report tomorrow.", false),
+            ("We’ll withdraw the decision tomorrow.", false),
+            ("I'll cancel the report tomorrow.", false),
+            ("They’ll withdraw the decision tomorrow.", false),
+            ("We will cancel the report tomorrow.", false),
+            ("We cancelled the report.", true),
+            ("We withdraw the decision.", true),
+        ],
+    );
+}
+
+#[test]
+fn review22_denied_completion_preserves_the_open_task_and_its_original_evidence() {
+    review22_status_cases(
+        "completed",
+        &["task"],
+        &[
+            ("Ich habe den Bericht niemals verschickt.", false),
+            ("Ich habe den Bericht keineswegs verschickt.", false),
+            ("Ich habe den Bericht nie verschickt.", false),
+            ("Nobody has been approved.", false),
+            ("Noone has been approved.", false),
+            ("Ich habe den Bericht verschickt.", true),
+            ("I have sent the report.", true),
+        ],
+    );
+}
+
+fn review22_status_cases(status_name: &str, kinds: &[&str], cases: &[(&str, bool)]) {
+    for kind in kinds {
+        let (mut state, mut request, mut answer) = setup();
+        if *kind == "decision" {
+            request.purpose = "facts".into();
+            request.transcript_sources[0].text = "Wir beschließen den Pilotstart.".into();
+            answer["changes"][0]["kind"] = json!("decision");
+            answer["changes"][0]["text"] = json!("Pilotstart beschlossen");
+            answer["changes"][0]["status"] = json!("recorded");
+            answer["changes"][0]["evidence"][0]["quote"] = json!("Wir beschließen den Pilotstart.");
+        }
+        answer["changes"][0]["due"] = json!(null);
+        validate::apply(&mut state, &request, &answer.to_string()).unwrap();
+        let before = serde_json::to_vec(&state).unwrap();
+        for (quote, allowed) in cases {
+            let source = Source {
+                id: "s_status".into(),
+                source: "system".into(),
+                start_ms: 3000,
+                end_ms: 6000,
+                text: (*quote).into(),
+            };
+            let mut sources = request.transcript_sources.clone();
+            sources.push(source.clone());
+            let mut status = Request::new(
+                "r_status".into(),
+                &Default::default(),
+                &state,
+                state.entities.clone(),
+                std::slice::from_ref(&source),
+                sources,
+            );
+            status.purpose = if *kind == "task" { "tasks" } else { "facts" }.into();
+            let mut change = answer.clone();
+            change["requestId"] = json!("r_status");
+            change["changes"][0]["targetId"] = json!(state.entities[0].id);
+            change["changes"][0]["targetRevision"] = json!(state.entities[0].revision);
+            change["changes"][0]["text"] = json!(null);
+            change["changes"][0]["status"] = json!(status_name);
+            change["changes"][0]["evidence"] = json!([{"sourceId":"s_status","quote":quote}]);
+            let mut next = state.clone();
+            let result = validate::apply(&mut next, &status, &change.to_string());
+            if *allowed {
+                result.unwrap_or_else(|e| panic!("{kind}: {quote}: {e}"));
+                assert_eq!(next.entities[0].status, status_name);
+                assert_eq!(next.entities[0].text, state.entities[0].text);
+                assert!(state.entities[0]
+                    .evidence
+                    .iter()
+                    .all(|e| next.entities[0].evidence.contains(e)));
+            } else {
+                assert!(result.is_err(), "{kind}: {quote}");
+                assert_eq!(serde_json::to_vec(&next).unwrap(), before, "{quote}");
+            }
+        }
+    }
+}
+
+#[test]
 fn recorded_decisions_reject_negation_and_uncertainty_without_publishing_state() {
     let invalid = [
         "Wir haben den Pilotstart nicht beschlossen.",

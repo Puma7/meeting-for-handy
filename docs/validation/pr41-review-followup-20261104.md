@@ -28,11 +28,11 @@ Der vollständige TEST_REPORT bleibt byteunverändert; er wurde für diese Nacha
 
 | Prüfung | Ergebnis und Bezug |
 | --- | --- |
-| Rust-Workspace / alle Targets | 539 frisch bestanden, darunter 143 Notizen- und 34 Providerprotokolltests; drei bestehende besondere Einstiege regulär ignoriert. Neue Rücknahme-/Beschlussregressionen sind enthalten. |
+| Rust-Workspace / alle Targets | 542 frisch bestanden, darunter 146 Notizen- und 34 Providerprotokolltests; drei bestehende besondere Einstiege regulär ignoriert. Die drei zusätzlichen Statusregressionen sind enthalten. |
 | Rustformat / Clippy | Auf diesem Korrekturstand frisch bestanden; gesperrte Abhängigkeiten und Warnungen als Fehler. |
-| Oberfläche | 375 Tests, TypeScript, Produktionsbuild und Format frisch bestanden. Die neue Modulnamenprüfung ergänzt die sechs zuletzt hinzugefügten Layoutnamenfälle. |
+| Oberfläche | 375 Tests, TypeScript, Produktionsbuild und Format auf `89b85e8` bestanden. Sämtliche UI-Bytes sind gegenüber diesem Stand unverändert; diese Prüfungen wurden für die anschließende reine Rust-Statuskorrektur nicht erneut ausgeführt. |
 | Projektfreigabe | `verify.ps1` vor jeder Bereitstellung: 47 PCM-, 35 Notizen-, 28 Vorlagen-, acht Agenten- und Monitorprüfungen bestanden. Der folgende Quellupload bleibt an einen abschließenden erfolgreichen Lauf gebunden. |
-| Echte lokale englische Referenz | Auf diesem Status-/Modulnamenkorrekturstand 138,1599687 s, keine Validierungswiederholung. Positive Aufgabe, unverbindliche Aussage, Impulserhalt, menschlicher Status nach Protokolländerung und bytegleiche Wiederöffnung bestanden. Die früheren Läufe auf `1768125` mit 129,685532 s und auf `34c1b20` mit 138,0743712 s bleiben erhalten und werden nicht als neu ausgeführt gezählt. |
+| Echte lokale englische Referenz | Nach den drei zusätzlichen Statuskorrekturen 125,2169942 s, keine Validierungswiederholung. Positive Aufgabe, unverbindliche Aussage, Impulserhalt, menschlicher Status nach Protokolländerung und bytegleiche Wiederöffnung bestanden. Die früheren Läufe auf `89b85e8` mit 138,1599687 s, auf `1768125` mit 129,685532 s und auf `34c1b20` mit 138,0743712 s bleiben erhalten und werden nicht als neu ausgeführt gezählt. |
 | Frühere lokale Referenzen | Deutsch 100,9989873 s und Englisch 125,0518623 s auf dem Elternstand `3d4d013`, jeweils ohne Validierungswiederholung. Die deutsche Zusage enthält tatsächlich „jedenfalls“. Diese Läufe werden nicht als erneut ausgeführt ausgegeben. |
 | Langsammodell / zwei Spuren | Historischer, ausdrücklich ausgeführter besonderer Test auf `1768125`: 244,43 s Laufzeit, 210 s kontrollierte SSE-Antwortpause, nächster Refresh nach 210,0497661 s, maximal eine Modellanfrage, ein erhaltener Impuls. Je 3.706.880 Samples / 16.000 Hz = 231,68 s pro synthetischer Spur. Beide dauerhaften PCM-Schreiber liefen nach dem Auswertungsstopp weiter. Der frühere Lauf auf `3d4d013` bleibt ebenfalls historischer Beleg. Für diese reine Status-/Beschriftungsnacharbeit wurde der lange Test nicht erneut ausgeführt; sein Worker-/Transport-/Aufnahmecode ist byteunverändert. |
 | Browsergegenprüfung | Tatsächliche Sidebar-/RecordingStatus-Komponenten auf `3d4d013`, danach unveränderte Sidebar-/Status-/CSS-Bytes: bei 390/740/1280 px ausgeklappt alle vier Statusfelder sichtbar, eingeklappt verborgen; Rechnerdetails erreichbar, keine Konsolenfehler. |
@@ -40,7 +40,7 @@ Der vollständige TEST_REPORT bleibt byteunverändert; er wurde für diese Nacha
 Die echten Referenzen verwendeten ausschließlich synthetischen Text und das vorhandene
 **google/gemma-4-e4b Q4_K_M** mit 6.326.936.720 Modellbytes, LM Studio **0.4.26.0**,
 Windows 11 Pro **26200**, Intel **i7-13700** und rund **64 GiB** physischem RAM.
-Keine Downloads, Cloud oder Nutzermeetings. UI-Prüfungen liefen zeitweise parallel.
+Keine Downloads, Cloud oder Nutzermeetings. Bei früheren Referenzen liefen UI-Prüfungen zeitweise parallel; beim aktuellen Referenzlauf liefen keine weiteren eigenen Tests.
 Die Referenzdauer umfasst Modellverarbeitung, Abschluss und Wiederöffnung.
 Bei den früheren Referenzen wurden Working Set, Private Bytes und Grafikspeicher nicht gemessen.
 Beim vorherigen englischen Lauf auf `1768125` wurde am 4. November um 20:20:14 UTC eine einzelne Stichprobe des
@@ -133,8 +133,8 @@ abgesicherten Gegenfällen abgewiesen. „Nicht mehr“ allein reicht nicht: Ein
 mehr benötigte Anforderung bleibt zulässig, „nicht mehr zurücknehmen“ wird nicht umgekehrt.
 Die Gegenprüfung wies denselben Fehler für neue Beschlüsse nach; auch diese müssen nun ein
 bejahendes, nicht nur ähnlich geschriebenes Beschlusssignal aus einem einzelnen Zitat tragen.
-Die bisherigen 27 Wörter der Erledigungsprüfung sind unverändert, weitere Negationen gelten für
-die beiden neuen Prüfungen. Das ist ein begrenzter lexikalischer Schutz, kein Beweis der inhaltlichen Deutung.
+Die damalige Korrektur ließ die 27 Wörter der Erledigungsprüfung unverändert und ergänzte weitere
+Negationen nur für die beiden neuen Prüfungen; die nachfolgende Runde korrigiert diese Lücke ebenfalls. Das ist ein begrenzter lexikalischer Schutz, kein Beweis der inhaltlichen Deutung.
 
 Vorher akzeptierte die native Validierung 40 von 42 unzulässigen Rücknahmefällen und alle zwölf
 zunächst geprüften falschen Beschlussfälle. Zusätzliche Fälle mit „nobody“, „noone“ und „keineswegs“
@@ -150,6 +150,28 @@ Browser-Popover-, Screenreader- oder native IPC-Prüfung.
 Der Archivquellentest schließt seinen Dienst und entfernt nur seinen frisch erzeugten Testordner
 mit dem vorhandenen geprüften Hilfsaufruf: kanonischer unmittelbarer Temp-Unterordner, eigener
 Namenspräfix und kein symbolischer Link. Alte Testreste oder Nutzerordner werden dabei nicht gesucht.
+
+## Zusätzliche Codex-Gegenfälle: Status und Aussagebereich
+
+Die nächste Codex-Prüfung auf `89b85e8` fand drei gültige Probleme, keine saubere Runde:
+Eine Entscheidung gegen eine Handlung wurde als verneinter Beschluss verworfen; „we’ll“ konnte
+als aktuelle Rücknahme gelten; „niemals/keineswegs verschickt“ konnte eine offene Aufgabe abschließen.
+Alle drei neuen Regressionstests scheiterten vor der Korrektur am tatsächlichen öffentlichen Validator.
+
+Die Beschlussprüfung unterscheidet jetzt die bejahte Beschlussaussage von ihrem nachfolgenden
+Infinitiv-/dass-Inhalt. „We decided not to release …“ und „Wir haben beschlossen, den Piloten nicht
+zu starten“ sind zulässig; „nicht beschlossen“ und „beschließen nicht, …“ bleiben abgewiesen.
+Englische gerade und typografische Apostrophe ergeben denselben geprüften Zukunftsmarker.
+Die zusätzlichen Negationswörter gelten jetzt auch für Erledigung. Die Modellantwort bleibt weiterhin
+an ein einzelnes vorhandenes wörtliches Zitat gebunden; der Schutz ist keine vollständige Sprachanalyse.
+
+32 zusätzliche Fallprüfungen bestehen: elf Beschlussfälle, 14 Rücknahmefälle für Aufgaben/Beschlüsse
+und sieben Erledigungsfälle. Zusammen mit den vorherigen 90 Fällen sind das 122 Statusgegenprüfungen.
+Abgewiesene Übergänge bewahren die gesamten serialisierten Zustandsbytes; erlaubte Änderungen
+bewahren den ursprünglichen Aufgabentext und sämtliche ursprünglichen Belege.
+Der erste breitere Lauf war durch beschränkte lokale Datei-/Verbindungsrechte blockiert und wurde
+kontrolliert beendet; er zählt nicht als bestandene Prüfung. Der anschließende vollständige Lauf
+bestand mit den erforderlichen lokalen Ausführungsrechten, unveränderten Prüfregeln und gesperrten Paketen.
 
 ## Reviewabdeckung und Veröffentlichung
 
