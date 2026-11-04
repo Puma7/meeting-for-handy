@@ -975,6 +975,9 @@ a {
   background: var(--accent);
   color: white;
 }
+.theme-dark .add-topic .icon-button {
+  color: #122444;
+}
 .attachments {
   padding: 14px;
   border-top: 1px solid var(--line);

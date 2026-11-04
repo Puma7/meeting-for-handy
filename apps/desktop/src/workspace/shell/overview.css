@@ -521,6 +521,9 @@
   .overview-column {
     display: contents;
   }
+  .column-drop-zone {
+    position: relative;
+  }
   .column-resize {
     display: none;
   }

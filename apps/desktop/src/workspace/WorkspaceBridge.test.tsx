@@ -1132,6 +1132,45 @@ it("rejects a newly over-budget topic share but preserves the draft and permits 
   ).toHaveLength(7500);
 });
 
+it.each(["de", "en"] as const)(
+  "reports a rejected manual status change and permits an explicit later retry in %s",
+  async (language) => {
+    const f = fixture();
+    f.adapter.context.mockImplementationOnce(async () => false);
+    render(
+      <LiveWorkspace
+        adapter={f.adapter}
+        meeting={f.meeting}
+        language={language}
+        onBack={() => {}}
+      />,
+    );
+    fireEvent.click(
+      await screen.findByRole("tab", {
+        name: language === "de" ? "Impulse" : "Prompts",
+      }),
+    );
+    const label = language === "de" ? "Besprochen" : "Discussed";
+    fireEvent.click(screen.getByRole("button", { name: label }));
+    await waitFor(() => expect(f.adapter.context).toHaveBeenCalledOnce());
+    expect(f.status.view.workspace.entities[0].status).toBe("open");
+    expect(
+      await screen.findByText(
+        language === "de"
+          ? "Die Änderung wurde nicht übernommen. Bitte aktuellen Auswertungsstand abwarten und erneut versuchen."
+          : "The change was not applied. Wait for the current analysis state and try again.",
+      ),
+    ).toBeTruthy();
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 2100));
+    });
+    expect(f.adapter.context).toHaveBeenCalledOnce();
+    fireEvent.click(screen.getByRole("button", { name: label }));
+    await waitFor(() => expect(f.adapter.context).toHaveBeenCalledTimes(2));
+    expect(f.status.view.workspace.entities[0].status).toBe("discussed");
+  },
+);
+
 it("translates pending and unavailable audio-preview states", async () => {
   const f = fixture();
   let fail!: (error: Error) => void;

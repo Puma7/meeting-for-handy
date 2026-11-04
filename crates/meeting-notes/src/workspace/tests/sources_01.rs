@@ -60,7 +60,7 @@ fn removed_text_withdraws_active_authority_but_retains_originals_and_manual_ids(
     assert!(runner.pending(&[]).is_empty());
     assert!(runner.context_dirty());
     let client = TextClient::new(&crate::Connection {
-        endpoint: "http://127.0.0.1:1235/v1/".into(),
+        endpoint: "http://127.0.0.1:1/v1/".into(),
         model: "unused-no-inference".into(),
         mode: "local".into(),
         cloud_consent: false,

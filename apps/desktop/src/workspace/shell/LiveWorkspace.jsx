@@ -284,7 +284,7 @@ function WorkspaceContents({
         blocked.current ||
         !hydrated.current
       )
-        return;
+        return false;
       // Older browser caches may contain an inadmissible pending note. Retain its
       // text locally, restore the last native note as the shared snapshot, and let
       // independent topic revocations proceed instead of retrying invalid writes.
@@ -326,7 +326,7 @@ function WorkspaceContents({
         setError(t(CONTEXT_BUDGET_MESSAGE));
       }
       const updating = latestStatus.current?.status === "updating";
-      if (updating && !extra) return;
+      if (updating && !extra) return false;
       const next = extra
         ? {
             ...context.current,
@@ -358,15 +358,18 @@ function WorkspaceContents({
           current.current = saved;
           setState(saved);
         }
-        return;
+        return true;
       }
       if (sharedContextSize(next) > SHARED_CONTEXT_LIMIT) {
+        if (extra) throw new Error(t(CONTEXT_BUDGET_MESSAGE));
         setError(t(CONTEXT_BUDGET_MESSAGE));
-        return;
+        return false;
       }
       const accepted = await adapter.context(next, runId);
-      if (accepted === false) return; // Native inference won the race; retry after its publication.
-      if (contextRun.current !== runId || !alive.current) return;
+      // State-derived inputs remain pending for a later poll; an extra human
+      // override must be explicitly retried against the then-current revision.
+      if (accepted === false) return false;
+      if (contextRun.current !== runId || !alive.current) return false;
       context.current = { ...next, revision: next.revision + 1 };
       const saved = {
         ...acknowledgeSharedTopics(current.current, next.agenda),
@@ -387,6 +390,7 @@ function WorkspaceContents({
       };
       current.current = saved;
       setState(saved);
+      return true;
     };
     const pending = contextQueue.current.then(send, send);
     contextQueue.current = pending.catch(() => {});
@@ -452,12 +456,19 @@ function WorkspaceContents({
       return;
     }
     try {
-      await syncContext({
+      const published = await syncContext({
         id: item.id,
         expectedRevision: item.revision,
         status: value,
         saved: Boolean(state.impulseStates[item.id]?.saved),
       });
+      if (!alive.current) return;
+      if (published === false)
+        setError(
+          t(
+            "Die Änderung wurde nicht übernommen. Bitte aktuellen Auswertungsstand abwarten und erneut versuchen.",
+          ),
+        );
       await poll();
     } catch (e) {
       setError(String(e));

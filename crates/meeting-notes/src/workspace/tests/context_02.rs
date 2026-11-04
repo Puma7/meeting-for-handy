@@ -198,7 +198,7 @@ fn numbered_human_agenda_can_change_status_without_generating_a_title_claim() {
 fn durable_human_activity_selects_the_last_edited_model_without_new_inference() {
     let root = tempfile::tempdir().unwrap();
     let connection = |model: &str| crate::Connection {
-        endpoint: "http://127.0.0.1:1235/v1/".into(),
+        endpoint: "http://127.0.0.1:1/v1/".into(),
         model: model.into(),
         mode: "local".into(),
         cloud_consent: false,

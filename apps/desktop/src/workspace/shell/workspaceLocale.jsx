@@ -3,6 +3,8 @@ import { createContext, useContext } from "react";
 export const WorkspaceLanguage = createContext("de");
 
 const english = {
+  "Die Änderung wurde nicht übernommen. Bitte aktuellen Auswertungsstand abwarten und erneut versuchen.":
+    "The change was not applied. Wait for the current analysis state and try again.",
   "Freigegebene Vorbereitung und Notizen sind zu groß. Bitte Text kürzen oder weniger Themen freigeben; private Entwürfe bleiben erhalten.":
     "Shared preparation and notes are too long. Shorten the text or share fewer topics; private drafts are retained.",
   durchsuchen: "search",
