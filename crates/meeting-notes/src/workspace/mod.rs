@@ -192,6 +192,7 @@ impl WorkspaceRunner {
             .state
             .processed
             .iter()
+            .chain(&self.state.inherited_sources)
             .map(|s| s.id.clone())
             .collect::<HashSet<_>>();
         for source in &mut pending {

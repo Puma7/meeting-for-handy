@@ -2102,6 +2102,113 @@ fn oversized_legacy_shared_context_remains_readable_and_can_be_shortened() {
 }
 
 #[test]
+fn restored_inherited_wording_gets_fresh_source_authority_and_stays_processed_after_reopen() {
+    let (mut previous, mut req, mut answer) = setup();
+    let text = LiveText {
+        key: "original".into(),
+        track: "system".into(),
+        start_ms: 0,
+        end_ms: 3000,
+        text: req.transcript_sources[0].text.clone(),
+    };
+    let inherited = live::pending(&[], std::slice::from_ref(&text)).remove(0);
+    let old_id = source_id(&inherited);
+    req.transcript_sources[0].id = old_id.clone();
+    req = Request::new(
+        "r_test".into(),
+        &WorkspaceContext::default(),
+        &previous,
+        vec![],
+        &req.transcript_sources,
+        req.transcript_sources.clone(),
+    );
+    answer["changes"][0]["evidence"][0]["sourceId"] = json!(old_id);
+    validate::apply(&mut previous, &req, &answer.to_string()).unwrap();
+    previous.originals = req.transcript_sources.clone();
+    previous.processed.push(inherited.clone());
+    previous.entities[0].human_locked = true;
+    let dir = tempfile::tempdir().unwrap();
+    let mut runner = WorkspaceRunner::open(dir.path()).unwrap();
+    runner.set_context(Default::default()).unwrap();
+    runner.inherit_manual(&previous).unwrap();
+    assert!(runner.state.processed.is_empty());
+    assert!(runner.pending(&[]).is_empty());
+    let client = TextClient::new(&crate::Connection {
+        endpoint: "http://127.0.0.1:1/v1/".into(),
+        model: "no-request".into(),
+        mode: "local".into(),
+        cloud_consent: false,
+        api_key: String::new(),
+    })
+    .unwrap();
+    runner
+        .update(&client, &[], &AnalysisControl::default(), "en")
+        .unwrap();
+    assert!(runner.state.superseded_sources.contains(&old_id));
+    let restored = runner.pending(std::slice::from_ref(&text));
+    assert_eq!(restored.len(), 1);
+    assert_ne!(restored[0].id, inherited.id);
+    let new_id = source_id(&restored[0]);
+    assert_ne!(new_id, old_id);
+    let original = Source {
+        id: new_id.clone(),
+        source: "system".into(),
+        start_ms: 0,
+        end_ms: 3000,
+        text: text.text.clone(),
+    };
+    let context = runner.context.lock().unwrap().clone();
+    let mut next = runner.state.clone();
+    let request = Request::new(
+        "r_test".into(),
+        &context,
+        &next,
+        vec![],
+        std::slice::from_ref(&original),
+        vec![original.clone()],
+    );
+    answer["changes"][0]["evidence"][0]["sourceId"] = json!(new_id);
+    validate::apply(&mut next, &request, &answer.to_string()).unwrap();
+    next.originals.push(original.clone());
+    next.processed.extend(restored);
+    runner
+        .commit(
+            next,
+            vec![original],
+            vec![],
+            &AnalysisControl::default(),
+            &context,
+        )
+        .unwrap();
+    drop(runner);
+    let runner = WorkspaceRunner::open(dir.path()).unwrap();
+    assert!(runner.pending(&[text]).is_empty());
+    assert!(!runner.context_dirty());
+    let state = runner.view();
+    assert!(state.originals.iter().any(|source| source.id == old_id));
+    assert!(state.originals.iter().any(|source| source.id == new_id));
+    assert!(!state.superseded_sources.contains(&new_id));
+    assert_eq!(runner.active_sources().len(), 1);
+    let mut classic = crate::live::LiveRunner::start(
+        &dir.path().join("display"),
+        "meeting",
+        crate::Connection {
+            endpoint: "http://127.0.0.1:1/v1/".into(),
+            model: "no-request".into(),
+            mode: "local".into(),
+            cloud_consent: false,
+            api_key: String::new(),
+        },
+        "en",
+    )
+    .unwrap()
+    .view();
+    classic.attach_workspace(state);
+    assert_eq!(classic.tasks.len(), 1);
+    assert_eq!(classic.tasks[0].evidence[0].source_id, new_id);
+}
+
+#[test]
 fn removed_agenda_evidence_resets_active_assessment_but_preserves_history_after_reopen() {
     for human in [false, true] {
         let dir = tempfile::tempdir().unwrap();
