@@ -745,6 +745,13 @@ it.each([
       );
     pointer("pointerdown", 450, 450);
     pointer("pointermove", 250, 30);
+    expect(
+      screen.getByText(
+        language === "en"
+          ? "Insert here: Conversation prompts"
+          : "Hier einfügen: Gesprächsimpulse",
+      ),
+    ).toBeTruthy();
     pointer("pointerup", 250, 30);
     expect(
       within(left).getByRole("button", {

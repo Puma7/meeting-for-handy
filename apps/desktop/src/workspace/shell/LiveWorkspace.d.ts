@@ -1,3 +1,4 @@
+/// <reference types="vite/client" />
 import type { ReactElement } from "react";
 export function LiveWorkspace(props: {
   adapter: unknown;
