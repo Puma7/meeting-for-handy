@@ -469,6 +469,7 @@ function WorkspaceContents({
             "Die Änderung wurde nicht übernommen. Bitte aktuellen Auswertungsstand abwarten und erneut versuchen.",
           ),
         );
+      else setError(null);
       await poll();
     } catch (e) {
       setError(String(e));

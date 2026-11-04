@@ -1168,6 +1168,16 @@ it.each(["de", "en"] as const)(
     fireEvent.click(screen.getByRole("button", { name: label }));
     await waitFor(() => expect(f.adapter.context).toHaveBeenCalledTimes(2));
     expect(f.status.view.workspace.entities[0].status).toBe("discussed");
+    await screen.findByRole("button", {
+      name: language === "de" ? "Wieder öffnen" : "Reopen",
+    });
+    expect(
+      screen.queryByText(
+        language === "de"
+          ? "Die Änderung wurde nicht übernommen. Bitte aktuellen Auswertungsstand abwarten und erneut versuchen."
+          : "The change was not applied. Wait for the current analysis state and try again.",
+      ),
+    ).toBeNull();
   },
 );
 
