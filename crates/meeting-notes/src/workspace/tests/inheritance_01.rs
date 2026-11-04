@@ -1,6 +1,138 @@
 use super::*;
 
 #[test]
+fn inherited_confirmations_keep_multi_entity_order_and_exact_reopen_state() {
+    for (target, append_new) in [(0, false), (1, false), (2, false), (0, true)] {
+        let dir = tempfile::tempdir().unwrap();
+        let mut runner = WorkspaceRunner::open(dir.path()).unwrap();
+        runner.set_context(Default::default()).unwrap();
+        let context = runner.context.lock().unwrap().clone();
+        let sources: Vec<_> = [
+            "Ich gebe den Entwurf morgen frei.",
+            "Ich prüfe die Unterlagen morgen.",
+            "Ich schreibe den Bericht morgen.",
+        ]
+        .iter()
+        .enumerate()
+        .map(|(i, quote)| Source {
+            id: format!("s_order_{i}"),
+            source: "system".into(),
+            start_ms: i as u64 * 3000,
+            end_ms: i as u64 * 3000 + 3000,
+            text: (*quote).into(),
+        })
+        .collect();
+        let mut state = WorkspaceState::default();
+        state.apply_context(&context).unwrap();
+        let request = Request::new(
+            "r_order".into(),
+            &context,
+            &state,
+            vec![],
+            &sources,
+            sources.clone(),
+        );
+        let changes: Vec<_> = sources.iter().enumerate().map(|(i, source)| json!({
+            "proposalId":format!("p_order_{i}"),"kind":"task","targetId":null,"targetRevision":null,
+            "text":(["Entwurf freigeben","Unterlagen prüfen","Bericht schreiben"][i]),
+            "status":"open","attention":"normal","owner":null,"due":null,
+            "evidence":[{"sourceId":source.id,"quote":source.text}],"relatedEntityIds":[]
+        })).collect();
+        let answer = json!({"contractVersion":CONTRACT_VERSION,"requestId":"r_order","changes":changes,
+            "overviewRefs":[],"unresolvedContextIds":[],"moreChangesPossible":false});
+        validate::apply(&mut state, &request, &answer.to_string()).unwrap();
+        state.originals = sources.clone();
+        runner
+            .commit(
+                state,
+                sources,
+                vec![],
+                &AnalysisControl::default(),
+                &context,
+            )
+            .unwrap();
+        let original_order: Vec<_> = runner.state.entities.iter().map(|e| e.id.clone()).collect();
+        let saved_before: Vec<_> = std::fs::read_dir(dir.path())
+            .unwrap()
+            .map(|e| e.unwrap().path())
+            .filter(|p| p.extension().is_some_and(|e| e == "json"))
+            .map(|p| {
+                let bytes = std::fs::read(&p).unwrap();
+                (p, bytes)
+            })
+            .collect();
+        let mut incoming = runner.state.clone();
+        let selected = &mut incoming.entities[target];
+        selected.human_locked = true;
+        selected.status = "completed".into();
+        selected.revision += 1;
+        let id = selected.id.clone();
+        incoming.human_activity.insert(
+            id.clone(),
+            chrono::DateTime::parse_from_rfc3339("2026-01-01T00:00:03Z").unwrap(),
+        );
+        let appended_id = if append_new {
+            let mut added = incoming.entities[1].clone();
+            added.id = "e_appended_confirmation".into();
+            added.human_locked = true;
+            incoming.human_activity.insert(
+                added.id.clone(),
+                chrono::DateTime::parse_from_rfc3339("2026-01-01T00:00:04Z").unwrap(),
+            );
+            let id = added.id.clone();
+            incoming.entities.push(added);
+            Some(id)
+        } else {
+            None
+        };
+        // Source-run display order is not authority to reorder the destination.
+        incoming.entities.reverse();
+        runner.inherit_manual(&incoming).unwrap();
+        let expected = runner.view();
+        let reopened = read_state(dir.path()).unwrap();
+        assert_eq!(
+            expected.entities, reopened.entities,
+            "target={target}, append={append_new}"
+        );
+        assert_eq!(
+            serde_json::to_vec(&expected).unwrap(),
+            serde_json::to_vec(&reopened).unwrap()
+        );
+        assert_eq!(expected.human_activity, reopened.human_activity);
+        let mut expected_order = original_order;
+        if let Some(id) = appended_id {
+            expected_order.push(id);
+        }
+        assert_eq!(
+            expected
+                .entities
+                .iter()
+                .map(|e| e.id.clone())
+                .collect::<Vec<_>>(),
+            expected_order
+        );
+        let confirmed = expected.entities.iter().find(|e| e.id == id).unwrap();
+        assert_eq!(confirmed.status, "completed");
+        assert!(confirmed.human_locked);
+        for (path, bytes) in saved_before {
+            assert_eq!(std::fs::read(path).unwrap(), bytes);
+        }
+        let revision = runner.state.revision;
+        runner.inherit_manual(&incoming).unwrap();
+        assert_eq!(
+            runner.state.revision, revision,
+            "same confirmation must be idempotent"
+        );
+        drop(runner);
+        let runner = WorkspaceRunner::open(dir.path()).unwrap();
+        assert_eq!(
+            serde_json::to_vec(&runner.view()).unwrap(),
+            serde_json::to_vec(&expected).unwrap()
+        );
+    }
+}
+
+#[test]
 fn new_model_run_inherits_manual_state_and_preserves_its_evidence() {
     let (mut previous, req, answer) = setup();
     validate::apply(&mut previous, &req, &answer.to_string()).unwrap();

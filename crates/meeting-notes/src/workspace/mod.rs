@@ -112,8 +112,13 @@ impl WorkspaceRunner {
                 next.human_activity.insert(entity.id.clone(), *at);
             }
             selected.insert(entity.id.clone());
-            next.entities.retain(|old| old.id != entity.id);
-            next.entities.push(entity);
+            // Journal replay replaces existing IDs in place. Keep the same
+            // order in memory; only genuinely new inherited IDs are appended.
+            if let Some(slot) = next.entities.iter_mut().find(|old| old.id == entity.id) {
+                *slot = entity;
+            } else {
+                next.entities.push(entity);
+            }
         }
         if selected.is_empty() {
             return Ok(());

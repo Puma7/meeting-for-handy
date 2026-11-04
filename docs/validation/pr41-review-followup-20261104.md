@@ -1,6 +1,6 @@
 # PR 41: Validierungsstand
 
-Stand: 4. November 2026. Version: **1.1.0-beta.1**, unverändert.
+Stand: 5. November 2026. Version: **1.1.0-beta.1**, unverändert.
 Dieser Vermerk beschreibt die tatsächlich geprüften Funktionen und ihre Grenzen.
 Ausführliche frühere Fassungen bleiben in der Git-Historie und den privaten Belegen erhalten.
 Der vollständige TEST_REPORT bleibt byteunverändert; er wurde für diese Nacharbeit nicht neu veröffentlicht.
@@ -28,14 +28,14 @@ Der vollständige TEST_REPORT bleibt byteunverändert; er wurde für diese Nacha
 
 | Prüfung | Ergebnis und Bezug |
 | --- | --- |
-| Rust-Workspace / alle Targets | 544 frisch bestanden, darunter 148 Notizen- und 34 Providerprotokolltests; drei bestehende besondere Einstiege regulär ignoriert. Die Status- und neuen Zusagen-/Ablehnungsregressionen sind enthalten; einer der besonderen Einstiege wurde zusätzlich ausdrücklich ausgeführt (siehe Langsammodell). |
+| Rust-Workspace / alle Targets | 545 frisch bestanden, darunter 149 Notizen- und 34 Providerprotokolltests; drei bestehende besondere Einstiege regulär ignoriert. Status-, Zusagen-/Ablehnungs- und neue Mehrfacheintrags-Wiederöffnungsregressionen sind enthalten. Der unten getrennt ausgewiesene Langsamtest stammt vom vorherigen Stand. |
 | Rustformat / Clippy | Auf diesem Korrekturstand frisch bestanden; gesperrte Abhängigkeiten und Warnungen als Fehler. |
-| Oberfläche | 375 Tests, TypeScript, Produktionsbuild und vollständiger Formatcheck unter src frisch bestanden. Eine zusätzlich gefundene gemischte letzte Zeile einer Typdeklaration wurde ausschließlich von CRLF zu LF vereinheitlicht; Deklarationstoken unverändert, TypeScript/Build/Format danach erneut bestanden. |
+| Oberfläche | 375 Tests, TypeScript, Produktionsbuild und vollständiger Formatcheck unter src auf `aa63003` bestanden. Alle Frontend-/Typ-/Abhängigkeitsbytes sind gegenüber diesem Stand unverändert, nicht lokal erneut geprüft. Die dortige letzte gemischte Zeile einer Typdeklaration wurde nur von CRLF zu LF vereinheitlicht; Deklarationstoken unverändert. |
 | Projektfreigabe | `verify.ps1` vor jeder Bereitstellung: 47 PCM-, 35 Notizen-, 28 Vorlagen-, acht Agenten- und Monitorprüfungen bestanden. Der folgende Quellupload bleibt an einen abschließenden erfolgreichen Lauf gebunden. |
-| Echte lokale Referenzen Deutsch und Englisch | Nach der gemeinsamen Zusagen-/Ablehnungskorrektur: Deutsch 109,7145876 s, Englisch 129,9766782 s, jeweils 0/0 Validierungswiederholungen (DE/EN). Positive Aufgabe, unverbindliche Aussage, Impulserhalt, menschlicher Status nach Protokolländerung und bytegleiche Wiederöffnung bestanden. Frühere Läufe auf `1e73d8f` mit 125,2169942 s, `89b85e8` mit 138,1599687 s, `1768125` mit 129,685532 s und `34c1b20` mit 138,0743712 s bleiben historische Belege. |
+| Echte lokale Referenzen Deutsch und Englisch | Auf diesem Importpositions-Korrekturstand: Deutsch 126,1410333 s mit 1 regulär zulässigen, vollständig validierten Wiederholung(en); Englisch 106,4012813 s mit 0. Beide Läufe bestanden positive Aufgabe, unverbindliche Aussage, Impulserhalt, menschlichen Status nach Protokolländerung und bytegleiche Wiederöffnung. Die vorherigen Läufe auf `aa63003` mit DE 109,7145876 s / EN 129,9766782 s und jeweils null Wiederholungen bleiben historische Nachweise. Die vorhandene Wiederholungsregel wurde nicht verändert und der Lauf nicht für eine Nullzählung wiederholt. |
 | Frühere lokale Referenzen | Deutsch 100,9989873 s und Englisch 125,0518623 s auf dem Elternstand `3d4d013`, jeweils ohne Validierungswiederholung. Die deutsche Zusage enthält tatsächlich „jedenfalls“. Diese Läufe werden nicht als erneut ausgeführt ausgegeben. |
-| Langsammodell / zwei Spuren | Auf diesem Korrekturstand ausdrücklich neu ausgeführter besonderer Test: 244,32 s Laufzeit, 210 s kontrollierte SSE-Antwortpause, nächster Refresh nach 210,0415725 s, maximal eine Modellanfrage, ein erhaltener Impuls. Samples je Spur 3758720/3758720, jeweils geteilt durch 16.000 Hz = 234,92/234,92 s. Beide dauerhaften PCM-Schreiber liefen nach dem Auswertungsstopp weiter. Frühere Läufe auf `1768125` und `3d4d013` bleiben historische Belege. |
-| Browsergegenprüfung | Neu mit tatsächlichen Sidebar-/RecordingStatus-Komponenten und synthetischen Werten bei 390/740/1280 px: vorher aufgeklappt nur 50 px Sprachauswahl in schmalen Fenstern, nachher 161 px und vollständig lesbarer Text. Aufnahmestatus sichtbar, kein horizontaler Überlauf, Ein-/Ausklappen und Rechnerdetails erreichbar, keine Seitenfehler. Kein nativer IPC- oder Gerätezugriff. |
+| Langsammodell / zwei Spuren | Auf dem vorherigen `aa63003` ausdrücklich ausgeführter besonderer Test, hier nicht erneut ausgeführt: 244,32 s Laufzeit, 210 s kontrollierte SSE-Antwortpause, nächster Refresh nach 210,0415725 s, maximal eine Modellanfrage, ein erhaltener Impuls. Samples je Spur 3758720/3758720, jeweils geteilt durch 16.000 Hz = 234,92/234,92 s. Beide dauerhaften PCM-Schreiber liefen nach dem Auswertungsstopp weiter. Worker-, Transport-, Audio-Schreiber- und Slow-Fixture-Dateien sowie sämtlicher Workspace-Code nach dem Importabschnitt bleiben byteunverändert. Die Slow-Fixture importiert keine Bestätigungen und führt den geänderten Ersatzpfad nicht aus; dafür gelten die neuen vier Persistenzfälle. Frühere Läufe auf `1768125` und `3d4d013` bleiben historische Belege. |
+| Browsergegenprüfung | Auf `aa63003` mit tatsächlichen Sidebar-/RecordingStatus-Komponenten und synthetischen Werten bei 390/740/1280 px: vorher aufgeklappt nur 50 px Sprachauswahl in schmalen Fenstern, nachher 161 px und vollständig lesbarer Text. Aufnahmestatus sichtbar, kein horizontaler Überlauf, Ein-/Ausklappen und Rechnerdetails erreichbar, keine Seitenfehler. Frontendbytes bleiben unverändert, nicht wiederholt. Kein nativer IPC- oder Gerätezugriff. |
 
 Die echten Referenzen verwendeten ausschließlich synthetischen Text und das vorhandene
 **google/gemma-4-e4b Q4_K_M** mit 6.326.936.720 Modellbytes, LM Studio **0.4.26.0**,
@@ -203,6 +203,28 @@ Die zwei lediglich nummerierten Validator-Testmodule sind unter Erhalt aller Tes
 zusammengeführt. Dadurch bleibt auch die gemeinsame Produktionskorrektur innerhalb der unveränderten
 100-Dateien-Anbietergrenze: 102 tatsächliche PR-Dateien, weiterhin nur die zwei bisherigen Lockdatei-Filter.
 Keine Prüfkonfiguration, Frist oder Dokumentationsgrenze wurde abgeschwächt.
+
+## Vererbte Bestätigungen: Reihenfolge vor und nach Wiederöffnung
+
+Die nächste vollständige CodeRabbit-Runde auf `aa63003` prüfte alle 100 vorgesehenen Dateien ohne
+Verfügbarkeitslücke und fand einen gültigen weiteren Fehler. Beim Ersetzen eines bestehenden Eintrags
+entfernte der Import den Eintrag und hing ihn hinten an; das Journal ersetzte denselben Eintrag an
+seiner ursprünglichen Position. Laufende Ansicht und Wiederöffnung konnten dadurch abweichen.
+Die beiden damaligen sauberen Codex-Prüfungen und grünen Ziel-CI-Läufe bleiben historische Nachweise;
+die vollständige CodeRabbit-Runde war wegen dieses Befunds nicht sauber.
+
+Die neue Regression zeigte vor der Korrektur tatsächlich [zweiter, dritter, erster Eintrag] im Speicher
+gegen [erster, zweiter, dritter Eintrag] nach dem Lesen. Der Import ersetzt bestehende Kennungen jetzt
+an ihrer Position und hängt nur neue Kennungen an. Vier Varianten prüfen den ersten, mittleren und
+letzten von drei Einträgen sowie einen zusätzlichen neuen Eintrag bei umgekehrter Herkunftsreihenfolge.
+Geprüft werden ganze Entitätsfolgen, identische serialisierte Zustände, menschliche Änderungszeiten,
+unveränderte vorherige JSON-Dateien, wiederholter Import ohne neue Revision und erneutes Öffnen des Writers.
+Alle 149 Notizen-Bibliothekstests bestehen, einschließlich der neuen Regression.
+
+Der erneut zusätzlich genannte angeblich regressionsverdeckende Modellserver-Port war kein belegter
+Fehler. CodeRabbit verfolgte den konkreten Anzeigetest und seine Initialisierung bis zum Transport:
+Die URL ist gespeicherte Metadaten; kein Request wird versendet. Der Anbieter nahm auch diese Aussage
+ausdrücklich zurück. Es wurde keine Festport-Ausnahme, Netzwerkausnahme oder Prüfschwelle eingeführt.
 
 ## Reviewabdeckung und Veröffentlichung
 
