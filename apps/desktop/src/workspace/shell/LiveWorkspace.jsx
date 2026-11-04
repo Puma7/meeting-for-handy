@@ -37,6 +37,9 @@ import {
   restoreSharedContext,
   sameSharedContext,
   acknowledgeSharedTopics,
+  sharedContextSize,
+  SHARED_CONTEXT_LIMIT,
+  CONTEXT_BUDGET_MESSAGE,
 } from "./liveWorkspace.mjs";
 
 const tabs = [
@@ -282,6 +285,46 @@ function WorkspaceContents({
         !hydrated.current
       )
         return;
+      // Older browser caches may contain an inadmissible pending note. Retain its
+      // text locally, restore the last native note as the shared snapshot, and let
+      // independent topic revocations proceed instead of retrying invalid writes.
+      if (
+        current.current.protocolShare?.pending &&
+        sharedContextSize(sharedWorkspaceContext(current.current)) >
+          SHARED_CONTEXT_LIMIT
+      ) {
+        const local = current.current;
+        const pendingText = local.protocolShare.text;
+        const saved = {
+          ...local,
+          protocolShare: {
+            text: context.current.sharedNotes.map((note) => note.text).join(""),
+            revision: Math.max(
+              1,
+              ...context.current.sharedNotes.map((note) => note.revision),
+            ),
+            pending: false,
+          },
+          history: local.history.some(
+            (entry) =>
+              entry.noteKind === "protocol" && entry.content === pendingText,
+          )
+            ? local.history
+            : [
+                ...local.history,
+                {
+                  id: `note-${Date.now()}`,
+                  at: new Date().toISOString(),
+                  label: t("Notizstand gesichert"),
+                  noteKind: "protocol",
+                  content: pendingText,
+                },
+              ],
+        };
+        current.current = saved;
+        setState(saved);
+        setError(t(CONTEXT_BUDGET_MESSAGE));
+      }
       const updating = latestStatus.current?.status === "updating";
       if (updating && !extra) return;
       const next = extra
@@ -315,6 +358,10 @@ function WorkspaceContents({
           current.current = saved;
           setState(saved);
         }
+        return;
+      }
+      if (sharedContextSize(next) > SHARED_CONTEXT_LIMIT) {
+        setError(t(CONTEXT_BUDGET_MESSAGE));
         return;
       }
       const accepted = await adapter.context(next, runId);
@@ -368,6 +415,20 @@ function WorkspaceContents({
       }
   }, [state, storageKey, storageBlocked, storageReady]);
   const mutate = (action) => setState((previous) => action(previous));
+  /** Reject newly over-budget topic sharing while allowing local drafts and reductions. */
+  function changeTopics(action) {
+    const next = action(current.current);
+    const size = sharedContextSize(sharedWorkspaceContext(next));
+    if (
+      size > SHARED_CONTEXT_LIMIT &&
+      size > sharedContextSize(sharedWorkspaceContext(current.current))
+    ) {
+      setError(t(CONTEXT_BUDGET_MESSAGE));
+      return;
+    }
+    current.current = next;
+    setState(next);
+  }
   /** Run one user-requested native action and refresh its authoritative status. */
   async function action(fn) {
     if (busy) return;
@@ -426,6 +487,7 @@ function WorkspaceContents({
 
   const ctx = {
     _mutate: mutate,
+    changeTopics,
     state,
     storageKey,
     storageBlocked,
@@ -486,9 +548,16 @@ function WorkspaceContents({
                 },
               ],
       };
+      const rejected =
+        kind === "protocol" &&
+        sharedContextSize(sharedWorkspaceContext(saved)) > SHARED_CONTEXT_LIMIT;
+      if (rejected) {
+        saved.protocolShare = v.protocolShare;
+        setError(t(CONTEXT_BUDGET_MESSAGE));
+      }
       current.current = saved;
       setState(saved);
-      if (kind === "protocol")
+      if (kind === "protocol" && !rejected)
         void syncContext().catch((error) => setError(String(error)));
     },
   };
@@ -714,6 +783,9 @@ function WorkspaceContents({
               }
               onClick={() =>
                 action(async () => {
+                  const shared = sharedWorkspaceContext(state);
+                  if (sharedContextSize(shared) > SHARED_CONTEXT_LIMIT)
+                    throw new Error(t(CONTEXT_BUDGET_MESSAGE));
                   await adapter.start({
                     meetingId: meeting.id,
                     endpoint,
@@ -724,7 +796,7 @@ function WorkspaceContents({
                     useSavedKey: false,
                     intervalMs: minutes * 60000,
                     language,
-                    workspace: sharedWorkspaceContext(state),
+                    workspace: shared,
                   });
                 })
               }
@@ -972,7 +1044,7 @@ function LiveTopics({ ctx, entities, quote, override, full, onExpand }) {
   ).length;
   /** Apply a preparation edit locally while retaining its explicit sharing state. */
   function change(fn) {
-    ctx._mutate?.(fn);
+    ctx.changeTopics(fn);
   }
   return (
     <Panel

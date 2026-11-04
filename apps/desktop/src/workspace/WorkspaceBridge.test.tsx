@@ -928,6 +928,210 @@ it("does not acknowledge a context write deferred by the native inference gate",
   );
 });
 
+it.each([
+  { name: "note plus JSON overhead", note: "x".repeat(8000), topics: [] },
+  { name: "JSON-escaped text", note: '\\"\n'.repeat(1500), topics: [] },
+  {
+    name: "shared agenda plus note",
+    note: "x".repeat(2000),
+    topics: Array.from({ length: 7 }, (_, i) => ({
+      id: `e_budget_${i}`,
+      revision: 1,
+      text: "a".repeat(900),
+    })),
+  },
+])(
+  "keeps an oversized $name local and lets a later topic revocation reach native state",
+  async ({ note: text, topics }) => {
+    const f = fixture();
+    f.status.status = "waiting";
+    f.status.workspaceContext.agenda.push(...topics);
+    const mounted = render(
+      <LiveWorkspace
+        adapter={f.adapter}
+        meeting={f.meeting}
+        onBack={() => {}}
+      />,
+    );
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Fürs Protokoll" }),
+    );
+    const note = screen.getByRole("textbox", {
+      name: "Protokollnotiz",
+    }) as HTMLTextAreaElement;
+    await waitFor(() => expect(note.value).toBe("Gesicherte Protokollnotiz"));
+    fireEvent.change(note, { target: { value: text } });
+    fireEvent.blur(note);
+    await act(async () => {});
+    expect(f.adapter.context.mock.calls.length).toBe(0);
+    expect(
+      screen.getByText(/Bitte Text kürzen oder weniger Themen freigeben/),
+    ).toBeTruthy();
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 2100));
+    });
+    expect(f.adapter.context.mock.calls.length).toBe(0);
+    fireEvent.click(screen.getByRole("tab", { name: "Vorbereitung" }));
+    fireEvent.click(screen.getAllByRole("checkbox", { name: "Freigeben" })[0]);
+    await waitFor(() => expect(f.adapter.context.mock.calls.length).toBe(1), {
+      timeout: 4000,
+    });
+    expect(
+      f.status.workspaceContext.agenda.some((x) => x.id === "e_agenda"),
+    ).toBe(false);
+    expect(
+      f.status.workspaceContext.sharedNotes.map((x) => x.text).join(""),
+    ).toBe("Gesicherte Protokollnotiz");
+    mounted.unmount();
+    render(
+      <LiveWorkspace
+        adapter={f.adapter}
+        meeting={f.meeting}
+        onBack={() => {}}
+      />,
+    );
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Fürs Protokoll" }),
+    );
+    const restored = screen.getByRole("textbox", {
+      name: "Protokollnotiz",
+    }) as HTMLTextAreaElement;
+    await waitFor(() => expect(restored.value).toBe(text));
+    fireEvent.change(restored, {
+      target: { value: "Short corrected protocol" },
+    });
+    fireEvent.blur(restored);
+    await waitFor(() =>
+      expect(f.status.workspaceContext.sharedNotes[0].text).toBe(
+        "Short corrected protocol",
+      ),
+    );
+  },
+  15000,
+);
+
+it("recovers a cached over-budget pending protocol without sending it or losing a revocation", async () => {
+  const f = fixture();
+  f.status.status = "waiting";
+  const text = "x".repeat(8000);
+  localStorage.setItem(
+    `handymeeting.workspace.v1.${f.meeting.id}`,
+    JSON.stringify({
+      version: 1,
+      topics: [
+        {
+          ...f.status.workspaceContext.agenda[0],
+          shared: false,
+          pending: true,
+        },
+      ],
+      notes: { private: "PRIVATE", protocol: "Newer local draft" },
+      protocolRevision: 5,
+      protocolShare: { text, revision: 4, pending: true },
+      preparation: { goal: "", agenda: "" },
+      history: [],
+      attachments: [],
+      impulseStates: {},
+      nativeContextRunId: "run-current",
+      nativeContextRevision: 7,
+    }),
+  );
+  render(
+    <LiveWorkspace adapter={f.adapter} meeting={f.meeting} onBack={() => {}} />,
+  );
+  await waitFor(() => expect(f.adapter.context.mock.calls.length).toBe(1));
+  const sent = f.adapter.context.mock.calls[0][0];
+  expect(sent.sharedNotes.map((n) => n.text).join("")).toBe(
+    "Gesicherte Protokollnotiz",
+  );
+  expect(sent.agenda).toEqual([]);
+  fireEvent.click(screen.getByRole("button", { name: "Fürs Protokoll" }));
+  expect(
+    (
+      screen.getByRole("textbox", {
+        name: "Protokollnotiz",
+      }) as HTMLTextAreaElement
+    ).value,
+  ).toBe("Newer local draft");
+  const retained = JSON.parse(
+    localStorage.getItem(`handymeeting.workspace.v1.${f.meeting.id}`)!,
+  );
+  expect(
+    retained.history.some(
+      (entry: { content: string }) => entry.content === text,
+    ),
+  ).toBe(true);
+  expect(retained.notes.private).toBe("PRIVATE");
+});
+
+it("admits a valid Unicode protocol using native scalar accounting with shared agenda and chunk overhead", async () => {
+  const f = fixture();
+  f.status.status = "waiting";
+  f.status.workspaceContext.agenda.push(
+    ...Array.from({ length: 5 }, (_, i) => ({
+      id: `e_unicode_${i}`,
+      revision: 1,
+      text: "a".repeat(900),
+    })),
+  );
+  render(
+    <LiveWorkspace adapter={f.adapter} meeting={f.meeting} onBack={() => {}} />,
+  );
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Fürs Protokoll" }),
+  );
+  const note = screen.getByRole("textbox", { name: "Protokollnotiz" });
+  fireEvent.change(note, { target: { value: "🙂".repeat(1800) } });
+  fireEvent.blur(note);
+  await waitFor(() => expect(f.adapter.context.mock.calls.length).toBe(1));
+  const sent = f.adapter.context.mock.calls[0][0];
+  const serialized = JSON.stringify([sent.agenda, sent.sharedNotes]);
+  expect(serialized.length).toBeGreaterThan(8000);
+  expect(Array.from(serialized).length).toBeLessThanOrEqual(8000);
+  expect(sent.sharedNotes.map((x) => x.text).join("")).toBe("🙂".repeat(1800));
+  expect(sent.sharedNotes).toHaveLength(2);
+});
+
+it("rejects a newly over-budget topic share but preserves the draft and permits a topic withdrawal", async () => {
+  const f = fixture();
+  f.status.status = "waiting";
+  f.status.workspaceContext.sharedNotes = Array.from({ length: 5 }, (_, i) => ({
+    id: `h_protocol_${i}`,
+    revision: 3,
+    text: "x".repeat(Math.min(1600, 7500 - i * 1600)),
+  }));
+  render(
+    <LiveWorkspace adapter={f.adapter} meeting={f.meeting} onBack={() => {}} />,
+  );
+  fireEvent.click(await screen.findByRole("tab", { name: "Vorbereitung" }));
+  const text = "New topic " + "a".repeat(170);
+  fireEvent.change(
+    screen.getByRole("textbox", { name: "Neuer Gesprächspunkt" }),
+    { target: { value: text } },
+  );
+  fireEvent.click(
+    screen.getByRole("button", { name: "Gesprächspunkt hinzufügen" }),
+  );
+  const checkboxes = screen.getAllByRole("checkbox", {
+    name: "Freigeben",
+  }) as HTMLInputElement[];
+  fireEvent.click(checkboxes[1]);
+  expect(checkboxes[1].checked).toBe(false);
+  expect(screen.getByText(text)).toBeTruthy();
+  expect(
+    screen.getByText(/Bitte Text kürzen oder weniger Themen freigeben/),
+  ).toBeTruthy();
+  expect(f.adapter.context.mock.calls.length).toBe(0);
+  fireEvent.click(checkboxes[0]);
+  await waitFor(() => expect(f.adapter.context.mock.calls.length).toBe(1), {
+    timeout: 4000,
+  });
+  expect(f.adapter.context.mock.calls[0][0].agenda).toEqual([]);
+  expect(
+    f.status.workspaceContext.sharedNotes.map((x) => x.text).join(""),
+  ).toHaveLength(7500);
+});
+
 it("translates pending and unavailable audio-preview states", async () => {
   const f = fixture();
   let fail!: (error: Error) => void;

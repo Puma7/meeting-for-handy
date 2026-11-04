@@ -66,6 +66,109 @@ const load = {
 
 beforeEach(() => localStorage.clear());
 
+it.each(["de", "en"] as const)(
+  "reports only active backlog warning reasons in %s",
+  (locale) => {
+    const { container } = render(
+      <RecordingStatus
+        locale={locale}
+        paused={false}
+        durationMs={1000}
+        parts={[]}
+        warningCount={0}
+        microphoneSilent={false}
+        microphoneMuted={false}
+        backlogMs={31_000}
+        onOpen={() => {}}
+      />,
+    );
+    expect(
+      container.querySelector(".sidebar-recording-head")!.getAttribute("title"),
+    ).toBe(
+      locale === "de"
+        ? "Aufnahme prüfen: Erkennung im Rückstand"
+        : "Check recording: Transcription behind",
+    );
+  },
+);
+
+it.each(["de", "en"] as const)(
+  "announces new collapsed-sidebar warning reasons without repeating unchanged polls in %s",
+  (locale) => {
+    const props = {
+      locale,
+      paused: false,
+      durationMs: 1000,
+      parts: [],
+      warningCount: 0,
+      microphoneSilent: false,
+      microphoneMuted: false,
+      backlogMs: 0,
+      onOpen: () => {},
+    };
+    const view = render(
+      <div className="sidebar is-collapsed">
+        <RecordingStatus {...props} />
+      </div>,
+    );
+    const region = screen.getByRole("status");
+    expect(region.getAttribute("aria-live")).toBe("polite");
+    expect(region.textContent).toBe("");
+    const update = (patch: Partial<typeof props>) =>
+      view.rerender(
+        <div className="sidebar is-collapsed">
+          <RecordingStatus {...props} {...patch} />
+        </div>,
+      );
+    update({ microphoneSilent: true });
+    expect(region.textContent).toContain(
+      locale === "de"
+        ? "Mikrofon nimmt nicht auf"
+        : "Microphone is not recording",
+    );
+    update({ warningCount: 1, backlogMs: 31_000 });
+    expect(region.textContent).toContain(
+      locale === "de" ? "Erkennung im Rückstand" : "Transcription behind",
+    );
+    expect(region.textContent).toContain(
+      locale === "de" ? "1 Hinweis" : "1 recording notice",
+    );
+    const textNode = region.firstChild;
+    update({ warningCount: 1, backlogMs: 32_000, durationMs: 2000 });
+    expect(screen.getByRole("status")).toBe(region);
+    expect(region.firstChild).toBe(textNode);
+    update({});
+    expect(region.textContent).toBe("");
+    update({ backlogMs: 31_000 });
+    expect(region.textContent).toContain(
+      locale === "de" ? "Erkennung im Rückstand" : "Transcription behind",
+    );
+  },
+);
+
+it("keeps initial recording warnings and sub-threshold backlog quiet", () => {
+  const props = {
+    locale: "en" as const,
+    paused: false,
+    durationMs: 1000,
+    parts: [],
+    warningCount: 1,
+    microphoneSilent: true,
+    microphoneMuted: false,
+    backlogMs: 0,
+    onOpen: () => {},
+  };
+  const view = render(<RecordingStatus {...props} />);
+  const region = screen.getByRole("status");
+  expect(region.textContent).toBe("");
+  view.rerender(<RecordingStatus {...props} backlogMs={29_999} />);
+  expect(region.textContent).toBe("");
+  view.rerender(<RecordingStatus {...props} backlogMs={30_000} />);
+  expect(region.textContent).toContain(
+    "Microphone is not recording · 1 recording notice · Transcription behind",
+  );
+});
+
 it("reopens capture warnings only when a new warning arrives", async () => {
   const warnings = [live.warnings[0]];
   const view = render(

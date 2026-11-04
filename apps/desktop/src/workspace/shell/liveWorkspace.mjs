@@ -72,6 +72,14 @@ export function sharedWorkspaceContext(state, revision = 0, overrides = []) {
     overrides,
   };
 }
+export const SHARED_CONTEXT_LIMIT = 8000;
+export const CONTEXT_BUDGET_MESSAGE =
+  "Freigegebene Vorbereitung und Notizen sind zu groß. Bitte Text kürzen oder weniger Themen freigeben; private Entwürfe bleiben erhalten.";
+/** Mirror native tuple serialization and Unicode-scalar accounting, including IDs, revisions and JSON escaping. */
+export function sharedContextSize(context) {
+  return Array.from(JSON.stringify([context.agenda, context.sharedNotes]))
+    .length;
+}
 /** Describe current inference progress in the chosen UI language without implying recording failure. */
 export function workspaceStatusText(status, language = "de") {
   if (language === "en") {
