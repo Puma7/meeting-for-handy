@@ -66,7 +66,10 @@ export function Panel({
         <div className="panel-actions">
           {actions}
           {onExpand && (
-            <IconButton label={`${title} vergrößern`} onClick={onExpand}>
+            <IconButton
+              label={`${title} ${t("vergrößern")}`}
+              onClick={onExpand}
+            >
               <Maximize2 size={15} />
             </IconButton>
           )}

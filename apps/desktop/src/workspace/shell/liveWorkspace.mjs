@@ -36,7 +36,10 @@ export function loadLiveState(raw) {
       typeof state.preparation?.goal !== "string" ||
       typeof state.preparation?.agenda !== "string" ||
       !state.topics.every(
-        (t) => typeof t.id === "string" && typeof t.text === "string",
+        (t) =>
+          typeof t.id === "string" &&
+          typeof t.text === "string" &&
+          (t.pending === undefined || typeof t.pending === "boolean"),
       )
     )
       throw Error("format");
@@ -155,12 +158,17 @@ export function restoreSharedContext(local, native, runId) {
     nativeContextRevision: native.revision,
     nativeContextRunId: runId,
     topics: [
-      ...native.agenda.map((a) => ({ ...a, shared: true })),
+      ...native.agenda.map((a) => {
+        const pending = local.topics.find(
+          (topic) => topic.id === a.id && topic.pending,
+        );
+        return pending ?? { ...a, shared: true };
+      }),
       ...local.topics
         .filter(
           (topic) => !native.agenda.some((entry) => entry.id === topic.id),
         )
-        .map((topic) => ({ ...topic, shared: false })),
+        .map((topic) => (topic.pending ? topic : { ...topic, shared: false })),
     ],
     notes: {
       ...local.notes,
@@ -182,6 +190,22 @@ export function restoreSharedContext(local, native, runId) {
           },
         ]
       : local.history,
+  };
+}
+
+/** Clear only topic intentions actually represented by the accepted native agenda; preserve edits made while the request was in flight. */
+export function acknowledgeSharedTopics(state, agenda) {
+  return {
+    ...state,
+    topics: state.topics.map((topic) => {
+      const accepted = agenda.find((entry) => entry.id === topic.id);
+      const matches = topic.shared
+        ? accepted &&
+          accepted.text === topic.text &&
+          accepted.revision === (topic.revision || 1)
+        : !accepted;
+      return topic.pending && matches ? { ...topic, pending: false } : topic;
+    }),
   };
 }
 

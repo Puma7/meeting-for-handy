@@ -190,6 +190,10 @@ describe("Native workspace boundary", () => {
   });
   it("renders English workspace controls and the original audio preview", async () => {
     const f = fixture();
+    localStorage.setItem(
+      `handymeeting.workspace.v1.${f.meeting.id}.notes-height.v1`,
+      "unreadable synthetic height",
+    );
     render(
       <LiveWorkspace
         adapter={{ ...f.adapter, sourceAudio: vi.fn() }}
@@ -207,6 +211,27 @@ describe("Native workspace boundary", () => {
     expect(screen.getByRole("button", { name: "Standard view" })).toBeTruthy();
     expect(
       screen.getByRole("button", { name: "Stop analysis only" }),
+    ).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Arrange" }));
+    expect(
+      screen.getAllByRole("button", { name: / remove from overview$/ }).length,
+    ).toBeGreaterThan(0);
+    expect(
+      screen.getAllByRole("button", { name: / expand$/ }).length,
+    ).toBeGreaterThan(0);
+    expect(screen.getAllByLabelText(/card height$/).length).toBeGreaterThan(0);
+    expect(
+      screen.getAllByRole("separator", { name: /resize height$/ }).length,
+    ).toBeGreaterThan(0);
+    fireEvent.click(screen.getByRole("button", { name: "Done" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Transcript" }));
+    expect(
+      screen.getByRole("textbox", { name: "Transcript search" }),
+    ).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "For the minutes" }));
+    expect(screen.getByRole("textbox", { name: "Protocol note" })).toBeTruthy();
+    expect(
+      screen.getByText(/The height is kept only for this view/),
     ).toBeTruthy();
     fireEvent.click(screen.getByRole("tab", { name: "Preparation" }));
     expect(screen.getByRole("textbox", { name: "My goal" })).toBeTruthy();
@@ -354,6 +379,45 @@ describe("Native workspace boundary", () => {
     ).toBeTruthy();
   });
 });
+
+it("preserves a pending topic revocation through native publication and reopening", async () => {
+  const f = fixture();
+  const mounted = render(
+    <LiveWorkspace adapter={f.adapter} meeting={f.meeting} onBack={() => {}} />,
+  );
+  fireEvent.click(await screen.findByRole("tab", { name: "Vorbereitung" }));
+  let share = screen.getByRole("checkbox", {
+    name: "Freigeben",
+  }) as HTMLInputElement;
+  expect(share.checked).toBe(true);
+  fireEvent.click(share);
+  expect(share.checked).toBe(false);
+  expect(f.adapter.context).not.toHaveBeenCalled();
+  f.status.workspaceContext.revision++;
+  await waitFor(
+    () => expect(f.adapter.status.mock.calls.length).toBeGreaterThan(1),
+    { timeout: 4000 },
+  );
+  expect(
+    (screen.getByRole("checkbox", { name: "Freigeben" }) as HTMLInputElement)
+      .checked,
+  ).toBe(false);
+  mounted.unmount();
+  render(
+    <LiveWorkspace adapter={f.adapter} meeting={f.meeting} onBack={() => {}} />,
+  );
+  fireEvent.click(await screen.findByRole("tab", { name: "Vorbereitung" }));
+  share = screen.getByRole("checkbox", {
+    name: "Freigeben",
+  }) as HTMLInputElement;
+  expect(share.checked).toBe(false);
+  f.status.status = "waiting";
+  await waitFor(() => expect(f.adapter.context).toHaveBeenCalledOnce(), {
+    timeout: 4000,
+  });
+  expect(f.adapter.context.mock.calls[0][0].agenda).toEqual([]);
+  expect(share.checked).toBe(false);
+}, 10000);
 
 it("isolates native workspace styles and returns capture warnings without changing recording", async () => {
   const f = fixture();

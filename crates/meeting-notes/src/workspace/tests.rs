@@ -1578,3 +1578,116 @@ fn numbered_human_agenda_can_change_status_without_generating_a_title_claim() {
         }
     }
 }
+
+#[test]
+fn durable_human_activity_selects_the_last_edited_model_without_new_inference() {
+    let root = tempfile::tempdir().unwrap();
+    let connection = |model: &str| crate::Connection {
+        endpoint: "http://127.0.0.1:1235/v1/".into(),
+        model: model.into(),
+        mode: "local".into(),
+        cloud_consent: false,
+        api_key: String::new(),
+    };
+    let mut folders = vec![];
+    for (model, at) in [
+        ("first", "2026-01-01T00:00:00Z"),
+        ("second", "2026-01-02T00:00:00Z"),
+    ] {
+        let live = crate::live::LiveRunner::start(root.path(), "meeting", connection(model), "en")
+            .unwrap()
+            .with_workspace(Default::default())
+            .unwrap();
+        let folder = live.workspace_folder().unwrap();
+        drop(live);
+        let initial = context_store::read(&folder, &Default::default()).unwrap();
+        let (mut state, mut req, mut answer) = setup();
+        req.purpose = "reconcile".into();
+        answer["changes"][0]["kind"] = json!("impulse");
+        answer["changes"][0]["text"] = json!("Who approves the draft?");
+        answer["changes"][0]["due"] = json!(null);
+        answer["overviewRefs"] = json!([]);
+        state.apply_context(&initial).unwrap();
+        validate::apply(&mut state, &req, &answer.to_string()).unwrap();
+        state.revision = 1;
+        state.updated_at = Some(at.into());
+        store::append(
+            &folder,
+            &store::Delta::between(
+                &WorkspaceState::default(),
+                &state,
+                req.transcript_sources.clone(),
+                vec![],
+            ),
+        )
+        .unwrap();
+        // Deterministic synthetic history, not the host clock or a user record.
+        let file = folder.join("context-00000001.json");
+        let mut entry: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&file).unwrap()).unwrap();
+        entry["createdAt"] = json!(at);
+        std::fs::write(&file, serde_json::to_vec(&entry).unwrap()).unwrap();
+        folders.push(folder);
+    }
+    assert_eq!(
+        crate::live::read_latest_workspace(root.path(), "meeting")
+            .unwrap()
+            .unwrap()
+            .model,
+        "second"
+    );
+    let first = read_state(&folders[0]).unwrap();
+    let mut context = first.context.clone();
+    context.overrides.push(Override {
+        id: first.entities[0].id.clone(),
+        expected_revision: 1,
+        status: "discussed".into(),
+        saved: false,
+    });
+    update_context(&folders[0], &context).unwrap();
+    for selected in [
+        crate::live::read_latest(root.path(), "meeting")
+            .unwrap()
+            .unwrap(),
+        crate::live::read_latest_workspace(root.path(), "meeting")
+            .unwrap()
+            .unwrap(),
+    ] {
+        assert_eq!(selected.model, "first");
+        assert_eq!(selected.updated_at.as_deref(), Some("2026-01-01T00:00:00Z")); // A human edit is not a new model inference.
+        assert_eq!(selected.workspace.unwrap().entities[0].status, "discussed");
+    }
+    let third = crate::live::LiveRunner::start(root.path(), "meeting", connection("third"), "en")
+        .unwrap()
+        .with_workspace(Default::default())
+        .unwrap();
+    assert_eq!(
+        third.view().workspace.unwrap().entities[0].status,
+        "discussed"
+    );
+}
+
+#[test]
+fn legacy_context_times_remain_readable_but_malformed_times_are_preserved_as_errors() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut runner = WorkspaceRunner::open(dir.path()).unwrap();
+    runner.set_context(Default::default()).unwrap();
+    drop(runner);
+    let path = dir.path().join("context-00000001.json");
+    let mut entry: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    entry.as_object_mut().unwrap().remove("createdAt");
+    std::fs::write(&path, serde_json::to_vec(&entry).unwrap()).unwrap();
+    let old = read_state(dir.path()).unwrap();
+    assert!(old.activity_at().is_none());
+    assert!(serde_json::to_value(&old)
+        .unwrap()
+        .get("contextUpdatedAt")
+        .is_none());
+    entry["createdAt"] = json!("not a timestamp");
+    let bytes = serde_json::to_vec(&entry).unwrap();
+    std::fs::write(&path, &bytes).unwrap();
+    assert!(read_state(dir.path()).is_err());
+    assert!(update_context(dir.path(), &old.context).is_err());
+    assert_eq!(std::fs::read(&path).unwrap(), bytes);
+}

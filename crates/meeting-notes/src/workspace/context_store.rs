@@ -30,12 +30,13 @@ pub(crate) fn lock(folder: &Path) -> Result<File> {
 }
 /// Replay contiguous human-context revisions; reject gaps or invalid entries without rewriting them.
 pub(crate) fn read(folder: &Path, fallback: &WorkspaceContext) -> Result<WorkspaceContext> {
-    replay(folder, fallback, |_| Ok(()))
+    replay(folder, fallback, |_, _| Ok(()))
 }
 /// Reconstruct every context-only transition after the model checkpoint, including withdrawn agenda entries and their human history.
 pub(crate) fn project(folder: &Path, state: &mut WorkspaceState) -> Result<WorkspaceContext> {
     let base = state.context.clone();
-    replay(folder, &base, |context| {
+    replay(folder, &base, |context, at| {
+        state.context_updated_at = state.context_updated_at.max(at);
         if context.revision > base.revision {
             state.apply_context(context)?;
         }
@@ -44,7 +45,7 @@ pub(crate) fn project(folder: &Path, state: &mut WorkspaceState) -> Result<Works
 }
 /// Accept only an uninterrupted suffix of human-only revisions; a revoked and restored shared input still invalidates inference.
 pub(crate) fn human_suffix(folder: &Path, expected: &WorkspaceContext) -> Result<WorkspaceContext> {
-    replay(folder, expected, |context| {
+    replay(folder, expected, |context, _| {
         if context.revision >= expected.revision {
             ensure!(
                 context.agenda == expected.agenda
@@ -65,7 +66,10 @@ pub(crate) fn human_suffix(folder: &Path, expected: &WorkspaceContext) -> Result
 fn replay(
     folder: &Path,
     fallback: &WorkspaceContext,
-    mut apply: impl FnMut(&WorkspaceContext) -> Result<()>,
+    mut apply: impl FnMut(
+        &WorkspaceContext,
+        Option<chrono::DateTime<chrono::FixedOffset>>,
+    ) -> Result<()>,
 ) -> Result<WorkspaceContext> {
     store::check_directory(folder)?;
     let mut paths = fs::read_dir(folder)?
@@ -84,6 +88,15 @@ fn replay(
     for (index, path) in paths.iter().enumerate() {
         let bytes = store::read_bounded(path)?;
         let entry: Entry = serde_json::from_slice(&bytes)?;
+        let activity = if entry.created_at.is_empty() {
+            None // Older context revisions did not store an activity timestamp.
+        } else {
+            Some(
+                chrono::DateTime::parse_from_rfc3339(&entry.created_at).map_err(|_| {
+                    anyhow::anyhow!("Zeitstempel des Meetingkontexts ist beschädigt.")
+                })?,
+            )
+        };
         if index == 0 {
             ensure!(
                 entry.reset
@@ -109,7 +122,7 @@ fn replay(
         context.overrides.extend(entry.overrides);
         context.revision = entry.revision;
         context.validate()?;
-        apply(&context)?;
+        apply(&context, activity)?;
     }
     Ok(context)
 }
@@ -162,5 +175,10 @@ pub(crate) fn update(
     file.as_file().sync_all()?;
     file.persist_noclobber(folder.join(format!("context-{:08}.json", next.revision)))
         .map_err(|e| e.error)?;
+    #[cfg(unix)]
+    File::open(folder)?.sync_all()?;
+    state.context_updated_at = state
+        .context_updated_at
+        .max(chrono::DateTime::parse_from_rfc3339(&entry.created_at).ok());
     Ok((next, state))
 }

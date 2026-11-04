@@ -170,7 +170,9 @@ export function Notes({ ctx }) {
           "Nach oben größer ziehen. Pfeil hoch oder runter ändert die Höhe. Pos1: klein, Ende: groß. Doppelklick: Standardhöhe.",
         )}
         {heightBlocked &&
-          " Die Höhe bleibt nur für diese Ansicht erhalten; der frühere Browserstand wird bewahrt."}
+          t(
+            " Die Höhe bleibt nur für diese Ansicht erhalten; der frühere Browserstand wird bewahrt.",
+          )}
       </span>
       <div className="notes-heading">
         <button
@@ -235,7 +237,7 @@ export function Notes({ ctx }) {
         <div className="notes-input-wrap">
           <textarea
             aria-label={
-              kind === "private" ? t("Private Notiz") : "Protokollnotiz"
+              kind === "private" ? t("Private Notiz") : t("Protokollnotiz")
             }
             aria-describedby="notes-enter-help"
             rows={2}

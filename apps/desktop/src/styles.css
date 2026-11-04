@@ -2427,3 +2427,42 @@ p {
 .sidebar-recording[data-warning] {
   border-color: var(--color-error);
 }
+
+/* Explicit collapse uses the same resource flyout as a narrow viewport. */
+.sidebar.is-collapsed {
+  z-index: 2;
+}
+.sidebar.is-collapsed .sidebar-resource-details {
+  margin-top: 0;
+  width: 36px;
+}
+.sidebar.is-collapsed .sidebar-resource-details > summary {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 32px;
+  font-size: 0;
+  list-style: none;
+}
+.sidebar.is-collapsed
+  .sidebar-resource-details
+  > summary::-webkit-details-marker {
+  display: none;
+}
+.sidebar.is-collapsed .sidebar-resource-details > summary > svg {
+  display: block;
+}
+.sidebar.is-collapsed .sidebar-resource-content {
+  position: fixed;
+  top: 16px;
+  left: 76px;
+  z-index: 30;
+  width: min(300px, calc(100vw - 96px));
+  padding: 14px;
+  background: var(--color-background);
+  border: 1px solid var(--color-line-strong);
+  border-radius: 10px;
+  box-shadow: 0 5px 22px #0002;
+  font-size: 13px;
+}

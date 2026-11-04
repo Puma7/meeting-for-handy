@@ -1437,11 +1437,46 @@ pub fn synthetic_smoke(args: &[String]) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Own only a newly created synthetic root; preserve failed fixtures and all older roots.
+    struct BatchFixture {
+        root: PathBuf,
+        parent: PathBuf,
+    }
+    impl BatchFixture {
+        fn new() -> Self {
+            static NEXT: AtomicUsize = AtomicUsize::new(0);
+            let parent = std::env::temp_dir().canonicalize().unwrap();
+            let root = parent.join(format!(
+                "handymeeting-batch-{}-{}-{}",
+                std::process::id(),
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_nanos(),
+                NEXT.fetch_add(1, Ordering::Relaxed)
+            ));
+            std::fs::create_dir(&root).unwrap();
+            Self { root, parent }
+        }
+    }
+    impl Drop for BatchFixture {
+        fn drop(&mut self) {
+            if std::thread::panicking() {
+                return;
+            }
+            // Never follow a replaced root or leave the verified temporary parent.
+            assert_eq!(self.root.parent(), Some(self.parent.as_path()));
+            assert_eq!(self.root.canonicalize().unwrap(), self.root);
+            std::fs::remove_dir_all(&self.root).unwrap();
+        }
+    }
+
     #[test]
     fn batch_closes_both_tracks_and_feeds_live_text_while_capture_continues() {
         use std::sync::mpsc::sync_channel;
-        let root =
-            Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../.build/asr-batch-regressions");
+        let fixture = BatchFixture::new();
+        let root = fixture.root.clone();
         let store = SessionStore::create(
             &root,
             "Synthetic live batch",
@@ -1576,8 +1611,8 @@ mod tests {
 
     #[test]
     fn batch_retries_only_unfinished_sections() {
-        let dir =
-            Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../.build/asr-batch-regressions");
+        let fixture = BatchFixture::new();
+        let dir = fixture.root.clone();
         let store = SessionStore::create(
             &dir,
             "Synthetic batch",
@@ -1779,8 +1814,8 @@ mod tests {
             reply.error.as_deref(),
             Some("Invalid recognition worker arguments")
         );
-        let root =
-            Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../.build/asr-batch-regressions");
+        let fixture = BatchFixture::new();
+        let root = fixture.root.clone();
         std::fs::create_dir_all(&root).unwrap();
         bytes.clear();
         let args = vec![
@@ -1794,8 +1829,8 @@ mod tests {
     }
     #[test]
     fn corrupt_batch_audio_sends_a_permanent_error_reply_before_exit() {
-        let dir =
-            Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../.build/asr-batch-regressions");
+        let fixture = BatchFixture::new();
+        let dir = fixture.root.clone();
         let store = SessionStore::create(
             &dir,
             "Synthetic corrupt batch",

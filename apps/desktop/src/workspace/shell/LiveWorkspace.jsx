@@ -36,6 +36,7 @@ import {
   workspaceStatusText,
   restoreSharedContext,
   sameSharedContext,
+  acknowledgeSharedTopics,
 } from "./liveWorkspace.mjs";
 
 const tabs = [
@@ -296,10 +297,20 @@ function WorkspaceContents({
               : context.current.overrides || [],
           );
       if (sameSharedContext(next, context.current)) {
-        if (current.current.protocolShare?.pending) {
+        if (
+          current.current.protocolShare?.pending ||
+          current.current.topics.some((topic) => topic.pending)
+        ) {
           const saved = {
-            ...current.current,
-            protocolShare: { ...current.current.protocolShare, pending: false },
+            ...acknowledgeSharedTopics(current.current, context.current.agenda),
+            ...(current.current.protocolShare
+              ? {
+                  protocolShare: {
+                    ...current.current.protocolShare,
+                    pending: false,
+                  },
+                }
+              : {}),
           };
           current.current = saved;
           setState(saved);
@@ -311,7 +322,7 @@ function WorkspaceContents({
       if (contextRun.current !== runId || !alive.current) return;
       context.current = { ...next, revision: next.revision + 1 };
       const saved = {
-        ...current.current,
+        ...acknowledgeSharedTopics(current.current, next.agenda),
         nativeContextRevision: context.current.revision,
         nativeContextRunId: runId,
         ...(current.current.protocolShare?.pending &&
@@ -1009,7 +1020,7 @@ function LiveTopics({ ctx, entities, quote, override, full, onExpand }) {
                       ...v,
                       topics: v.topics.map((x) =>
                         x.id === topic.id
-                          ? { ...x, shared: e.target.checked }
+                          ? { ...x, shared: e.target.checked, pending: true }
                           : x,
                       ),
                     }))
@@ -1017,6 +1028,11 @@ function LiveTopics({ ctx, entities, quote, override, full, onExpand }) {
                 />
                 {t("Freigeben")}
               </label>
+              {topic.pending && (
+                <span className="heading-meta" role="status">
+                  {t("Vorgemerkt")}
+                </span>
+              )}
             </div>
             {view.expanded === topic.id && topic.native && (
               <>
@@ -1259,7 +1275,7 @@ function LivePanel({
           <label className="search-input compact-search">
             <Search size={14} />
             <input
-              aria-label={`${titles[panel]} durchsuchen`}
+              aria-label={`${titles[panel]} ${t("durchsuchen")}`}
               placeholder={t("Suchen …")}
               value={view.query || ""}
               onChange={(e) => patch({ query: e.target.value })}

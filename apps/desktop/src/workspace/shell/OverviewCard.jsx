@@ -151,7 +151,7 @@ export function OverviewCard({
                 <label>
                   {t("Höhe")}
                   <select
-                    aria-label={`${t(moduleName(card.id))} Kartenhöhe`}
+                    aria-label={`${t(moduleName(card.id))} ${t("Kartenhöhe")}`}
                     value={card.height}
                     onChange={(event) =>
                       onResize(card.id, Number(event.target.value))
@@ -190,13 +190,13 @@ export function OverviewCard({
             </div>
           </div>
           <IconButton
-            label={`${t(moduleName(card.id))} aus Überblick entfernen`}
+            label={`${t(moduleName(card.id))} ${t("aus Überblick entfernen")}`}
             onClick={() => onHide(card.id)}
           >
             <X size={14} />
           </IconButton>
           <IconButton
-            label={`${t(moduleName(card.id))} vergrößern`}
+            label={`${t(moduleName(card.id))} ${t("vergrößern")}`}
             onClick={() => onExpand(card.id, t(moduleName(card.id)))}
           >
             <Maximize2 size={14} />
@@ -208,7 +208,7 @@ export function OverviewCard({
         <div
           className="card-resize"
           role="separator"
-          aria-label={`${t(moduleName(card.id))} Höhe ändern`}
+          aria-label={`${t(moduleName(card.id))} ${t("Höhe ändern")}`}
           aria-orientation="horizontal"
           tabIndex={0}
           aria-valuenow={height}

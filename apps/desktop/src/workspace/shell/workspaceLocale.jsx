@@ -3,6 +3,10 @@ import { createContext, useContext } from "react";
 export const WorkspaceLanguage = createContext("de");
 
 const english = {
+  durchsuchen: "search",
+  Protokollnotiz: "Protocol note",
+  " Die Höhe bleibt nur für diese Ansicht erhalten; der frühere Browserstand wird bewahrt.":
+    " The height is kept only for this view; the previous browser state is retained.",
   Vorbereitung: "Preparation",
   Transkript: "Transcript",
   Überblick: "Overview",

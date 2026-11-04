@@ -180,5 +180,7 @@ pub(crate) fn append(folder: &Path, delta: &Delta) -> Result<()> {
     temp.as_file().sync_all()?;
     temp.persist_noclobber(folder.join(format!("revision-{:08}.json", delta.revision)))
         .map_err(|e| e.error)?;
+    #[cfg(unix)]
+    File::open(folder)?.sync_all()?;
     Ok(())
 }

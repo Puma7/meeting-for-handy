@@ -535,16 +535,19 @@ pub fn read_latest(root: &Path, meeting_id: &str) -> Result<Option<LiveView>> {
         let classic_activity = timestamp(view.updated_at.as_deref());
         match read_workspace_if_present(&folder.join("workspace-v9")) {
             Ok(Some(state))
-                if view.updated_at.is_none()
-                    || timestamp(state.updated_at.as_deref()) >= classic_activity =>
+                if view.updated_at.is_none() || state.activity_at() >= classic_activity =>
             {
                 view.attach_workspace(state);
             }
             Ok(_) => {}
             Err(_) => damaged += 1,
         }
-        let activity =
-            timestamp(view.updated_at.as_deref()).or_else(|| timestamp(Some(&run.run.created_at)));
+        let activity = view
+            .workspace
+            .as_ref()
+            .and_then(|state| state.activity_at())
+            .or_else(|| timestamp(view.updated_at.as_deref()))
+            .or_else(|| timestamp(Some(&run.run.created_at)));
         if newest.as_ref().is_none_or(|(at, _, _)| activity > *at) {
             newest = Some((activity, folder, view));
         }
@@ -584,9 +587,7 @@ pub fn read_latest_workspace(root: &Path, meeting_id: &str) -> Result<Option<Liv
             }
         };
         let activity = state
-            .updated_at
-            .as_deref()
-            .and_then(|at| chrono::DateTime::parse_from_rfc3339(at).ok())
+            .activity_at()
             .or_else(|| chrono::DateTime::parse_from_rfc3339(&run.run.created_at).ok());
         if newest.as_ref().is_none_or(|(at, _, _, _)| activity > *at) {
             newest = Some((activity, run, folder, state));

@@ -102,6 +102,8 @@ pub struct Event {
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct WorkspaceState {
+    #[serde(skip)]
+    pub(crate) context_updated_at: Option<chrono::DateTime<chrono::FixedOffset>>,
     #[serde(default)]
     pub superseded_sources: Vec<String>,
     #[serde(default, skip_serializing)]
@@ -123,6 +125,14 @@ pub struct WorkspaceState {
     pub(crate) inherited_sources: Vec<crate::live::LiveSource>,
 }
 impl WorkspaceState {
+    /// Rank durable human activity separately from the displayed time of the last model inference.
+    pub(crate) fn activity_at(&self) -> Option<chrono::DateTime<chrono::FixedOffset>> {
+        self.context_updated_at.max(
+            self.updated_at
+                .as_deref()
+                .and_then(|at| chrono::DateTime::parse_from_rfc3339(at).ok()),
+        )
+    }
     /// Apply shared inputs and human overrides, preserving original evidence and deterministic history events.
     pub(crate) fn apply_context(&mut self, context: &WorkspaceContext) -> Result<()> {
         for entity in self
