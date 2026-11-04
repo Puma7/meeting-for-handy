@@ -45,6 +45,7 @@ enum Loaded {
     /// Initial observed policy controls active retention, never final eviction authority.
     Ollama {
         release_after: i64,
+        context_length: Option<u64>,
     },
     LmStudio {
         instance: String,
@@ -167,9 +168,10 @@ impl ModelLease {
     pub fn prepare(&self, control: &AnalysisControl) -> Result<()> {
         self.prepare_inner(control, None)
     }
-    /// The workspace bounds its own first LM load, without changing an existing reservation.
+    /// Use the fixed workspace context for Ollama and our first LM Studio load;
+    /// an already loaded LM Studio instance retains its existing configuration.
     pub fn prepare_workspace(&self, control: &AnalysisControl) -> Result<()> {
-        self.prepare_inner(control, Some(8192))
+        self.prepare_inner(control, Some(crate::workspace::WORKSPACE_CONTEXT_LENGTH))
     }
     fn prepare_inner(&self, control: &AnalysisControl, context_length: Option<u64>) -> Result<()> {
         control.check()?;
@@ -191,6 +193,21 @@ impl ModelLease {
             )?;
             ensure!(before["models"].as_array().is_some_and(|models| models.iter().filter(|m|m["type"]=="llm").filter_map(|m|m["loaded_instances"].as_array()).flatten().any(|i|i["id"].as_str()==Some(instance))), "Die mitbenutzte Modellinstanz ist nicht mehr geladen. In LM Studio prüfen; es wird keine neue Kopie automatisch geladen.");
             return Ok(());
+        }
+        if let (
+            Some(Loaded::Ollama {
+                context_length: current,
+                ..
+            }),
+            Some(requested),
+        ) = (&mut state.loaded, context_length)
+        {
+            if *current != Some(requested) {
+                *current = Some(requested);
+                // A previously classic-only reservation must acknowledge the workspace
+                // budget before use. Failure stays visible and can be retried explicitly.
+                state.refresh_failed = true;
+            }
         }
         if state.loaded.is_some() {
             if state.refresh_failed {
@@ -246,7 +263,11 @@ impl ModelLease {
                 };
                 let response = client.model_request(
                     "api/generate",
-                    Some(&json!({"model":client.model,"stream":false,"keep_alive":keep_alive_for(release_after)})),
+                    Some(&ollama_reservation(
+                        &client.model,
+                        keep_alive_for(release_after),
+                        context_length,
+                    )),
                     // A native load creates server state. Once submitted, read its bounded
                     // acknowledgement even after cancellation so the owned instance remains
                     // known and can be released. Inference itself remains cancellable.
@@ -257,7 +278,10 @@ impl ModelLease {
                     response["done"] == true,
                     "Textmodell wurde nicht als geladen bestätigt."
                 );
-                Loaded::Ollama { release_after }
+                Loaded::Ollama {
+                    release_after,
+                    context_length,
+                }
             }
             LocalProvider::LmStudio => {
                 let before = client.model_request(
@@ -377,24 +401,29 @@ impl ModelLease {
         Ok(())
     }
     /// Returns only routing policy for the selected model; never session or audio data.
-    pub(crate) fn inference(&self) -> Result<(LocalProvider, String, i64)> {
+    pub(crate) fn inference(&self) -> Result<(LocalProvider, String, i64, Option<u64>)> {
         let state = self
             .slot
             .state
             .lock()
             .map_err(|_| anyhow::anyhow!("Lokales Modell ist gesperrt."))?;
-        let name = match state
+        let (name, context_length) = match state
             .loaded
             .as_ref()
             .context("Lokales Modell wurde noch nicht geladen.")?
         {
-            Loaded::Ollama { .. } => state.client.model.clone(),
+            Loaded::Ollama { context_length, .. } => (state.client.model.clone(), *context_length),
             Loaded::LmStudio { instance } | Loaded::LmStudioBorrowed { instance } => {
-                instance.clone()
+                (instance.clone(), None)
             }
         };
         ensure!(!state.refresh_failed, "Die lokale Modellreservierung konnte nicht erneuert werden. Modelldienst prüfen und Auswertung fortsetzen.");
-        Ok((state.provider, name, ollama_keep_alive(&state).unwrap_or(0)))
+        Ok((
+            state.provider,
+            name,
+            ollama_keep_alive(&state).unwrap_or(0),
+            context_length,
+        ))
     }
     /// Compares logical slot identity without merging different routes or credentials.
     pub fn same_model(&self, other: &Self) -> bool {
@@ -511,7 +540,7 @@ fn keep_alive_for(release_after: i64) -> i64 {
 /// Unloaded slots and LM Studio explicit instances never enter the Ollama refresher.
 fn ollama_keep_alive(state: &State) -> Option<i64> {
     match state.loaded {
-        Some(Loaded::Ollama { release_after }) => Some(keep_alive_for(release_after)),
+        Some(Loaded::Ollama { release_after, .. }) => Some(keep_alive_for(release_after)),
         _ => None,
     }
 }
@@ -519,9 +548,17 @@ fn ollama_keep_alive(state: &State) -> Option<i64> {
 /// Refresh only the existing slot's policy; failed renewal is surfaced before inference.
 fn renew_ollama(state: &mut State, timeout: Duration) -> Result<()> {
     let seconds = ollama_keep_alive(state).context("Lokale Modellreservierung fehlt.")?;
+    let context_length = match state.loaded {
+        Some(Loaded::Ollama { context_length, .. }) => context_length,
+        _ => None,
+    };
     let response = state.client.model_request(
         "api/generate",
-        Some(&json!({"model":state.client.model,"stream":false,"keep_alive":seconds})),
+        Some(&ollama_reservation(
+            &state.client.model,
+            seconds,
+            context_length,
+        )),
         &AnalysisControl::default(),
         timeout,
     )?;
@@ -531,6 +568,20 @@ fn renew_ollama(state: &mut State, timeout: Duration) -> Result<()> {
     );
     state.refresh_failed = false;
     Ok(())
+}
+
+/// Renew the established workspace context as well as its TTL; classic-only
+/// reservations keep their original provider defaults and request envelope.
+fn ollama_reservation(
+    model: &str,
+    keep_alive: i64,
+    context_length: Option<u64>,
+) -> serde_json::Value {
+    let mut body = json!({"model":model,"stream":false,"keep_alive":keep_alive});
+    if let Some(length) = context_length {
+        body["options"] = json!({"num_ctx":length});
+    }
+    body
 }
 
 /// Rejects empty, oversized and control-bearing provider identifiers before management requests.

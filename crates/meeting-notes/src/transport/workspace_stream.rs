@@ -73,11 +73,11 @@ impl TextClient {
         let messages = json!([{"role":"system","content":system},{"role":"user","content":user}]);
         let (url, body, native) = if let Some(lease) = &self.residency {
             lease.prepare_workspace(control)?;
-            let (provider, model, keep_alive) = lease.inference()?;
+            let (provider, model, keep_alive, _) = lease.inference()?;
             match provider {
                 crate::residency::LocalProvider::Ollama => (
                     self.base.join("../api/chat")?,
-                    json!({"model":model,"stream":true,"messages":messages,"format":schema,"keep_alive":keep_alive,"options":{"temperature":0,"num_predict":4096}}),
+                    json!({"model":model,"stream":true,"messages":messages,"format":schema,"keep_alive":keep_alive,"options":{"temperature":0,"num_predict":4096,"num_ctx":crate::workspace::WORKSPACE_CONTEXT_LENGTH}}),
                     true,
                 ),
                 crate::residency::LocalProvider::LmStudio => (

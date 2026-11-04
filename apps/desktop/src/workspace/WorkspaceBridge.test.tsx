@@ -12,6 +12,41 @@ import WorkspaceBridge from "./WorkspaceBridge";
 import type { DesktopApi, Meeting } from "../types";
 import { LiveWorkspace } from "./shell/LiveWorkspace.jsx";
 import { fitColumn } from "./shell/fitOverview.mjs";
+import { workspaceText } from "./shell/workspaceLocale.jsx";
+
+it("translates only dictionary entries and preserves inherited object names", () => {
+  for (const name of ["constructor", "toString", "valueOf", "__proto__"]) {
+    expect(workspaceText("en", name)).toBe(name);
+  }
+  expect(workspaceText("en", "Transkript")).toBe("Transcript");
+});
+
+it.each(["constructor", "toString", "valueOf", "__proto__", "Transkript"])(
+  "keeps the saved custom layout name literal in English: %s",
+  (name) => {
+    const f = fixture();
+    localStorage.setItem(
+      "handymeeting.workspace.layout-catalog.v1",
+      JSON.stringify({
+        defaultId: "custom-abc",
+        custom: [{ id: "custom-abc", base: "verlauf" }],
+        names: { "custom-abc": name },
+      }),
+    );
+    render(
+      <LiveWorkspace
+        adapter={f.adapter}
+        meeting={f.meeting}
+        onBack={() => {}}
+        language="en"
+      />,
+    );
+    const select = screen.getByRole("combobox", {
+      name: "Overview layout",
+    }) as HTMLSelectElement;
+    expect(select.selectedOptions[0].text).toBe(`${name} · Default`);
+  },
+);
 
 beforeEach(() => {
   localStorage.clear();

@@ -22,6 +22,7 @@ pub const CONTRACT_VERSION: &str = "meeting-update-1";
 pub const PROMPT_VERSION: &str = "handymeeting-workspace-9";
 const PROMPT: &str = include_str!("system.de.txt");
 const MAX_REQUEST_CHARS: usize = 24_000;
+pub(crate) const WORKSPACE_CONTEXT_LENGTH: u64 = 8192;
 
 pub struct WorkspaceRunner {
     folder: std::path::PathBuf,

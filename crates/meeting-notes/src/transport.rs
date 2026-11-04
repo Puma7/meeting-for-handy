@@ -586,14 +586,17 @@ impl TextClient {
         }
         let response = if let Some(lease) = &self.residency {
             lease.prepare(control)?;
-            let (provider, model, keep_alive) = lease.inference()?;
+            let (provider, model, keep_alive, context_length) = lease.inference()?;
             match provider {
                 crate::residency::LocalProvider::Ollama => {
                     // Native chat supports keep_alive on older Ollama versions too.
                     // The same fixed messages/schema/budget are used; only the envelope differs.
-                    let native = serde_json::json!({"model":model,"stream":false,
+                    let mut native = serde_json::json!({"model":model,"stream":false,
                         "messages":body["messages"],"format":schema,"keep_alive":keep_alive,
                         "options":{"num_predict":max_tokens,"temperature":0}});
+                    if let Some(length) = context_length {
+                        native["options"]["num_ctx"] = length.into();
+                    }
                     let result = self.model_request(
                         "api/chat",
                         Some(&native),

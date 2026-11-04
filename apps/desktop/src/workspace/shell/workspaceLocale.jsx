@@ -246,7 +246,10 @@ const english = {
 };
 
 export function workspaceText(language, text) {
-  return language === "en" ? (english[text] ?? text) : text;
+  return language === "en" &&
+    Object.prototype.hasOwnProperty.call(english, text)
+    ? english[text]
+    : text;
 }
 
 export function useWorkspaceText() {

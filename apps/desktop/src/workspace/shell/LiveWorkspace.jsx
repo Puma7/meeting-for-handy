@@ -904,7 +904,7 @@ function WorkspaceContents({
                       >
                         {layoutChoices.map(({ id, label }) => (
                           <option key={id} value={id}>
-                            {t(label)}
+                            {label}
                             {catalog.defaultId === id ? t(" · Standard") : ""}
                           </option>
                         ))}

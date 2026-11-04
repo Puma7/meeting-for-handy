@@ -1517,3 +1517,115 @@ fn workspace_refuses_an_unknown_ollama_load_size_without_loading() {
     drop(lease);
     assert_eq!(server.seen().len(), 2);
 }
+
+/// Exercises actual workspace, classic and renewal HTTP requests against a synthetic
+/// resident finite lease. No real model, external service or memory allocation is used.
+fn workspace_context_requests(classic_first: bool, observe_renewal: bool) {
+    use meeting_notes::{live::LiveText, workspace::WorkspaceRunner};
+    let (sent, renewal) = std::sync::mpsc::channel();
+    let mut workspace_loads = 0;
+    let server = Server::new(move |path, body| {
+        if path == "/api/ps" {
+            let expiry = chrono::Utc::now() + chrono::Duration::seconds(300);
+            return (
+                200,
+                json!({"models":[{"name":"synthetic","expires_at":expiry.to_rfc3339()}]}),
+            );
+        }
+        if path == "/api/generate" && body["options"]["num_ctx"] == 8192 {
+            workspace_loads += 1;
+            if workspace_loads > 1 {
+                let _ = sent.send(body.clone());
+            }
+        }
+        if path == "/api/chat" && body["stream"] == true {
+            let input: Value =
+                serde_json::from_str(body["messages"][1]["content"].as_str().unwrap()).unwrap();
+            let answer = json!({"contractVersion":"meeting-update-1","requestId":input["requestId"],"changes":[],"overviewRefs":[],"unresolvedContextIds":[],"moreChangesPossible":false});
+            return (
+                200,
+                json!({"message":{"content":answer.to_string()},"done":true,"done_reason":"stop"}),
+            );
+        }
+        ollama(path, body)
+    });
+    let conn = server.connection();
+    let pool = LocalModelPool::default();
+    let lease = pool.reserve(&conn, LocalProvider::Ollama).unwrap();
+    if classic_first {
+        lease.prepare(&AnalysisControl::default()).unwrap();
+    }
+    let before_workspace = server.seen().len();
+    let client = TextClient::new(&conn)
+        .unwrap()
+        .with_residency(Arc::clone(&lease))
+        .unwrap();
+    let folder = tempfile::tempdir().unwrap();
+    let mut runner = WorkspaceRunner::open(folder.path()).unwrap();
+    let texts = vec![LiveText {
+        key: "synthetic-context".into(),
+        track: "system".into(),
+        start_ms: 0,
+        end_ms: 3000,
+        text: "Vielleicht sprechen wir später über die Dokumentation.".into(),
+    }];
+    let pending = runner.pending(&texts);
+    runner
+        .update(&client, &pending, &AnalysisControl::default(), "de")
+        .unwrap();
+    let requests = server.seen();
+    let preload: Vec<_> = requests[before_workspace..]
+        .iter()
+        .filter(|(p, _)| p == "/api/generate")
+        .map(|(_, b)| b["options"]["num_ctx"].clone())
+        .collect();
+    let chat: Vec<_> = requests
+        .iter()
+        .filter(|(p, b)| p == "/api/chat" && b["stream"] == true)
+        .map(|(_, b)| b["options"]["num_ctx"].clone())
+        .collect();
+    assert!(!chat.is_empty());
+    assert_eq!(
+        (preload, chat.clone()),
+        (vec![json!(8192)], vec![json!(8192); chat.len()]),
+        "Workspace preload and actual streamed phases must use the same explicit context"
+    );
+    if classic_first {
+        assert!(requests[..before_workspace]
+            .iter()
+            .all(|(_, b)| b.get("options").is_none()));
+    }
+    assert!(generate(&client).is_ok());
+    assert_eq!(
+        server
+            .seen()
+            .iter()
+            .rev()
+            .find(|(p, _)| p == "/api/chat")
+            .unwrap()
+            .1["options"]["num_ctx"],
+        8192,
+        "A shared classic user must not reset the workspace reservation"
+    );
+    if observe_renewal {
+        let renewed = renewal.recv_timeout(Duration::from_secs(75)).unwrap();
+        assert_eq!(renewed["options"]["num_ctx"], 8192);
+        assert_eq!(renewed["keep_alive"], 300);
+    }
+    drop(client);
+    drop(lease);
+    assert!(!server
+        .seen()
+        .iter()
+        .any(|(p, b)| p == "/api/generate" && b["keep_alive"] == 0));
+}
+
+#[test]
+fn workspace_ollama_context_survives_streams_classic_reuse_and_real_renewal_timer() {
+    workspace_context_requests(false, true);
+}
+
+#[test]
+fn workspace_ollama_context_upgrades_an_existing_classic_reservation() {
+    workspace_context_requests(true, false);
+}
