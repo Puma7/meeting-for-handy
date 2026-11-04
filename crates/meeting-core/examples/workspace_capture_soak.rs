@@ -69,10 +69,25 @@ fn main() -> meeting_core::Result<()> {
     for part in &data.parts {
         store.append_transcript(TranscriptCheckpoint{sequence:0,at:String::new(),file:part.file.clone(),model_id:"synthetic-no-asr".into(),full:"Robin sagt: Ich schreibe den Bericht bis Freitag. Zum Budget fehlt noch eine Zusage.".into(),committed:"Robin sagt: Ich schreibe den Bericht bis Freitag. Zum Budget fehlt noch eine Zusage.".into(),tentative:String::new(),processed_samples:part.confirmed_sample_count,final_text:true,revision_after_restart:false})?;
     }
-    store.set_status("recorded")?;
     let folder = store.folder().to_path_buf();
     drop(store);
-    let reopened = SessionStore::open(&folder)?.snapshot()?;
+    let manifest: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(folder.join("session.json"))?)?;
+    if manifest["parts"]
+        .as_array()
+        .is_some_and(|parts| !parts.is_empty())
+    {
+        return Err(
+            "Fixture requires a stale empty manifest so journal recovery is actually exercised"
+                .into(),
+        );
+    }
+    let restored = SessionStore::open(&folder)?;
+    let reopened = restored.snapshot()?;
+    if reopened.parts.iter().any(|part| part.status != "complete" || part.text.as_deref() != Some("Robin sagt: Ich schreibe den Bericht bis Freitag. Zum Budget fehlt noch eine Zusage.")) {
+        return Err("Transcript journal recovery lost confirmed text".into());
+    }
+    restored.set_status("recorded")?;
     let counts = ["system", "microphone"].map(|source| {
         reopened
             .parts

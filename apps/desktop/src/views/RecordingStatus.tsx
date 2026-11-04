@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Cpu } from "lucide-react";
+import { Cpu, TriangleAlert } from "lucide-react";
 import { clock } from "../domain";
 import type { AudioPart, DesktopApi, Locale, SystemLoad } from "../types";
 
@@ -121,6 +121,7 @@ export default function RecordingStatus({
         : de
           ? "Keine Störung gemeldet"
           : "No problem reported";
+  const warning = microphoneSilent || warningCount > 0 || behind;
   const status = paused
     ? de
       ? "Aufnahme pausiert"
@@ -132,15 +133,30 @@ export default function RecordingStatus({
     <section
       className="sidebar-recording"
       data-paused={paused || undefined}
+      data-warning={warning || undefined}
       aria-label={de ? "Aufnahmestatus" : "Recording status"}
     >
       <button
         type="button"
         className="sidebar-recording-head"
-        title={de ? "Zur laufenden Aufnahme" : "Go to the recording"}
+        title={
+          warning
+            ? `${de ? "Aufnahme prüfen" : "Check recording"}: ${audioNote}${behind ? (de ? " · Erkennung im Rückstand" : " · Transcription behind") : ""}`
+            : de
+              ? "Zur laufenden Aufnahme"
+              : "Go to the recording"
+        }
         onClick={onOpen}
       >
-        <span className="recording-pulse" aria-hidden="true" />
+        {warning ? (
+          <TriangleAlert
+            className="recording-warning"
+            size={17}
+            aria-label={de ? "Aufnahme prüfen" : "Check recording"}
+          />
+        ) : (
+          <span className="recording-pulse" aria-hidden="true" />
+        )}
         <span className="sidebar-recording-label">{status}</span>
         <span className="sidebar-recording-time">{clock(durationMs)}</span>
       </button>

@@ -154,6 +154,7 @@ export default function App({ api = desktopApi }: { api?: DesktopApi }) {
       return true;
     }
   });
+  /** Select the standard meeting view without discarding native recording or saved workspace state. */
   function chooseClassicMeetingView(classic: boolean) {
     setClassicMeetingView(classic);
     try {
@@ -2009,6 +2010,7 @@ export default function App({ api = desktopApi }: { api?: DesktopApi }) {
       />
     ) : undefined;
 
+  /** Apply a native pause change while retaining failures for the current recording. */
   function changeCapturePause(paused: boolean) {
     const id = app?.activeMeeting?.id;
     if (!id || !api.setCapturePaused) return;
@@ -2018,6 +2020,7 @@ export default function App({ api = desktopApi }: { api?: DesktopApi }) {
       setApp(state);
     });
   }
+  /** Change microphone muting through the native controller and surface failed actions. */
   function changeMicrophoneMute(muted: boolean) {
     const id = app?.activeMeeting?.id;
     if (!id || !api.setMicrophoneMuted) return;

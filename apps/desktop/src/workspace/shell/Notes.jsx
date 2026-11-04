@@ -44,6 +44,7 @@ export function Notes({ ctx }) {
         !element.classList.contains("workspace-content") &&
         getComputedStyle(element).position !== "absolute",
     );
+    /** Recalculate the available notes-pane limit without treating viewport changes as user preferences. */
     function measure() {
       const room =
         host.getBoundingClientRect().height -

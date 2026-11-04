@@ -123,18 +123,6 @@ pub struct WorkspaceState {
 impl WorkspaceState {
     /// Apply shared inputs and human overrides, preserving original evidence and deterministic history events.
     pub(crate) fn apply_context(&mut self, context: &WorkspaceContext) -> Result<()> {
-        if self
-            .context
-            .shared_notes
-            .iter()
-            .any(|old| !context.shared_notes.iter().any(|new| new == old))
-        {
-            for e in &self.entities {
-                if e.kind != "agenda" && !self.context_excluded_ids.contains(&e.id) {
-                    self.context_excluded_ids.push(e.id.clone());
-                }
-            }
-        }
         for entity in self
             .entities
             .iter()
@@ -146,8 +134,6 @@ impl WorkspaceState {
                 self.context_excluded_ids.push(entity.id.clone());
             }
         }
-        self.overview_refs
-            .retain(|id| !self.context_excluded_ids.contains(id));
         for a in &context.agenda {
             let previously_shared = self.context.agenda.iter().any(|entry| entry.id == a.id);
             self.context_excluded_ids.retain(|id| id != &a.id);
@@ -220,6 +206,35 @@ impl WorkspaceState {
             });
             self.applied_overrides.push(key);
         }
+        if self
+            .context
+            .shared_notes
+            .iter()
+            .any(|old| !context.shared_notes.iter().any(|new| new.id == old.id))
+        {
+            for e in &self.entities {
+                // Context-only human actions may not yet be part of the model checkpoint.
+                // Replay them first; only literal, still-current transcript evidence protects
+                // a confirmed item from invalidation of context-dependent AI drafts.
+                let confirmed_original = e.human_locked
+                    && !e.evidence.is_empty()
+                    && e.evidence.iter().all(|evidence| {
+                        !self.superseded_sources.contains(&evidence.source_id)
+                            && self.originals.iter().any(|source| {
+                                source.id == evidence.source_id
+                                    && source.text.contains(&evidence.quote)
+                            })
+                    });
+                if e.kind != "agenda"
+                    && !confirmed_original
+                    && !self.context_excluded_ids.contains(&e.id)
+                {
+                    self.context_excluded_ids.push(e.id.clone());
+                }
+            }
+        }
+        self.overview_refs
+            .retain(|id| !self.context_excluded_ids.contains(id));
         self.context = context.clone();
         Ok(())
     }

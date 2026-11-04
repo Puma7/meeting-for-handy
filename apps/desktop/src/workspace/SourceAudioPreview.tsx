@@ -64,14 +64,14 @@ export default function SourceAudioPreview({
         }}
       >
         {preview.status === "loading"
-          ? "Audio wird geladen …"
+          ? t("Audio wird geladen …")
           : t("Audiovorschau laden")}
       </button>
       {preview.status === "unavailable" && (
         <p role="status">
-          Für diesen Abschnitt ist keine lokale Audiovorschau verfügbar.
-          Archiviertes Audio kann nach dem Wiederherstellen erneut geprüft
-          werden.
+          {t(
+            "Für diesen Abschnitt ist keine lokale Audiovorschau verfügbar. Archiviertes Audio kann nach dem Wiederherstellen erneut geprüft werden.",
+          )}
         </p>
       )}
     </div>

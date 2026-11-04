@@ -342,3 +342,29 @@ describe("recording status in the sidebar (synthetic IPC)", () => {
     expect(vi.mocked(api.getSystemLoad!).mock.calls.length).toBe(reads);
   });
 });
+
+it.each([
+  { warningCount: 1, microphoneSilent: false, backlogMs: 0 },
+  { warningCount: 0, microphoneSilent: true, backlogMs: 0 },
+  { warningCount: 0, microphoneSilent: false, backlogMs: 31000 },
+])(
+  "keeps a distinct warning in the collapsed recording control (%j)",
+  (warning) => {
+    const { container } = render(
+      <div className="sidebar is-collapsed">
+        <RecordingStatus
+          locale="en"
+          paused={false}
+          durationMs={1000}
+          parts={[]}
+          microphoneMuted={false}
+          onOpen={() => {}}
+          {...warning}
+        />
+      </div>,
+    );
+    const control = container.querySelector(".sidebar-recording-head")!;
+    expect(control.querySelector(".recording-warning")).toBeTruthy();
+    expect(control.getAttribute("title")).toMatch(/Check recording/);
+  },
+);

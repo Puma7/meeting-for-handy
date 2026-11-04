@@ -5,6 +5,7 @@ export function useOverviewSize(ref) {
   const [size, setSize] = useState(null);
   useLayoutEffect(() => {
     const element = ref.current;
+    /** Measure the actual overview viewport after layout and notes-height changes. */
     function measure() {
       const height = element.getBoundingClientRect().height;
       const stacked = getComputedStyle(element).display === "flex";

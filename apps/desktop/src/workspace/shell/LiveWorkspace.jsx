@@ -216,6 +216,7 @@ function WorkspaceContents({
     context = useRef(null),
     contextRun = useRef(null),
     contextQueue = useRef(Promise.resolve()),
+    latestStatus = useRef(null),
     polling = useRef(false),
     alive = useRef(true);
   current.current = state;
@@ -229,6 +230,7 @@ function WorkspaceContents({
         : Math.max(end, source.endMs),
     0,
   );
+  /** Hydrate authoritative native progress and context, then synchronize only committed inputs when idle. */
   async function poll() {
     if (polling.current) return;
     polling.current = true;
@@ -244,6 +246,7 @@ function WorkspaceContents({
         native.revision < (context.current?.revision ?? 0)
       )
         return;
+      latestStatus.current = next;
       setStatus(next);
       if (
         !hydrated.current ||
@@ -278,21 +281,51 @@ function WorkspaceContents({
         !hydrated.current
       )
         return;
-      const next = sharedWorkspaceContext(
-        current.current,
-        context.current.revision,
-        extra
-          ? [...(context.current.overrides || []), extra]
-          : context.current.overrides || [],
-      );
-      if (sameSharedContext(next, context.current)) return;
-      await adapter.context(next, runId);
+      const updating = latestStatus.current?.status === "updating";
+      if (updating && !extra) return;
+      const next = extra
+        ? {
+            ...context.current,
+            overrides: [...(context.current.overrides || []), extra],
+          }
+        : sharedWorkspaceContext(
+            current.current,
+            context.current.revision,
+            extra
+              ? [...(context.current.overrides || []), extra]
+              : context.current.overrides || [],
+          );
+      if (sameSharedContext(next, context.current)) {
+        if (current.current.protocolShare?.pending) {
+          const saved = {
+            ...current.current,
+            protocolShare: { ...current.current.protocolShare, pending: false },
+          };
+          current.current = saved;
+          setState(saved);
+        }
+        return;
+      }
+      const accepted = await adapter.context(next, runId);
+      if (accepted === false) return; // Native inference won the race; retry after its publication.
       if (contextRun.current !== runId || !alive.current) return;
       context.current = { ...next, revision: next.revision + 1 };
       const saved = {
         ...current.current,
         nativeContextRevision: context.current.revision,
         nativeContextRunId: runId,
+        ...(current.current.protocolShare?.pending &&
+        sameSharedContext(
+          { sharedNotes: sharedWorkspaceContext(current.current).sharedNotes },
+          { sharedNotes: next.sharedNotes },
+        )
+          ? {
+              protocolShare: {
+                ...current.current.protocolShare,
+                pending: false,
+              },
+            }
+          : {}),
       };
       current.current = saved;
       setState(saved);
@@ -402,17 +435,36 @@ function WorkspaceContents({
       mutate((v) => ({
         ...v,
         notes: { ...v.notes, [kind]: text },
+        ...(kind === "protocol"
+          ? {
+              protocolShare: v.protocolShare ?? {
+                text: v.notes.protocol,
+                revision: v.protocolRevision || 1,
+                pending: false,
+              },
+            }
+          : {}),
         protocolRevision:
           (v.protocolRevision || 1) + (kind === "protocol" ? 1 : 0),
       })),
-    commitNote: (kind) =>
-      mutate((v) =>
-        v.history.at(-1)?.content === v.notes[kind] &&
-        v.history.at(-1)?.noteKind === kind
-          ? v
-          : {
-              ...v,
-              history: [
+    commitNote: (kind) => {
+      const v = current.current;
+      const saved = {
+        ...v,
+        ...(kind === "protocol"
+          ? {
+              protocolShare: {
+                text: v.notes.protocol,
+                revision: v.protocolRevision || 1,
+                pending: true,
+              },
+            }
+          : {}),
+        history:
+          v.history.at(-1)?.content === v.notes[kind] &&
+          v.history.at(-1)?.noteKind === kind
+            ? v.history
+            : [
                 ...v.history,
                 {
                   id: `note-${Date.now()}`,
@@ -422,8 +474,12 @@ function WorkspaceContents({
                   content: v.notes[kind],
                 },
               ],
-            },
-      ),
+      };
+      current.current = saved;
+      setState(saved);
+      if (kind === "protocol")
+        void syncContext().catch((error) => setError(String(error)));
+    },
   };
   /** Open an original source quote with explicit recognition-revision context. */
   function quote(item) {
@@ -903,6 +959,7 @@ function LiveTopics({ ctx, entities, quote, override, full, onExpand }) {
   const done = topics.filter(
     (topic) => topic.native?.status === "discussed",
   ).length;
+  /** Apply a preparation edit locally while retaining its explicit sharing state. */
   function change(fn) {
     ctx._mutate?.(fn);
   }

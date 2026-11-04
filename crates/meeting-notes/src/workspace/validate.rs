@@ -34,7 +34,14 @@ pub(crate) fn apply(
     let mut aliases = HashMap::new();
     let mut targets = HashSet::new();
     let mut events = vec![];
+    let mut acknowledged_open_topic = false;
     for mut c in response.changes {
+        acknowledged_open_topic |= request.purpose == "reconcile"
+            && c.kind == "agenda"
+            && ["touched", "unclear"].contains(&c.status.as_str())
+            && c.evidence
+                .iter()
+                .any(|evidence| missing_pledge(&evidence.quote));
         let phase_allowed = match request.purpose.as_str() {
             "tasks" => c.kind == "task",
             "facts" => ["fact", "decision"].contains(&c.kind.as_str()),
@@ -84,11 +91,20 @@ pub(crate) fn apply(
             .transpose()?;
         if let Some(old) = old {
             ensure!(
-                !old.human_locked
-                    && Some(old.revision) == c.target_revision
-                    && old.kind == c.kind
-                    && targets.insert(old.id.clone()),
-                "Der Eintrag ist manuell geschützt, doppelt oder wurde geändert."
+                !old.human_locked,
+                "Eine Modellantwort darf menschlich bestätigte Einträge nicht verändern."
+            );
+            ensure!(
+                Some(old.revision) == c.target_revision,
+                "Die Modellantwort verwendet eine veraltete Eintragsfassung."
+            );
+            ensure!(
+                old.kind == c.kind,
+                "Die Modellantwort verwechselt die Art des Zieleintrags."
+            );
+            ensure!(
+                targets.insert(old.id.clone()),
+                "Die Modellantwort ändert denselben Eintrag mehrfach."
             );
         } else {
             ensure!(
@@ -280,6 +296,11 @@ pub(crate) fn apply(
     if request.purpose != "reconcile" {
         next.overview_refs = refs;
     }
+    // Enforce the existing prompt contract for a gap the model itself acknowledged.
+    // A retained human-reviewed impulse satisfies it; never auto-reopen or invent a question.
+    ensure!(!acknowledged_open_topic || next.entities.iter().any(|entity|
+        entity.kind == "impulse" && !next.context_excluded_ids.contains(&entity.id)),
+        "Ein als offen belegter Agendapunkt benötigt den geforderten Frageimpuls; die Antwort wird vollständig verworfen.");
     next.events.extend(events.clone());
     *state = next;
     Ok(events)
@@ -381,7 +402,7 @@ pub(super) fn completion_quote_allowed(quote: &str) -> bool {
 }
 
 /// Detect an explicitly missing commitment so it cannot be promoted into an assigned task.
-fn missing_pledge(quote: &str) -> bool {
+pub(super) fn missing_pledge(quote: &str) -> bool {
     let text = quote.to_lowercase();
     [
         "fehlt",

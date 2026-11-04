@@ -812,9 +812,13 @@ export default function LiveNotesPanel({
       {!hasContent ? (
         running ? (
           <p className="muted live-empty">
-            {de
-              ? "Wartet auf bestätigten Text."
-              : "Waiting for confirmed text."}
+            {status?.status === "updating"
+              ? de
+                ? "Noch keine Ergebnisse."
+                : "No results yet."
+              : de
+                ? "Wartet auf bestätigten Text."
+                : "Waiting for confirmed text."}
           </p>
         ) : null
       ) : (

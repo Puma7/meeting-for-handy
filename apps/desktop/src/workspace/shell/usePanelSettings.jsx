@@ -6,6 +6,7 @@ import { useState } from "react";
 export function usePanelSettings(ctx, panel, initial) {
   const [fallback, setFallback] = useState(initial);
   const value = ctx?.panelViews?.[panel] ?? fallback;
+  /** Persist a user panel-control change while retaining the other saved panel settings. */
   function patch(update) {
     if (ctx?.setPanelView) ctx.setPanelView(panel, update);
     else setFallback((previous) => ({ ...previous, ...update }));

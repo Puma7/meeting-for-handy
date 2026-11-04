@@ -1399,3 +1399,32 @@ it("does not remember a cloud model as the local live summary model after switch
   );
   localStorage.clear();
 });
+
+it.each(["de", "en"] as const)(
+  "does not claim to wait for text during the first inference (%s)",
+  async (locale) => {
+    setup(
+      {
+        getLiveNotes: vi
+          .fn()
+          .mockResolvedValue(
+            status({ status: "updating", running: true, view: null }),
+          ),
+        startLiveNotes: vi.fn(),
+      },
+      { locale },
+    );
+    expect(
+      await screen.findByText(
+        locale === "de" ? "Noch keine Ergebnisse." : "No results yet.",
+      ),
+    ).toBeTruthy();
+    expect(
+      screen.queryByText(
+        locale === "de"
+          ? "Wartet auf bestätigten Text."
+          : "Waiting for confirmed text.",
+      ),
+    ).toBeNull();
+  },
+);

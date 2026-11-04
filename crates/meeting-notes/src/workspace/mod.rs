@@ -32,6 +32,7 @@ pub struct WorkspaceRunner {
 }
 
 impl WorkspaceRunner {
+    /// Acquire an isolated writer and restore model revisions plus the independent human-context journal.
     pub fn open(folder: &Path) -> Result<Self> {
         let (writer, state) = store::load(folder)?;
         let input = context_store::read(folder, &state.context)?;
@@ -117,6 +118,7 @@ impl WorkspaceRunner {
         )
     }
 
+    /// Detect latest transcript chunks not yet processed, including corrections and reversions.
     pub fn pending(&self, texts: &[LiveText]) -> Vec<LiveSource> {
         *self.observed.borrow_mut() = Some(live::pending(&[], texts));
         let latest = self.active_sources();
@@ -151,12 +153,14 @@ impl WorkspaceRunner {
         pending
     }
 
+    /// Select the newest processed revision of each independent transcript chunk.
     fn active_sources(&self) -> Vec<LiveSource> {
         latest_sources(&self.state.processed)
             .into_iter()
             .filter(|s| !self.state.superseded_sources.contains(&source_id(s)))
             .collect()
     }
+    /// Identify prior source authorities withdrawn by the current observed transcript.
     fn changed_source_ids(&self) -> HashSet<String> {
         self.observed
             .borrow()
@@ -176,6 +180,7 @@ impl WorkspaceRunner {
             })
             .unwrap_or_default()
     }
+    /// Project durable state together with the latest human context for the renderer.
     pub fn view(&self) -> WorkspaceState {
         let mut state = self.state.clone();
         if let Ok(context) = self.context.lock() {
@@ -183,15 +188,18 @@ impl WorkspaceRunner {
         }
         state
     }
+    /// Report whether shared inputs changed or an original-source replay remains unfinished.
     pub fn context_dirty(&self) -> bool {
         !self.changed_source_ids().is_empty()
             || self.state.replay_cursor.is_some()
             || self.context.lock().is_ok_and(|c| *c != self.state.context)
     }
+    /// Return the isolated workspace persistence directory for controlled context transactions.
     pub fn folder(&self) -> std::path::PathBuf {
         self.folder.clone()
     }
 
+    /// Initialize context for a new run without overwriting a newer native revision.
     pub fn set_context(&mut self, context: WorkspaceContext) -> Result<()> {
         context.validate()?;
         let mut current = self
@@ -254,6 +262,7 @@ impl WorkspaceRunner {
         }
         unreachable!()
     }
+    /// Validate all phases against one bounded source window and commit only their complete transaction.
     fn update_window(
         &mut self,
         client: &TextClient,
@@ -458,12 +467,38 @@ impl WorkspaceRunner {
                     }
                     "PHASE AUFGABEN: Antworte ausschließlich mit kind=task. Suche jede ausdrückliche Übernahme oder Zuweisung in requiredSourceIds. Ich schreibe den Bericht bis Freitag muss zwingend als task/open erscheinen, niemals nur als Fakt. Neue Aufgaben benötigen einen ausdrücklichen Übernahmebeleg. Fehlende Zusagen, offene Freigaben, Fragen, Wünsche und unverbindliche Vorschläge sind KEINE Aufgaben. Owner und due nur wörtlich belegt, sonst null. Status completed nur für eine vorhandene passende Aufgabe mit ausdrücklichem Erledigungsbeleg. Verändere keine menschlich geschützten Aufgaben. Keine Fakten, Entscheidungen, Agenda oder Impulse in dieser Phase. Wähle die Aufgaben für overviewRefs."
                 } else if phase == "facts" {
-                    schema["properties"]["changes"]["items"]["properties"]["kind"]["enum"] =
-                        serde_json::json!(["fact", "decision"]);
-                    for field in ["owner", "due"] {
-                        schema["properties"]["changes"]["items"]["properties"][field] =
-                            serde_json::json!({"type":"null"});
+                    let base = schema["properties"]["changes"]["items"].clone();
+                    let mut variants = Vec::new();
+                    for kind in ["fact", "decision"] {
+                        let mut branch = base.clone();
+                        branch["properties"]["kind"]["enum"] = serde_json::json!([kind]);
+                        branch["properties"]["targetId"] = serde_json::json!({"type":"null"});
+                        branch["properties"]["targetRevision"] = serde_json::json!({"type":"null"});
+                        branch["properties"]["text"]["type"] = "string".into();
+                        branch["properties"]["status"]["enum"] =
+                            serde_json::json!(["recorded", "unclear"]);
+                        for field in ["owner", "due"] {
+                            branch["properties"][field] = serde_json::json!({"type":"null"});
+                        }
+                        variants.push(branch);
                     }
+                    // Tasks may be present as overview context but cannot be retagged as facts.
+                    for entity in req.state.iter().filter(|entity| {
+                        !entity.human_locked && ["fact", "decision"].contains(&entity.kind.as_str())
+                    }) {
+                        let mut branch = base.clone();
+                        branch["properties"]["kind"]["enum"] = serde_json::json!([entity.kind]);
+                        branch["properties"]["targetId"] =
+                            serde_json::json!({"type":"string","enum":[entity.id]});
+                        branch["properties"]["targetRevision"] =
+                            serde_json::json!({"type":"integer","enum":[entity.revision]});
+                        for field in ["owner", "due"] {
+                            branch["properties"][field] = serde_json::json!({"type":"null"});
+                        }
+                        variants.push(branch);
+                    }
+                    schema["properties"]["changes"]["items"] =
+                        serde_json::json!({"anyOf":variants});
                     "PHASE FAKTEN UND BESCHLÜSSE: Nur kind=fact oder decision. Bereits in state enthaltene Aufgaben nicht als allgemeinen Fakt wiederholen. fact/recorded oder unclear für wichtige weitere Beobachtungen. Eine fehlende Budgetzusage ist eine offene Tatsache, keine Aufgabe. decision/recorded ausschließlich für einen ausdrücklichen Beschluss; withdrawn nur ausdrücklich belegte Rücknahme einer vorhandenen Entscheidung. Owner/due immer null. Keine Aufgaben, Impulse oder Agenda. overviewRefs wählt bis zu 8 wichtige vorhandene Aufgaben aus state sowie Fakten/Beschlüsse; neue Einträge über proposalId referenzieren."
                 } else {
                     let base = schema["properties"]["changes"]["items"].clone();
@@ -494,12 +529,35 @@ impl WorkspaceRunner {
                     for field in ["targetId", "targetRevision", "owner", "due"] {
                         new_impulse["properties"][field] = serde_json::json!({"type":"null"});
                     }
+                    // A small model can otherwise satisfy this phase by touching the agenda
+                    // and omit the already acknowledged open question. Give that question
+                    // one constrained request before the ordinary agenda/status reconciliation.
+                    let needs_question = !next.entities.iter().any(|entity| {
+                        entity.kind == "impulse" && !next.context_excluded_ids.contains(&entity.id)
+                    }) && req.transcript_sources.iter().any(|source| {
+                        req.required_source_ids().contains(&source.id)
+                            && source.text.contains('?')
+                            && next.entities.iter().any(|entity| {
+                                !next.context_excluded_ids.contains(&entity.id)
+                                    && ["fact", "agenda"].contains(&entity.kind.as_str())
+                                    && entity.evidence.iter().any(|evidence| {
+                                        evidence.source_id == source.id
+                                            && validate::missing_pledge(&evidence.quote)
+                                    })
+                            })
+                    });
+                    if needs_question {
+                        variants.clear();
+                        schema["properties"]["changes"]["minItems"] = 1.into();
+                    }
                     variants.push(new_impulse);
                     schema["properties"]["changes"]["items"] =
                         serde_json::json!({"anyOf":variants});
                     schema["properties"]["overviewRefs"]["maxItems"] = 0.into();
                     "PHASE IMPULSABGLEICH: Ausschließlich kind=impulse oder agenda. KEINE task, KEINE fact, KEINE decision, auch wenn sie in state stehen. Neue Fragen immer kind=impulse, status=open, attention=clarification, owner/due null, targetId/targetRevision null. Zu einer ausdrücklich fehlenden Antwort oder Zusage MUSS mindestens der wichtigste neue konkrete Frageimpuls ergänzt werden, sofern kein gleichbedeutender vorhanden ist: fehlende Budgetzusage ergibt die Frage Wie wird das Budget freigegeben. Ein Fakt über eine fehlende Zusage oder ein touched-Agendaeintrag ersetzt diesen Frageimpuls nicht. Keine Aufgabe daraus machen. Neue Impulse benötigen einen wörtlichen Beleg für das offene Thema. Vorhandene Impulse behalten; nur eine passende ausdrückliche Antwort darf ihren Status zu discussed ändern, Text bleibt null. Eine noch offene Freigabe ist keine erfolgte Freigabe. Agenda nur vorhandene id/revision: touched bei angerissenem Thema, discussed nur bei ausreichender inhaltlicher Antwort, unclear bei unklarem Bezug. Agendatext nicht ändern. Menschlich geschützte Einträge nicht ändern. overviewRefs bleibt in dieser Phase leer."
                 };
+                let question_only =
+                    phase == "reconcile" && schema["properties"]["changes"]["minItems"] == 1;
                 for attempt in 0..2 {
                     let repair = if attempt == 0 {
                         ""
@@ -535,6 +593,9 @@ impl WorkspaceRunner {
                     };
                     match validate::apply(&mut next, &req, &answer) {
                         Ok(events) => {
+                            ensure!(!question_only || next.entities.iter().any(|entity|
+                                entity.kind == "impulse" && !next.context_excluded_ids.contains(&entity.id)),
+                                "Der angeforderte Frageimpuls fehlt; keine Änderung wurde veröffentlicht.");
                             if phase == "facts" {
                                 let selected = overview_selection.get_or_insert_with(Vec::new);
                                 for id in &next.overview_refs {
@@ -544,6 +605,19 @@ impl WorkspaceRunner {
                                 }
                             }
                             committed_changes.extend(events);
+                            if question_only {
+                                let mut followup = base_group.clone();
+                                followup.extend(
+                                    next.entities
+                                        .iter()
+                                        .filter(|entity| {
+                                            entity.kind == "impulse"
+                                                && !next.context_excluded_ids.contains(&entity.id)
+                                        })
+                                        .cloned(),
+                                );
+                                groups.push_front((followup, true));
+                            }
                             break;
                         }
                         Err(error)
@@ -592,6 +666,7 @@ impl WorkspaceRunner {
         Ok(if replay { 0 } else { window.len() })
     }
 
+    /// Recheck both native context versions under the short disk lease before durable publication.
     fn commit(
         &mut self,
         mut next: WorkspaceState,
@@ -619,12 +694,14 @@ impl WorkspaceRunner {
     }
 }
 
+/// Bind an original identifier to exact recognized text as well as chunk identity.
 fn source_id(source: &LiveSource) -> String {
     use sha2::{Digest, Sha256};
     let digest = Sha256::digest(format!("{}\0{}", source.id, source.text).as_bytes());
     format!("s_{}", &format!("{digest:x}")[..16])
 }
 
+/// Offer bounded literal quote alternatives from the actual original source.
 fn quote_options(text: &str) -> Vec<String> {
     let mut options = Vec::new();
     let mut add = |s: &str| {
@@ -662,6 +739,7 @@ pub fn update_context(
     context_store::update(folder, context)
 }
 
+/// Keep the last processed revision independently for each transcript key and chunk.
 fn latest_sources(processed: &[LiveSource]) -> Vec<LiveSource> {
     let mut latest = std::collections::BTreeMap::new();
     for source in processed {

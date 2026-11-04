@@ -398,6 +398,7 @@ impl LiveNotes {
         self.status_with_preference(service, meeting_id, false)
     }
 
+    /// Expose current job controls together with the requested saved analysis view without changing job ownership.
     pub(crate) fn status_with_preference(
         &self,
         service: &Service,
@@ -450,6 +451,7 @@ impl LiveNotes {
             .is_some())
     }
 
+    /// Return false for shared-input edits deferred during inference; human-only actions remain durable. Keep progress/context lock ordering consistent and publish under the short context lease.
     pub(crate) fn set_workspace_context(
         &self,
         service: &Arc<Service>,
@@ -487,11 +489,25 @@ impl LiveNotes {
         {
             return Err("Der Auswertungslauf hat gewechselt. Bitte erneut versuchen.".into());
         }
+        // Match Job::status lock order: shared progress first, then context.
+        // Hold the short publication gate until the context write has completed.
+        let mut shared = job
+            .map(|job| job.shared.lock().map_err(|_| "Live-Zustand ist gesperrt."))
+            .transpose()?;
         let handle = job.and_then(|j| j.workspace_context.clone());
         let mut current = handle
             .as_ref()
             .map(|c| c.lock().map_err(|_| "Meetingkontext ist gesperrt."))
             .transpose()?;
+        if shared
+            .as_ref()
+            .is_some_and(|shared| shared.status == "updating")
+            && current.as_ref().is_some_and(|current| {
+                current.agenda != context.agenda || current.shared_notes != context.shared_notes
+            })
+        {
+            return Ok(false);
+        }
         let (next, projected) = match meeting_notes::workspace::update_context(&folder, &context) {
             Ok(value) => value,
             Err(error) => {
@@ -509,7 +525,7 @@ impl LiveNotes {
         }
         if let Some(job) = job {
             job.manual.store(true, Ordering::Release);
-            if let Ok(mut shared) = job.shared.lock() {
+            if let Some(shared) = shared.as_mut() {
                 if let Some(view) = shared.view.as_mut() {
                     view.workspace = Some(projected);
                 }
@@ -1101,6 +1117,122 @@ mod tests {
         assert_eq!(error.as_deref(), Some("Kurzfassung fehlgeschlagen."));
     }
 
+    #[test]
+    fn protocol_edits_are_deferred_at_native_publication_gate_until_inference_finishes() {
+        let root = fixture_root("deferred-protocol");
+        let service = Arc::new(Service::new(root.clone()).unwrap());
+        let meeting_id = "e".repeat(32);
+        let connection = meeting_notes::Connection {
+            endpoint: "http://127.0.0.1:1235/v1/".into(),
+            model: "synthetic".into(),
+            mode: "local".into(),
+            cloud_consent: false,
+            api_key: String::new(),
+        };
+        let runner = LiveRunner::start(
+            &live_root(&service, &meeting_id),
+            &meeting_id,
+            connection,
+            "en",
+        )
+        .unwrap()
+        .with_workspace(meeting_notes::workspace::WorkspaceContext {
+            agenda: vec![meeting_notes::workspace::Agenda {
+                id: "e_topic".into(),
+                revision: 1,
+                text: "Synthetic agenda".into(),
+            }],
+            ..Default::default()
+        })
+        .unwrap();
+        let folder = runner.workspace_folder().unwrap().to_path_buf();
+        let handle = runner.workspace_context().unwrap();
+        let run_id = runner.run().id.clone();
+        let context = handle.lock().unwrap().clone();
+        *service.live_notes.lock().unwrap() = Some(Job {
+            workspace_folder: Some(folder.clone()),
+            workspace_context: Some(Arc::clone(&handle)),
+            meeting_id: meeting_id.clone(),
+            control: AnalysisControl::default(),
+            manual: Arc::new(AtomicBool::new(false)),
+            interval_ms: Arc::new(AtomicU64::new(DEFAULT_INTERVAL_MS)),
+            shared: Arc::new(Mutex::new(Shared {
+                status: "updating".into(),
+                update_started: Some(Instant::now()),
+                waiting_for_transcript: false,
+                error: None,
+                pending_chars: 200,
+                last_update: Instant::now(),
+                last_trigger: None,
+                retry_at: None,
+                view: None,
+            })),
+            worker: None,
+            models: crate::model_sessions::Models::default(),
+        });
+        let before = std::fs::read_dir(&folder).unwrap().count();
+        let mut edit = context.clone();
+        edit.shared_notes
+            .push(meeting_notes::workspace::SharedNote {
+                id: "h_note".into(),
+                revision: 1,
+                text: "Synthetic committed edit".into(),
+            });
+        assert!(!service
+            .live_notes
+            .set_workspace_context(&service, &meeting_id, &run_id, edit.clone())
+            .unwrap());
+        assert_eq!(*handle.lock().unwrap(), context);
+        assert_eq!(std::fs::read_dir(&folder).unwrap().count(), before);
+        let mut human = context.clone();
+        human.overrides.push(meeting_notes::workspace::Override {
+            id: "e_topic".into(),
+            expected_revision: 1,
+            status: "discussed".into(),
+            saved: false,
+        });
+        assert!(service
+            .live_notes
+            .set_workspace_context(&service, &meeting_id, &run_id, human)
+            .unwrap());
+        assert_eq!(
+            meeting_notes::workspace::read_state(&folder)
+                .unwrap()
+                .entities[0]
+                .status,
+            "discussed"
+        );
+        edit.revision = handle.lock().unwrap().revision;
+        edit.overrides = handle.lock().unwrap().overrides.clone();
+        service
+            .live_notes
+            .lock()
+            .unwrap()
+            .as_ref()
+            .unwrap()
+            .shared
+            .lock()
+            .unwrap()
+            .status = "waiting".into();
+        assert!(service
+            .live_notes
+            .set_workspace_context(&service, &meeting_id, &run_id, edit)
+            .unwrap());
+        assert_eq!(
+            handle.lock().unwrap().shared_notes[0].text,
+            "Synthetic committed edit"
+        );
+        service.live_notes.stop().unwrap();
+        drop(runner);
+        assert_eq!(
+            meeting_notes::workspace::read_state(&folder)
+                .unwrap()
+                .context
+                .shared_notes[0]
+                .text,
+            "Synthetic committed edit"
+        );
+    }
     #[test]
     fn classic_job_controls_and_saved_workspace_are_both_visible() {
         let root = fixture_root("classic-and-workspace");

@@ -943,6 +943,16 @@ fn provider_context_rejection_shrinks_the_existing_frontier_before_sources() {
                 serde_json::from_slice(&bytes[header..header + size]).unwrap();
             let req: serde_json::Value =
                 serde_json::from_str(body["messages"][1]["content"].as_str().unwrap()).unwrap();
+            if req["purpose"] == "facts" {
+                let variants = body["response_format"]["json_schema"]["schema"]["properties"]
+                    ["changes"]["items"]["anyOf"]
+                    .as_array()
+                    .unwrap();
+                assert_eq!(variants.len(), 2); // Only new facts/decisions; the seed tasks are not valid targets.
+                assert!(variants
+                    .iter()
+                    .all(|branch| branch["properties"]["targetId"]["type"] == "null"));
+            }
             let count = req["state"].as_array().unwrap().len();
             assert_eq!(
                 req["window"]["requiredSourceIds"].as_array().unwrap().len(),
@@ -1008,4 +1018,269 @@ fn provider_context_rejection_shrinks_the_existing_frontier_before_sources() {
     assert!(sizes.starts_with(&[6, 3, 1, 2, 3, 1, 2]), "{sizes:?}");
     assert_eq!(runner.state.processed.len(), 1);
     assert_eq!(runner.state.entities.len(), 6);
+}
+
+#[test]
+fn edited_protocol_retains_human_confirmed_state_before_and_after_reopen() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut runner = WorkspaceRunner::open(dir.path()).unwrap();
+    let initial = WorkspaceContext {
+        shared_notes: vec![SharedNote {
+            id: "h_protocol".into(),
+            revision: 1,
+            text: "Shared context".into(),
+        }],
+        ..Default::default()
+    };
+    runner.set_context(initial).unwrap();
+    let current = runner.context.lock().unwrap().clone();
+    let (_, mut req, mut answer) = setup();
+    req.purpose = "reconcile".into();
+    answer["changes"][0]["kind"] = json!("impulse");
+    answer["changes"][0]["text"] = json!("Wer gibt den Entwurf frei?");
+    answer["changes"][0]["due"] = json!(null);
+    answer["overviewRefs"] = json!([]);
+    let mut next = runner.state.clone();
+    next.apply_context(&current).unwrap();
+    validate::apply(&mut next, &req, &answer.to_string()).unwrap();
+    next.originals = req.transcript_sources.clone();
+    let mut draft = next.entities[0].clone();
+    draft.id = "e_draft".into();
+    next.entities.push(draft);
+    let id = next.entities[0].id.clone();
+    runner
+        .commit(
+            next,
+            req.transcript_sources.clone(),
+            vec![],
+            &AnalysisControl::default(),
+            &current,
+        )
+        .unwrap();
+    let mut manual = current;
+    manual.overrides.push(Override {
+        id: id.clone(),
+        expected_revision: 1,
+        status: "discussed".into(),
+        saved: false,
+    });
+    let (mut edited, _) = update_context(dir.path(), &manual).unwrap();
+    // No inference checkpoint has incorporated the human action yet.
+    edited.shared_notes[0].text.push('!');
+    edited.shared_notes[0].revision += 1;
+    let (_, active) = update_context(dir.path(), &edited).unwrap();
+    assert!(!active.context_excluded_ids.contains(&id));
+    assert!(!active.context_excluded_ids.contains(&"e_draft".into()));
+    assert_eq!(active.entities[0].status, "discussed");
+    assert!(active.entities[0].human_locked);
+    drop(runner);
+    let reopened = read_state(dir.path()).unwrap();
+    assert!(!reopened.context_excluded_ids.contains(&id));
+    assert!(reopened.entities[0].human_locked);
+    assert_eq!(reopened.events.iter().filter(|e| e.human).count(), 1);
+    assert_eq!(reopened.originals, req.transcript_sources);
+    let mut revoked = reopened.clone();
+    let mut without_note = revoked.context.clone();
+    without_note.shared_notes.clear();
+    revoked.apply_context(&without_note).unwrap();
+    assert!(!revoked.context_excluded_ids.contains(&id));
+    assert!(revoked.context_excluded_ids.contains(&"e_draft".into()));
+    let mut withdrawn = reopened;
+    withdrawn
+        .superseded_sources
+        .push(req.transcript_sources[0].id.clone());
+    let mut edited = withdrawn.context.clone();
+    edited.shared_notes.clear();
+    withdrawn.apply_context(&edited).unwrap();
+    assert!(withdrawn.context_excluded_ids.contains(&id));
+}
+
+#[test]
+fn an_acknowledged_missing_commitment_cannot_be_only_a_touched_agenda() {
+    let (mut state, mut req, mut answer) = setup();
+    req.purpose = "reconcile".into();
+    req.transcript_sources[0].text = "There is no commitment on the budget.".into();
+    let agenda = Entity {
+        id: "e_agenda".into(),
+        revision: 1,
+        kind: "agenda".into(),
+        text: "Clarify budget".into(),
+        status: "open".into(),
+        attention: "normal".into(),
+        owner: None,
+        due: None,
+        evidence: vec![],
+        human_locked: false,
+    };
+    state.entities.push(agenda.clone());
+    req.state.push(agenda);
+    let change = &mut answer["changes"][0];
+    change["kind"] = json!("agenda");
+    change["targetId"] = json!("e_agenda");
+    change["targetRevision"] = json!(1);
+    change["text"] = json!(null);
+    change["status"] = json!("touched");
+    change["due"] = json!(null);
+    change["evidence"][0]["quote"] = json!("There is no commitment on the budget.");
+    answer["overviewRefs"] = json!([]);
+    let before = serde_json::to_vec(&state).unwrap();
+    assert!(validate::apply(&mut state, &req, &answer.to_string()).is_err());
+    assert_eq!(serde_json::to_vec(&state).unwrap(), before);
+    let mut impulse = answer["changes"][0].clone();
+    impulse["proposalId"] = json!("p_question");
+    impulse["kind"] = json!("impulse");
+    impulse["targetId"] = json!(null);
+    impulse["targetRevision"] = json!(null);
+    impulse["text"] = json!("Who can approve the budget?");
+    impulse["status"] = json!("open");
+    impulse["attention"] = json!("clarification");
+    answer["changes"].as_array_mut().unwrap().push(impulse);
+    validate::apply(&mut state, &req, &answer.to_string()).unwrap();
+    assert!(state
+        .entities
+        .iter()
+        .any(|e| e.kind == "impulse" && e.status == "open"));
+}
+
+#[test]
+fn acknowledged_open_questions_get_a_bounded_request_and_ignored_constraints_do_not_loop() {
+    use std::{
+        io::{Read, Write},
+        net::TcpListener,
+        thread,
+    };
+    for omit in [false, true] {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let endpoint = format!("http://{}/v1/", listener.local_addr().unwrap());
+        let server = thread::spawn(move || {
+            let mut calls = Vec::new();
+            loop {
+                let (mut stream, _) = listener.accept().unwrap();
+                stream
+                    .set_read_timeout(Some(std::time::Duration::from_secs(3)))
+                    .unwrap();
+                let mut bytes = Vec::new();
+                let mut buffer = [0; 8192];
+                let header = loop {
+                    let n = stream.read(&mut buffer).unwrap();
+                    assert!(n > 0 && bytes.len() < 500000);
+                    bytes.extend_from_slice(&buffer[..n]);
+                    if let Some(p) = bytes.windows(4).position(|v| v == b"\r\n\r\n") {
+                        break p + 4;
+                    }
+                };
+                let size = String::from_utf8_lossy(&bytes[..header])
+                    .lines()
+                    .filter_map(|v| v.split_once(':'))
+                    .find(|(k, _)| k.eq_ignore_ascii_case("content-length"))
+                    .unwrap()
+                    .1
+                    .trim()
+                    .parse::<usize>()
+                    .unwrap();
+                while bytes.len() < header + size {
+                    let n = stream.read(&mut buffer).unwrap();
+                    assert!(n > 0);
+                    bytes.extend_from_slice(&buffer[..n]);
+                }
+                let body: serde_json::Value =
+                    serde_json::from_slice(&bytes[header..header + size]).unwrap();
+                let req: serde_json::Value =
+                    serde_json::from_str(body["messages"][1]["content"].as_str().unwrap()).unwrap();
+                let schema = &body["response_format"]["json_schema"]["schema"];
+                let forced = schema["properties"]["changes"]["minItems"] == 1;
+                let phase = req["purpose"].as_str().unwrap();
+                calls.push((phase.to_owned(), forced));
+                assert!(calls.len() <= 3);
+                let mut changes = Vec::new();
+                if phase == "facts" || (forced && !omit) {
+                    changes.push(json!({"proposalId":"p_new","kind":if forced {"impulse"} else {"fact"},"targetId":null,"targetRevision":null,"text":if forced {"Who can approve the budget?"} else {"Budget commitment is missing."},"status":if forced {"open"} else {"unclear"},"attention":"clarification","owner":null,"due":null,"evidence":[{"sourceId":req["transcriptSources"][0]["id"],"quote":"There is no commitment on the budget."}],"relatedEntityIds":[]}));
+                } else if !forced {
+                    changes.push(json!({"proposalId":"p_agenda","kind":"agenda","targetId":"e_budget","targetRevision":1,"text":null,"status":"touched","attention":"normal","owner":null,"due":null,"evidence":[{"sourceId":req["transcriptSources"][0]["id"],"quote":"There is no commitment on the budget."}],"relatedEntityIds":[]}));
+                }
+                if forced {
+                    assert_eq!(
+                        schema["properties"]["changes"]["items"]["anyOf"]
+                            .as_array()
+                            .unwrap()
+                            .len(),
+                        1
+                    );
+                    assert_eq!(
+                        schema["properties"]["changes"]["items"]["anyOf"][0]["properties"]["kind"]
+                            ["enum"],
+                        json!(["impulse"])
+                    );
+                }
+                let answer=json!({"contractVersion":CONTRACT_VERSION,"requestId":req["requestId"],"changes":changes,"overviewRefs":[],"unresolvedContextIds":[],"moreChangesPossible":false}).to_string();
+                let payload = format!(
+                    "data: {}\n\ndata: {}\n\n",
+                    json!({"choices":[{"delta":{"content":answer},"finish_reason":null}]}),
+                    json!({"choices":[{"delta":{},"finish_reason":"stop"}]})
+                );
+                write!(stream,"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{payload}",payload.len()).unwrap();
+                if phase == "reconcile" && (omit || !forced) {
+                    break;
+                }
+            }
+            calls
+        });
+        let dir = tempfile::tempdir().unwrap();
+        let mut runner = WorkspaceRunner::open(dir.path()).unwrap();
+        runner
+            .set_context(WorkspaceContext {
+                agenda: vec![Agenda {
+                    id: "e_budget".into(),
+                    revision: 1,
+                    text: "Clarify budget".into(),
+                }],
+                ..Default::default()
+            })
+            .unwrap();
+        let client = TextClient::new(&crate::Connection {
+            endpoint,
+            model: "synthetic".into(),
+            mode: "local".into(),
+            cloud_consent: false,
+            api_key: String::new(),
+        })
+        .unwrap();
+        let texts = [LiveText {
+            key: "question".into(),
+            track: "system".into(),
+            start_ms: 0,
+            end_ms: 3000,
+            text: "Who can approve the budget? There is no commitment on the budget.".into(),
+        }];
+        let pending = runner.pending(&texts);
+        let result = runner.update(&client, &pending, &AnalysisControl::default(), "en");
+        let calls = server.join().unwrap();
+        if omit {
+            assert!(result.is_err());
+            assert!(runner.state.processed.is_empty());
+            assert_eq!(runner.state.revision, 0);
+            assert_eq!(calls.len(), 2);
+        } else {
+            assert_eq!(result.unwrap(), 1);
+            assert_eq!(
+                calls,
+                vec![
+                    ("facts".into(), false),
+                    ("reconcile".into(), true),
+                    ("reconcile".into(), false)
+                ]
+            );
+            assert!(runner.state.entities.iter().any(|e| e.kind == "impulse"));
+            assert_eq!(
+                runner
+                    .state
+                    .entities
+                    .iter()
+                    .find(|e| e.id == "e_budget")
+                    .unwrap()
+                    .status,
+                "touched"
+            );
+        }
+    }
 }

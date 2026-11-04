@@ -87,34 +87,12 @@ fn bridge_protocol(_: impl std::fmt::Display) -> BridgeError {
 /// Args are the values after `--asr-worker`: model, backend directory, session
 /// directory, track source, and optional `--cpu`. This function opens no device.
 pub fn worker_main(args: &[String]) -> Result<(), String> {
-    if !(4..=5).contains(&args.len())
-        || !["system", "microphone", "batch"].contains(&args[3].as_str())
-        || (args.len() == 5 && args[4] != "--cpu")
-    {
-        return Err("Invalid recognition worker arguments".into());
-    }
-    let model_path = Path::new(&args[0]);
-    let backend_dir = Path::new(&args[1]);
-    let folder = Path::new(&args[2])
-        .canonicalize()
-        .map_err(|_| "Session directory is unavailable")?;
-    let source = &args[3];
-    let identity = handy_bridge::verify_model_snapshot(&folder, model_path)
-        .map_err(|error| error.to_string())?;
-    let batch = source == "batch";
-    if batch != identity.source_model_metadata.ready_for_batch() {
-        return Err("Recognition mode differs from the saved model identity".into());
-    }
-    let engine = if batch {
-        NativeEngine::load_batch(model_path, args.len() == 5, Some(backend_dir))
-    } else {
-        NativeEngine::load(model_path, args.len() == 5, Some(backend_dir))
-    }
-    .map_err(|error| error.to_string())?;
     let stdin = std::io::stdin();
     let stdout = std::io::stdout();
     let mut input = BufReader::new(stdin.lock());
     let mut output = BufWriter::new(stdout.lock());
+    let (engine, folder, batch) = initialize_worker(args, &mut output)?;
+    let source = &args[3];
     send_reply(
         &mut output,
         Reply {
@@ -128,44 +106,14 @@ pub fn worker_main(args: &[String]) -> Result<(), String> {
         match request {
             Request::Quit => return Ok(()),
             Request::BatchSection { part, previous } if batch => {
-                batch_sample_count(part.confirmed_sample_count)?;
-                let mut pcm = Vec::new();
-                if let Some(previous) = previous {
-                    if previous.source != part.source
-                        || previous.start_sample >= part.start_sample
-                        || previous
-                            .start_sample
-                            .checked_add(previous.confirmed_sample_count)
-                            != Some(part.start_sample)
-                    {
-                        return Err("Batch context is not contiguous on this track".into());
-                    }
-                    batch_sample_count(previous.confirmed_sample_count)?;
-                    let preceding = meeting_core::read_closed_audio(&folder, &previous)
-                        .map_err(|_| "Batch context failed verification")?;
-                    pcm.extend_from_slice(
-                        &preceding[preceding.len().saturating_sub(BATCH_CONTEXT_SAMPLES)..],
-                    );
-                }
-                let context_samples = pcm.len();
-                pcm.extend(
-                    meeting_core::read_closed_audio(&folder, &part)
-                        .map_err(|_| "Closed audio did not pass batch verification")?,
-                );
-                let (text, overlap_words) = engine
-                    .transcribe_batch(&pcm, context_samples)
-                    .map_err(|error| error.to_string())?;
-                send_reply(
-                    &mut output,
-                    Reply {
-                        ok: true,
-                        committed: text.clone(),
-                        full: text,
-                        overlap_words,
-                        ..Reply::default()
-                    },
-                )?;
+                let result = batch_section(&folder, &part, previous.as_deref(), |pcm, context| {
+                    engine
+                        .transcribe_batch(pcm, context)
+                        .map_err(|error| error.to_string())
+                });
+                reply_to_batch(&mut output, result)?;
             }
+
             Request::Begin { file } if !batch => {
                 let path = worker_audio_path(&folder, &file, source)?;
                 let result = engine.with_stream(&default_run_options(), |stream| {
@@ -250,6 +198,109 @@ pub fn worker_main(args: &[String]) -> Result<(), String> {
                 }
             }
             _ => return Err("Recognition requires a new bounded audio window first".into()),
+        }
+    }
+}
+
+/// Send controlled model/identity/argument failures before the ready handshake,
+/// so the supervisor retries only an actual unexplained process interruption.
+fn initialize_worker(
+    args: &[String],
+    output: &mut impl Write,
+) -> Result<(NativeEngine, PathBuf, bool), String> {
+    let result = (|| -> Result<_, String> {
+        if !(4..=5).contains(&args.len())
+            || !["system", "microphone", "batch"].contains(&args[3].as_str())
+            || (args.len() == 5 && args[4] != "--cpu")
+        {
+            return Err("Invalid recognition worker arguments".into());
+        }
+        let model_path = Path::new(&args[0]);
+        let backend_dir = Path::new(&args[1]);
+        let folder = Path::new(&args[2])
+            .canonicalize()
+            .map_err(|_| "Session directory is unavailable")?;
+        let source = &args[3];
+        let identity = handy_bridge::verify_model_snapshot(&folder, model_path)
+            .map_err(|error| error.to_string())?;
+        let batch = source == "batch";
+        if batch != identity.source_model_metadata.ready_for_batch() {
+            return Err("Recognition mode differs from the saved model identity".into());
+        }
+        let engine = if batch {
+            NativeEngine::load_batch(model_path, args.len() == 5, Some(backend_dir))
+        } else {
+            NativeEngine::load(model_path, args.len() == 5, Some(backend_dir))
+        }
+        .map_err(|error| error.to_string())?;
+        Ok((engine, folder, batch))
+    })();
+    if let Err(error) = &result {
+        let _ = send_reply(
+            output,
+            Reply {
+                ok: false,
+                error: Some(error.clone()),
+                ..Reply::default()
+            },
+        );
+    }
+    result
+}
+
+/// Verify closed audio and same-track context before granting PCM to native batch ASR.
+fn batch_section(
+    folder: &Path,
+    part: &AudioPart,
+    previous: Option<&AudioPart>,
+    transcribe: impl FnOnce(&[f32], usize) -> Result<(String, usize), String>,
+) -> Result<Reply, String> {
+    batch_sample_count(part.confirmed_sample_count)?;
+    let mut pcm = Vec::new();
+    if let Some(previous) = previous {
+        if previous.source != part.source
+            || previous.start_sample >= part.start_sample
+            || previous
+                .start_sample
+                .checked_add(previous.confirmed_sample_count)
+                != Some(part.start_sample)
+        {
+            return Err("Batch context is not contiguous on this track".into());
+        }
+        batch_sample_count(previous.confirmed_sample_count)?;
+        let preceding = meeting_core::read_closed_audio(folder, previous)
+            .map_err(|_| "Batch context failed verification")?;
+        pcm.extend_from_slice(&preceding[preceding.len().saturating_sub(BATCH_CONTEXT_SAMPLES)..]);
+    }
+    let context_samples = pcm.len();
+    pcm.extend(
+        meeting_core::read_closed_audio(folder, part)
+            .map_err(|_| "Closed audio did not pass batch verification")?,
+    );
+    let (text, overlap_words) = transcribe(&pcm, context_samples)?;
+    Ok(Reply {
+        ok: true,
+        committed: text.clone(),
+        full: text,
+        overlap_words,
+        ..Reply::default()
+    })
+}
+
+/// Send explicit permanent failures instead of misclassifying a controlled exit as process loss.
+fn reply_to_batch(output: &mut impl Write, result: Result<Reply, String>) -> Result<(), String> {
+    match result {
+        Ok(reply) => send_reply(output, reply),
+        Err(error) => {
+            let _ = send_reply(
+                output,
+                Reply {
+                    ok: false,
+                    error: Some(error.clone()),
+                    ..Reply::default()
+                },
+            );
+            Err(error)
         }
     }
 }
@@ -365,7 +416,29 @@ enum WorkerKind {
     Speaker(Arc<AtomicBool>),
 }
 
+/// Preserve process-loss classification across the startup handshake without
+/// turning model, protocol or integrity errors into automatic retries.
+#[derive(Debug)]
+struct StartFailure {
+    message: String,
+    transient: bool,
+}
+impl From<String> for StartFailure {
+    fn from(message: String) -> Self {
+        Self {
+            message,
+            transient: false,
+        }
+    }
+}
+impl From<&str> for StartFailure {
+    fn from(message: &str) -> Self {
+        message.to_owned().into()
+    }
+}
+
 impl Worker {
+    /// Start an owned ASR process and retain the legacy caller-facing error text.
     fn start(
         model: &Path,
         backend: &Path,
@@ -383,7 +456,9 @@ impl Worker {
             absolute_deadline,
             WorkerKind::Asr,
         )
+        .map_err(|error| error.message)
     }
+    /// Start optional speaker analysis with its own cancellation flag and no capture ownership.
     pub(super) fn start_speaker(
         model: &Path,
         backend: &Path,
@@ -399,7 +474,9 @@ impl Worker {
             None,
             WorkerKind::Speaker(cancel),
         )
+        .map_err(|error| error.message)
     }
+    /// Build the owned worker command and retain typed startup failures through the ready handshake.
     fn start_mode(
         model: &Path,
         backend: &Path,
@@ -408,7 +485,7 @@ impl Worker {
         cpu_only: bool,
         absolute_deadline: Option<Instant>,
         kind: WorkerKind,
-    ) -> Result<Self, String> {
+    ) -> Result<Self, StartFailure> {
         if absolute_deadline.is_some_and(|deadline| Instant::now() >= deadline) {
             return Err("Synthetic worker deadline elapsed".into());
         }
@@ -437,6 +514,17 @@ impl Worker {
             use std::os::windows::process::CommandExt;
             command.creation_flags(0x08000000);
         }
+        Self::start_command(command, kind, absolute_deadline, Duration::from_secs(180))
+    }
+
+    /// Supervise one owned process and validate its initial reply before exposing it.
+    /// The shorter deadline in tests exercises the actual pipe/handshake path.
+    fn start_command(
+        mut command: Command,
+        kind: WorkerKind,
+        absolute_deadline: Option<Instant>,
+        ready_timeout: Duration,
+    ) -> Result<Self, StartFailure> {
         let mut child = command
             .spawn()
             .map_err(|_| "Recognition child process could not start")?;
@@ -508,7 +596,12 @@ impl Worker {
                 WorkerKind::Speaker(flag) => Some(flag),
             },
         };
-        worker.receive(Duration::from_secs(180))?;
+        worker
+            .receive(ready_timeout)
+            .map_err(|message| StartFailure {
+                message,
+                transient: worker.transient_failure.get(),
+            })?;
         Ok(worker)
     }
 
@@ -673,14 +766,21 @@ pub(crate) fn spawn_batch(
                 let attempt_result = run_batch(&store, &stop, |part, previous| {
                     let worker = match &mut worker {
                         Some(worker) => worker,
-                        slot @ None => slot.insert(Worker::start(
+                        slot @ None => match Worker::start_mode(
                             &model,
                             &backend,
                             store.folder(),
                             "batch",
                             true,
                             None,
-                        )?),
+                            WorkerKind::Asr,
+                        ) {
+                            Ok(worker) => slot.insert(worker),
+                            Err(error) => {
+                                retryable = error.transient;
+                                return Err(error.message);
+                            }
+                        },
                     };
                     let audio_only = |part: &AudioPart| {
                         let mut audio = part.clone();
@@ -841,6 +941,7 @@ struct TrackRunOptions {
     restarts: Option<Arc<AtomicUsize>>,
 }
 
+/// Launch one recognition track with its configured replay and backend options.
 fn spawn_track_options(
     store: SessionStore,
     model_path: PathBuf,
@@ -863,6 +964,7 @@ fn spawn_track_options(
     })
 }
 
+/// Supervise a track recognizer, restarting only within the bounded recovery policy.
 fn spawn_track_with<R, S>(
     store: SessionStore,
     source: String,
@@ -917,6 +1019,7 @@ where
     })
 }
 
+/// Read only confirmed sequential audio and persist recognition checkpoints independently of capture.
 fn run_track<R: Recognizer>(
     store: &SessionStore,
     source: &str,
@@ -1592,6 +1695,152 @@ mod tests {
         assert_eq!(calls, 1);
     }
 
+    fn protocol_test_child(script: &str) -> Command {
+        #[cfg(windows)]
+        let mut command = {
+            use std::os::windows::process::CommandExt;
+            let mut command = Command::new("powershell.exe");
+            command.args(["-NoProfile", "-NonInteractive", "-Command", script]);
+            command.creation_flags(0x08000000);
+            command
+        };
+        #[cfg(not(windows))]
+        let mut command = {
+            let mut command = Command::new("sh");
+            command.args(["-c", script]);
+            command
+        };
+        command
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        command
+    }
+
+    #[test]
+    fn batch_retries_transient_startup_but_not_protocol_or_model_failures() {
+        #[cfg(windows)]
+        let cases = [
+            ("exit 0", true),
+            ("Start-Sleep -Seconds 5", true),
+            ("[Console]::Out.WriteLine('not JSON')", false),
+            (
+                "[Console]::Out.WriteLine('{\"ok\":false,\"error\":\"model unavailable\"}')",
+                false,
+            ),
+        ];
+        #[cfg(not(windows))]
+        let cases = [
+            ("exit 0", true),
+            ("exec sleep 5", true),
+            ("printf 'not JSON\n'", false),
+            (
+                "printf '{\"ok\":false,\"error\":\"model unavailable\"}\n'",
+                false,
+            ),
+        ];
+        for (script, transient) in cases {
+            let mut attempts = 0;
+            let result = retry_batch(
+                || {
+                    attempts += 1;
+                    match Worker::start_command(
+                        protocol_test_child(script),
+                        WorkerKind::Asr,
+                        None,
+                        if script.to_ascii_lowercase().contains("sleep") {
+                            Duration::from_secs(2)
+                        } else {
+                            Duration::from_secs(10)
+                        },
+                    ) {
+                        Ok(_) => (Ok(()), false),
+                        Err(error) => (Err(error.message), error.transient),
+                    }
+                },
+                || {},
+            );
+            assert!(result.is_err());
+            assert_eq!(attempts, if transient { 3 } else { 1 }, "{script}");
+        }
+    }
+
+    #[test]
+    fn controlled_initialization_errors_are_reported_before_ready() {
+        let mut bytes = Vec::new();
+        assert!(initialize_worker(&[], &mut bytes).is_err());
+        let reply: Reply = serde_json::from_slice(&bytes).unwrap();
+        assert!(!reply.ok);
+        assert_eq!(
+            reply.error.as_deref(),
+            Some("Invalid recognition worker arguments")
+        );
+        let root =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../.build/asr-batch-regressions");
+        std::fs::create_dir_all(&root).unwrap();
+        bytes.clear();
+        let args = vec![
+            "missing-model.gguf".into(),
+            "missing-runtime".into(),
+            root.to_string_lossy().into_owned(),
+            "batch".into(),
+        ];
+        assert!(initialize_worker(&args, &mut bytes).is_err());
+        assert!(!serde_json::from_slice::<Reply>(&bytes).unwrap().ok);
+    }
+    #[test]
+    fn corrupt_batch_audio_sends_a_permanent_error_reply_before_exit() {
+        let dir =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../.build/asr-batch-regressions");
+        let store = SessionStore::create(
+            &dir,
+            "Synthetic corrupt batch",
+            handy_bridge::PARAKEET_ULTRA_ID,
+            "Output",
+            None,
+        )
+        .unwrap();
+        let mut writer = meeting_core::PcmWriter::new(store.clone(), "system").unwrap();
+        writer.append(&[3000; 1600]).unwrap();
+        writer.finish().unwrap();
+        let mut part = store.snapshot().unwrap().parts[0].clone();
+        part.confirmed_sha256 = "0".repeat(64);
+        let result = batch_section(store.folder(), &part, None, |_, _| {
+            panic!("corrupt audio must not reach native ASR")
+        });
+        let mut output = Vec::new();
+        assert!(reply_to_batch(&mut output, result).is_err());
+        let reply: Reply =
+            serde_json::from_slice(&output).expect("explicit error reply before exit");
+        assert!(!reply.ok);
+        assert_eq!(
+            reply.error.as_deref(),
+            Some("Closed audio did not pass batch verification")
+        );
+        let wire = serde_json::to_string(&reply).unwrap();
+        assert!(!wire.contains('\''));
+        #[cfg(windows)]
+        let script = format!(
+            r#"[Console]::Out.WriteLine('{{"ok":true}}');$null=[Console]::In.ReadLine();[Console]::Out.WriteLine('{wire}');$null=[Console]::In.ReadLine()"#
+        );
+        #[cfg(not(windows))]
+        let script=format!("printf '%s\n' '{{\"ok\":true}}'; IFS= read -r line; printf '%s\n' '{wire}'; IFS= read -r line");
+        let mut worker = Worker::start_command(
+            protocol_test_child(&script),
+            WorkerKind::Asr,
+            None,
+            Duration::from_secs(5),
+        )
+        .unwrap();
+        let error = worker
+            .call(Request::BatchSection {
+                part,
+                previous: None,
+            })
+            .unwrap_err();
+        assert_eq!(error, "Closed audio did not pass batch verification");
+        assert!(!worker.transient_failure.get());
+    }
     #[test]
     fn feed_rejects_unconfirmed_or_nonsequential_audio() {
         assert!(validate_feed(0, 0, 8000, 8000).is_ok());

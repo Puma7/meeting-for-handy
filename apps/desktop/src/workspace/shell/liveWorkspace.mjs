@@ -18,6 +18,14 @@ export function loadLiveState(raw) {
   try {
     const state = JSON.parse(raw);
     if (
+      state.protocolShare !== undefined &&
+      (typeof state.protocolShare?.text !== "string" ||
+        !Number.isSafeInteger(state.protocolShare?.revision) ||
+        state.protocolShare.revision < 1 ||
+        typeof state.protocolShare?.pending !== "boolean")
+    )
+      throw Error("protocol share format");
+    if (
       state.version !== 1 ||
       !Array.isArray(state.topics) ||
       !Array.isArray(state.history) ||
@@ -39,14 +47,16 @@ export function loadLiveState(raw) {
 }
 /** Project only explicitly shared topics, protocol notes and manual overrides into native DTOs. */
 export function sharedWorkspaceContext(state, revision = 0, overrides = []) {
-  const protocol = Array.from(state.notes.protocol);
+  const protocol = Array.from(
+    state.protocolShare?.text ?? state.notes.protocol,
+  );
   const sharedNotes = [];
   for (let i = 0; i < protocol.length; i += 1600) {
     const text = protocol.slice(i, i + 1600).join("");
     if (text.trim())
       sharedNotes.push({
         id: `h_protocol_${i / 1600}`,
-        revision: state.protocolRevision || 1,
+        revision: state.protocolShare?.revision ?? state.protocolRevision ?? 1,
         text,
       });
   }
@@ -130,7 +140,16 @@ export function restoreSharedContext(local, native, runId) {
   )
     return local;
   const protocol = native.sharedNotes.map((n) => n.text).join("");
-  const divergent = local.notes.protocol && local.notes.protocol !== protocol;
+  const pending = local.protocolShare?.pending === true;
+  const editing =
+    local.protocolShare && local.notes.protocol !== local.protocolShare.text;
+  const keepLocal = pending || editing;
+  const divergent =
+    !keepLocal && local.notes.protocol && local.notes.protocol !== protocol;
+  const nativeRevision = Math.max(
+    1,
+    ...native.sharedNotes.map((n) => n.revision),
+  );
   return {
     ...local,
     nativeContextRevision: native.revision,
@@ -143,8 +162,14 @@ export function restoreSharedContext(local, native, runId) {
         )
         .map((topic) => ({ ...topic, shared: false })),
     ],
-    notes: { ...local.notes, protocol },
-    protocolRevision: Math.max(1, ...native.sharedNotes.map((n) => n.revision)),
+    notes: {
+      ...local.notes,
+      protocol: keepLocal ? local.notes.protocol : protocol,
+    },
+    protocolRevision: keepLocal ? local.protocolRevision : nativeRevision,
+    protocolShare: pending
+      ? local.protocolShare
+      : { text: protocol, revision: nativeRevision, pending: false },
     history: divergent
       ? [
           ...local.history,

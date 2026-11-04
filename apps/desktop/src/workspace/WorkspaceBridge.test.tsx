@@ -1,5 +1,6 @@
 import { StrictMode } from "react";
 import {
+  act,
   fireEvent,
   render,
   screen,
@@ -94,6 +95,7 @@ function fixture() {
         item.revision++;
         item.humanLocked = true;
       }
+      return true;
     }),
     start: vi.fn(),
     stop: vi.fn(),
@@ -744,3 +746,117 @@ it.each([false, true])(
     );
   },
 );
+
+it("commits protocol notes after inference and retains a newer uncommitted draft on reopen", async () => {
+  const f = fixture();
+  const mounted = render(
+    <LiveWorkspace adapter={f.adapter} meeting={f.meeting} onBack={() => {}} />,
+  );
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Fürs Protokoll" }),
+  );
+  let note = screen.getByRole("textbox", {
+    name: "Protokollnotiz",
+  }) as HTMLTextAreaElement;
+  await waitFor(() => expect(note.value).toBe("Gesicherte Protokollnotiz"));
+  fireEvent.change(note, { target: { value: "Committed protocol edit" } });
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 2100));
+  });
+  expect(f.adapter.context).not.toHaveBeenCalled();
+  fireEvent.blur(note);
+  await act(async () => {});
+  expect(f.adapter.context).not.toHaveBeenCalled();
+  mounted.unmount();
+  const reloaded = render(
+    <LiveWorkspace adapter={f.adapter} meeting={f.meeting} onBack={() => {}} />,
+  );
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Fürs Protokoll" }),
+  );
+  note = screen.getByRole("textbox", {
+    name: "Protokollnotiz",
+  }) as HTMLTextAreaElement;
+  await waitFor(() => expect(note.value).toBe("Committed protocol edit"));
+  fireEvent.change(note, { target: { value: "New uncommitted draft" } });
+  f.status.status = "waiting";
+  await waitFor(() => expect(f.adapter.context).toHaveBeenCalledOnce(), {
+    timeout: 4000,
+  });
+  expect(
+    f.adapter.context.mock.calls[0][0].sharedNotes.map((n) => n.text).join(""),
+  ).toBe("Committed protocol edit");
+  expect(note.value).toBe("New uncommitted draft");
+  reloaded.unmount();
+  render(
+    <LiveWorkspace adapter={f.adapter} meeting={f.meeting} onBack={() => {}} />,
+  );
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Fürs Protokoll" }),
+  );
+  await waitFor(() =>
+    expect(
+      (
+        screen.getByRole("textbox", {
+          name: "Protokollnotiz",
+        }) as HTMLTextAreaElement
+      ).value,
+    ).toBe("New uncommitted draft"),
+  );
+});
+
+it("does not acknowledge a context write deferred by the native inference gate", async () => {
+  const f = fixture();
+  f.status.status = "waiting";
+  f.adapter.context.mockImplementationOnce(async () => false);
+  render(
+    <LiveWorkspace adapter={f.adapter} meeting={f.meeting} onBack={() => {}} />,
+  );
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Fürs Protokoll" }),
+  );
+  const note = screen.getByRole("textbox", {
+    name: "Protokollnotiz",
+  }) as HTMLTextAreaElement;
+  await waitFor(() => expect(note.value).toBe("Gesicherte Protokollnotiz"));
+  fireEvent.change(note, { target: { value: "Queued at native race" } });
+  fireEvent.blur(note);
+  await waitFor(() => expect(f.adapter.context).toHaveBeenCalledOnce());
+  expect(f.status.workspaceContext.revision).toBe(7);
+  await waitFor(() => expect(f.adapter.context).toHaveBeenCalledTimes(2), {
+    timeout: 4000,
+  });
+  expect(f.adapter.context.mock.calls[1][0].revision).toBe(7);
+  expect(f.status.workspaceContext.sharedNotes[0].text).toBe(
+    "Queued at native race",
+  );
+});
+
+it("translates pending and unavailable audio-preview states", async () => {
+  const f = fixture();
+  let fail!: (error: Error) => void;
+  const sourceAudio = vi.fn(
+    () =>
+      new Promise<Uint8Array>((_, reject) => {
+        fail = reject;
+      }),
+  );
+  render(
+    <LiveWorkspace
+      adapter={{ ...f.adapter, sourceAudio }}
+      meeting={f.meeting}
+      language="en"
+      onBack={() => {}}
+    />,
+  );
+  fireEvent.click(await screen.findByRole("tab", { name: "Prompts" }));
+  fireEvent.click(
+    screen.getByRole("button", { name: /Die Freigabe bleibt noch offen/ }),
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Load audio preview" }));
+  expect(screen.getByRole("button", { name: "Loading audio …" })).toBeTruthy();
+  await act(async () => fail(new Error("synthetic unavailable")));
+  expect(
+    await screen.findByText(/Local audio preview is unavailable/),
+  ).toBeTruthy();
+});

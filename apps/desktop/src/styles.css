@@ -2419,3 +2419,11 @@ p {
   flex-wrap: wrap;
   gap: 6px;
 }
+
+.recording-warning {
+  color: var(--color-error);
+  flex-shrink: 0;
+}
+.sidebar-recording[data-warning] {
+  border-color: var(--color-error);
+}
