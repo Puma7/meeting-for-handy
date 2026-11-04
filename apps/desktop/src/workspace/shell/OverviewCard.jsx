@@ -76,8 +76,7 @@ export function OverviewCard({
           aria-hidden="true"
         >
           <span>
-            {t("Hier einfügen:")}
-            {t(moduleName(moving))}
+            {t("Hier einfügen:")} {t(moduleName(moving))}
           </span>
         </div>
       )}

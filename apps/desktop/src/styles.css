@@ -1473,10 +1473,10 @@ mark {
     width: auto;
     justify-content: center;
   }
-  .sidebar-recording-label,
-  .sidebar-recording-time,
-  .sidebar-recording-facts,
-  .sidebar-recording-text {
+  .sidebar.is-collapsed .sidebar-recording-label,
+  .sidebar.is-collapsed .sidebar-recording-time,
+  .sidebar.is-collapsed .sidebar-recording-facts,
+  .sidebar.is-collapsed .sidebar-recording-text {
     display: none;
   }
   .appearance-row {

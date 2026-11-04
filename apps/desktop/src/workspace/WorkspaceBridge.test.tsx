@@ -1209,3 +1209,99 @@ it("translates pending and unavailable audio-preview states", async () => {
     await screen.findByText(/Local audio preview is unavailable/),
   ).toBeTruthy();
 });
+
+it.each(["de", "en"] as const)(
+  "separates dynamic workspace labels in %s",
+  async (locale) => {
+    const f = fixture();
+    const task = {
+      ...f.status.view.workspace.entities[0],
+      id: "e_task",
+      kind: "task",
+      text: "Bericht schreiben",
+      owner: "Robin",
+      due: "Freitag",
+    };
+    (f.status.view.workspace.entities as unknown[]).push(task);
+    render(
+      <LiveWorkspace
+        adapter={f.adapter}
+        meeting={f.meeting}
+        language={locale}
+        onBack={() => {}}
+      />,
+    );
+    fireEvent.click(
+      screen.getByRole("tab", {
+        name: locale === "de" ? "Transkript" : "Transcript",
+      }),
+    );
+    expect(
+      screen.getByRole("option", {
+        name: locale === "de" ? "Letzte 5 Min." : "Last 5 min",
+      }),
+    ).toBeTruthy();
+    fireEvent.click(
+      screen.getByRole("tab", {
+        name: locale === "de" ? "Impulse" : "Prompts",
+      }),
+    );
+    expect(
+      await screen.findByText(locale === "de" ? "von 1" : "of 1"),
+    ).toBeTruthy();
+    fireEvent.click(screen.getByRole("tab", { name: "Details" }));
+    expect(
+      await screen.findByText(
+        locale === "de"
+          ? "Zuständig: Robin · Termin: Freitag"
+          : "Owner: Robin · Due: Freitag",
+      ),
+    ).toBeTruthy();
+  },
+);
+
+it.each(["de", "en"] as const)(
+  "separates empty-column drop labels in %s",
+  async (language) => {
+    const f = fixture();
+    localStorage.setItem(
+      "handymeeting.workspace.user-layout.v1.verlauf.layout.v1",
+      JSON.stringify({
+        version: 1,
+        columns: 4,
+        widths: [25, 25, 25, 25],
+        cards: [{ id: "summary", column: 0, height: 240 }],
+      }),
+    );
+    render(
+      <LiveWorkspace
+        adapter={f.adapter}
+        meeting={f.meeting}
+        language={language}
+        onBack={() => {}}
+      />,
+    );
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: language === "de" ? "Anordnen" : "Arrange",
+      }),
+    );
+    fireEvent.click(
+      screen.getByRole("button", {
+        name:
+          language === "de"
+            ? "Live-Überblick verschieben"
+            : "Live overview move",
+      }),
+    );
+    for (let column = 1; column <= 4; column++)
+      expect(
+        screen.getByRole("button", {
+          name:
+            language === "de"
+              ? `Hier in Spalte ${column} ablegen`
+              : `Drop into column ${column} here`,
+        }),
+      ).toBeTruthy();
+  },
+);

@@ -1247,6 +1247,8 @@ mod tests {
                 .text,
             "Synthetic committed edit"
         );
+        drop(service);
+        remove_fixture_root(root);
     }
     #[test]
     fn classic_job_controls_and_saved_workspace_are_both_visible() {
@@ -1309,11 +1311,14 @@ mod tests {
             .view
             .is_none());
         service.live_notes.stop().unwrap();
+        drop(service);
+        remove_fixture_root(root);
     }
 
     #[test]
     fn manual_action_refreshes_classic_projection_of_a_stopped_workspace_job() {
-        let service = Arc::new(Service::new(fixture_root("stopped-workspace-projection")).unwrap());
+        let root = fixture_root("stopped-workspace-projection");
+        let service = Arc::new(Service::new(root.clone()).unwrap());
         let meeting_id = "c".repeat(32);
         let mut runner = LiveRunner::start(
             &live_root(&service, &meeting_id),
@@ -1400,6 +1405,8 @@ mod tests {
             "discussed"
         );
         drop(runner);
+        drop(service);
+        remove_fixture_root(root);
     }
     #[test]
     fn terminal_status_never_reports_waiting_for_transcript() {
@@ -1604,6 +1611,23 @@ mod tests {
                 let _ = std::fs::remove_dir_all(root);
             }
         }
+    }
+
+    // Only freshly generated roots owned by the tests above may be removed.
+    fn remove_fixture_root(root: std::path::PathBuf) {
+        let temp = std::fs::canonicalize(std::env::temp_dir()).unwrap();
+        let absolute = std::fs::canonicalize(&root).unwrap();
+        assert_eq!(absolute.parent(), Some(temp.as_path()));
+        assert!(absolute
+            .file_name()
+            .unwrap()
+            .to_string_lossy()
+            .starts_with("handymeeting-live-"));
+        assert!(!std::fs::symlink_metadata(&root)
+            .unwrap()
+            .file_type()
+            .is_symlink());
+        std::fs::remove_dir_all(absolute).unwrap();
     }
 
     fn fixture_root(label: &str) -> std::path::PathBuf {

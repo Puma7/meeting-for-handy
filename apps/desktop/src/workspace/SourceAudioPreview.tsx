@@ -20,7 +20,10 @@ export default function SourceAudioPreview({
   const [url, setUrl] = useState<string | null>(null);
 
   useEffect(() => {
-    if (preview.status !== "ready") return;
+    if (preview.status !== "ready") {
+      setUrl(null);
+      return;
+    }
     const next = URL.createObjectURL(
       new Blob([preview.bytes], { type: "audio/wav" }),
     );

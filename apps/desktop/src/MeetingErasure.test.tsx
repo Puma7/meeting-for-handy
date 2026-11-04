@@ -329,7 +329,9 @@ it.each(["failed", "cancelled", "workspace cache failure"] as const)(
     expect(localStorage.getItem(cache)).toBe(
       failCache ? "synthetic private workspace" : null,
     );
+    if (!failCache) expect(localStorage.getItem(heightKey)).toBeNull();
     localStorage.removeItem(cache);
+    localStorage.removeItem(heightKey);
     expect(localStorage.getItem(otherCache)).toBe(
       "synthetic retained workspace",
     );

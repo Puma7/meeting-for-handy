@@ -110,3 +110,17 @@ fn corrupt_persisted_entity_and_event_evidence_is_rejected_without_rewriting_fil
         }
     }
 }
+
+#[test]
+fn dropping_writer_releases_its_lease_even_with_a_duplicated_handle() {
+    let dir = tempfile::tempdir().unwrap();
+    let runner = WorkspaceRunner::open(dir.path()).unwrap();
+    let duplicate = runner._writer.try_clone().unwrap();
+    assert!(WorkspaceRunner::open(dir.path()).is_err());
+    drop(runner);
+    let reopened = WorkspaceRunner::open(dir.path()).unwrap();
+    assert!(WorkspaceRunner::open(dir.path()).is_err());
+    drop(duplicate);
+    assert!(WorkspaceRunner::open(dir.path()).is_err());
+    drop(reopened);
+}

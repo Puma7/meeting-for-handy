@@ -5,6 +5,8 @@ use std::io::{Read, Write};
 use std::sync::atomic::AtomicUsize;
 
 fn body(stream: &mut std::net::TcpStream) -> serde_json::Value {
+    // Accepted sockets may inherit a nonblocking listener on BSD/Windows.
+    stream.set_nonblocking(false).unwrap();
     stream
         .set_read_timeout(Some(Duration::from_secs(15)))
         .unwrap();
@@ -365,4 +367,21 @@ fn slow_refresh_catches_up_without_overlap_and_audio_keeps_growing() {
     )
     .unwrap();
     println!("{result}");
+}
+
+#[test]
+fn request_fixture_reads_delayed_bytes_from_an_inherited_nonblocking_stream() {
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let mut client = std::net::TcpStream::connect(listener.local_addr().unwrap()).unwrap();
+    let (mut stream, _) = listener.accept().unwrap();
+    // Emulate platforms which inherit the listener's mode on accepted sockets.
+    stream.set_nonblocking(true).unwrap();
+    let writer = thread::spawn(move || {
+        thread::sleep(Duration::from_millis(30));
+        client
+            .write_all(b"POST / HTTP/1.1\r\nContent-Length: 13\r\n\r\n{\"slow\":true}")
+            .unwrap();
+    });
+    assert_eq!(body(&mut stream), serde_json::json!({"slow":true}));
+    writer.join().unwrap();
 }

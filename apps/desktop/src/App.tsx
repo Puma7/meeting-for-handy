@@ -2376,7 +2376,9 @@ export default function App({ api = desktopApi }: { api?: DesktopApi }) {
           }
           devicesReady={Boolean(
             modelId &&
-              models.some((item) => item.id === modelId) &&
+              models.some(
+                (item) => item.id === modelId && item.supportsStreaming,
+              ) &&
               devices.some(
                 (item) => item.id === systemId && item.source === "system",
               ),

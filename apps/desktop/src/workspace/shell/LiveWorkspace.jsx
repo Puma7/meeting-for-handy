@@ -1347,8 +1347,7 @@ function LivePanel({
               }}
             />
             <span>
-              {t("von")}
-              {impulseTotal}
+              {t("von")} {impulseTotal}
             </span>
           </label>
         )
@@ -1385,8 +1384,7 @@ function LivePanel({
                 <option value="all">{t("Gesamt")}</option>
                 {[5, 10, 15, 30, 60].map((value) => (
                   <option key={value} value={value}>
-                    {t("Letzte")}
-                    {value} {t("Min.")}
+                    {t("Letzte")} {value} {t("Min.")}
                   </option>
                 ))}
                 <option value="custom">{t("Individueller Zeitraum")}</option>
@@ -1548,9 +1546,8 @@ function LivePanel({
                     </div>
                     {item.kind === "task" && (
                       <small>
-                        {t("Zuständig:")}
-                        {item.owner || t("nicht benannt")} {t("· Termin:")}{" "}
-                        {item.due || t("nicht benannt")}
+                        {t("Zuständig:")} {item.owner || t("nicht benannt")}{" "}
+                        {t("· Termin:")} {item.due || t("nicht benannt")}
                       </small>
                     )}
                     {quote(item)}

@@ -554,8 +554,7 @@ export function CustomOverview({
                     className="column-drop-zone drop-active"
                     onClick={() => drop(column)}
                   >
-                    {t("Hier in Spalte")}
-                    {column + 1} {t("ablegen")}
+                    {t("Hier in Spalte")} {column + 1} {t("ablegen")}
                   </button>
                 )}
             </div>

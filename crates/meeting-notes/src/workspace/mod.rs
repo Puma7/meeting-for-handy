@@ -31,6 +31,14 @@ pub struct WorkspaceRunner {
     observed: std::cell::RefCell<Option<Vec<LiveSource>>>,
 }
 
+impl Drop for WorkspaceRunner {
+    fn drop(&mut self) {
+        // Explicitly end this owner's lease: an inherited/duplicated handle may
+        // otherwise retain the OS lock after our File has been closed.
+        let _ = fs2::FileExt::unlock(&self._writer);
+    }
+}
+
 impl WorkspaceRunner {
     /// Acquire an isolated writer and restore model revisions plus the independent human-context journal.
     pub fn open(folder: &Path) -> Result<Self> {

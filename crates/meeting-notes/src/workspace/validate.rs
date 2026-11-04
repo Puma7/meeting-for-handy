@@ -480,11 +480,12 @@ pub(super) fn task_quote_allowed(quote: &str) -> bool {
     let text = quote.to_lowercase();
     !missing_pledge(quote)
         && !text.contains('?')
-        && ![
-            "niemand", "keiner", "nobody", "falls ", "wenn ", "unless ", "if ",
-        ]
-        .iter()
-        .any(|s| text.contains(s))
+        && !text.split(|c: char| !c.is_alphabetic()).any(|word| {
+            [
+                "niemand", "keiner", "nobody", "falls", "wenn", "unless", "if",
+            ]
+            .contains(&word)
+        })
         && [
             "übernehme",
             "übernimmt",

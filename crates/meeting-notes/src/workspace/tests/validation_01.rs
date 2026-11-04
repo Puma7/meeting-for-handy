@@ -277,3 +277,33 @@ fn an_explicit_empty_fact_overview_clears_old_selection() {
     assert!(state.overview_refs.is_empty());
     assert_eq!(state.entities.len(), 1);
 }
+
+#[test]
+fn task_exclusions_match_words_without_rejecting_unconditional_suffixes() {
+    for quote in [
+        "Ich schreibe jedenfalls den Bericht bis Freitag.",
+        "Ich schreibe ebenfalls den Bericht bis Freitag.",
+        "Ich prüfe den Tarif bis Freitag.",
+    ] {
+        let (mut state, mut request, mut answer) = setup();
+        request.transcript_sources[0].text = quote.into();
+        answer["changes"][0]["evidence"][0]["quote"] = json!(quote);
+        answer["changes"][0]["due"] = serde_json::Value::Null;
+        validate::apply(&mut state, &request, &answer.to_string()).unwrap();
+        assert_eq!(state.entities[0].kind, "task", "{quote}");
+    }
+    for quote in [
+        "Ich schreibe den Bericht, falls ich Zeit habe.",
+        "Ich schreibe den Bericht falls\nich Zeit habe.",
+        "Ich schreibe den Bericht, wenn ich Zeit habe.",
+        "I will write the report if I have time.",
+        "I will write the report unless approval is missing.",
+        "Niemand übernimmt den Bericht.",
+        "Keiner übernimmt den Bericht.",
+        "Nobody will handle the report.",
+        "Ich schreibe den Bericht?",
+        "Die Zusage fehlt, ich schreibe den Bericht noch nicht verbindlich.",
+    ] {
+        assert!(!validate::task_quote_allowed(quote), "{quote}");
+    }
+}
