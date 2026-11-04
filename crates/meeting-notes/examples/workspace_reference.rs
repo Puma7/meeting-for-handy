@@ -41,7 +41,12 @@ fn main() -> Result<()> {
         agenda: vec![Agenda {
             id: "e_budget_agenda".into(),
             revision: 1,
-            text: "Budgetrahmen klären".into(),
+            text: if english {
+                "Clarify the budget"
+            } else {
+                "Budgetrahmen klären"
+            }
+            .into(),
         }],
         ..Default::default()
     };
