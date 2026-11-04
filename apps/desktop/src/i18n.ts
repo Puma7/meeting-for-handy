@@ -194,7 +194,7 @@ export const de = {
   agentMicrophoneConsent:
     "Mein Mikrofon ausdrücklich für diese Anfrage freigeben",
   agentChooseDevices:
-    "Bitte zuerst unter Meeting ein verfügbares Streaming-Modell und die Computerausgabe auswählen.",
+    "Bitte zuerst unter Meeting ein verfügbares Erkennungsmodell mit Streaming-Unterstützung und die Computerausgabe auswählen.",
   agentChooseMicrophone:
     "Bitte zuerst unter Meeting ein verfügbares Mikrofon auswählen.",
   agentBusy:
@@ -511,7 +511,7 @@ export const en: Record<MessageKey, string> = {
   agentSystemOnly: "System audio only requested",
   agentMicrophoneConsent: "Explicitly allow my microphone for this request",
   agentChooseDevices:
-    "First choose an available streaming model and system output under Meeting.",
+    "First choose an available recognition model with streaming support and system output under Meeting.",
   agentChooseMicrophone: "First select an available microphone under Meeting.",
   agentBusy:
     "A recording or its completion is already running. The new request can be approved afterwards.",

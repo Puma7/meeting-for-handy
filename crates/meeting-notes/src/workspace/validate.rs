@@ -65,14 +65,7 @@ pub(crate) fn apply(
             valid_id(&c.proposal_id, "p_") && !aliases.contains_key(&c.proposal_id),
             "Doppelte Vorschlagskennung."
         );
-        let allowed = match c.kind.as_str() {
-            "fact" => ["recorded", "unclear"].as_slice(),
-            "decision" => ["recorded", "withdrawn"].as_slice(),
-            "task" => ["open", "completed", "withdrawn"].as_slice(),
-            "agenda" => ["touched", "discussed", "unclear"].as_slice(),
-            "impulse" => ["open", "discussed", "unclear"].as_slice(),
-            _ => &[],
-        };
+        let allowed = allowed_statuses(&c.kind);
         ensure!(
             allowed.contains(&c.status.as_str())
                 && ["normal", "current", "clarification"].contains(&c.attention.as_str()),
@@ -399,6 +392,19 @@ pub(super) fn completion_quote_allowed(quote: &str) -> bool {
         words.any(|word| ["habe", "haben"].contains(&word))
             && words.any(|word| german.contains(&word))
     })
+}
+
+/// Share validator status rules with constrained output schemas; new entities
+/// additionally exclude terminal states that require an existing target.
+pub(super) fn allowed_statuses(kind: &str) -> &'static [&'static str] {
+    match kind {
+        "fact" => &["recorded", "unclear"],
+        "decision" => &["recorded", "withdrawn"],
+        "task" => &["open", "completed", "withdrawn"],
+        "agenda" => &["touched", "discussed", "unclear"],
+        "impulse" => &["open", "discussed", "unclear"],
+        _ => &[],
+    }
 }
 
 /// Detect an explicitly missing commitment so it cannot be promoted into an assigned task.

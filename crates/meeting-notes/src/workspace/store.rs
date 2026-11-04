@@ -78,6 +78,8 @@ pub(crate) struct Delta {
     overview_refs: Vec<String>,
     originals: Vec<Source>,
     processed: Vec<LiveSource>,
+    #[serde(default)]
+    inherited_sources: Vec<LiveSource>,
 }
 impl Delta {
     /// Build an append-only delta, including new human events independently of model output.
@@ -111,6 +113,7 @@ impl Delta {
             overview_refs: new.overview_refs.clone(),
             originals,
             processed: new.processed[old.processed.len()..].to_vec(),
+            inherited_sources: new.inherited_sources.clone(),
         }
     }
 }
@@ -163,6 +166,7 @@ pub(crate) fn read(folder: &Path) -> Result<WorkspaceState> {
         state.overview_refs = delta.overview_refs;
         state.originals.extend(delta.originals);
         state.processed.extend(delta.processed);
+        state.inherited_sources = delta.inherited_sources;
     }
     Ok(state)
 }

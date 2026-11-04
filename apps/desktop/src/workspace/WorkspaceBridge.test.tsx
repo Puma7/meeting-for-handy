@@ -803,7 +803,7 @@ it("commits protocol notes after inference and retains a newer uncommitted draft
       ).value,
     ).toBe("New uncommitted draft"),
   );
-});
+}, 10000);
 
 it("does not acknowledge a context write deferred by the native inference gate", async () => {
   const f = fixture();

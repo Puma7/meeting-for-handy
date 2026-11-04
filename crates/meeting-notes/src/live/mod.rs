@@ -653,7 +653,8 @@ pub struct LiveView {
 }
 
 impl LiveView {
-    fn attach_workspace(&mut self, state: crate::workspace::WorkspaceState) {
+    /// Rebuild all classic lists from the authoritative workspace, including manual status changes.
+    pub fn attach_workspace(&mut self, state: crate::workspace::WorkspaceState) {
         self.prompt_version = crate::workspace::PROMPT_VERSION.into();
         self.updated_at = state.updated_at.clone();
         self.windows = state.revision as usize;

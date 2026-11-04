@@ -213,6 +213,40 @@ fn a_context_saved_during_inference_rejects_stale_model_publication() {
     assert_eq!(read_state(dir.path()).unwrap().context, next);
 }
 #[test]
+fn a_revoked_and_restored_shared_input_still_rejects_inflight_inference() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut runner = WorkspaceRunner::open(dir.path()).unwrap();
+    runner
+        .set_context(WorkspaceContext {
+            shared_notes: vec![SharedNote {
+                id: "h_note".into(),
+                revision: 1,
+                text: "Released text".into(),
+            }],
+            ..Default::default()
+        })
+        .unwrap();
+    let expected = runner.context.lock().unwrap().clone();
+    let mut revoked = expected.clone();
+    revoked.shared_notes.clear();
+    let (mut restored, _) = update_context(dir.path(), &revoked).unwrap();
+    restored.shared_notes = expected.shared_notes.clone();
+    let (current, _) = update_context(dir.path(), &restored).unwrap();
+    *runner.context.lock().unwrap() = current.clone();
+    assert!(runner
+        .commit(
+            runner.state.clone(),
+            vec![],
+            vec![],
+            &AnalysisControl::default(),
+            &expected
+        )
+        .is_err());
+    assert!(!dir.path().join("revision-00000001.json").exists());
+    assert_eq!(read_state(dir.path()).unwrap().context, current);
+}
+
+#[test]
 fn corrupt_context_does_not_get_overwritten_and_private_fields_are_rejected() {
     let dir = tempfile::tempdir().unwrap();
     let _runner = WorkspaceRunner::open(dir.path()).unwrap();
@@ -849,6 +883,182 @@ fn new_model_run_inherits_manual_state_and_preserves_its_evidence() {
     assert_eq!(reopened.entities, previous.entities);
     assert_eq!(reopened.originals, previous.originals);
 }
+
+#[test]
+fn context_only_topic_can_be_withdrawn_and_reshared_without_inference() {
+    let dir = tempfile::tempdir().unwrap();
+    let runner = WorkspaceRunner::open(dir.path()).unwrap();
+    let input = WorkspaceContext {
+        agenda: vec![Agenda {
+            id: "e_topic".into(),
+            revision: 1,
+            text: "Budget".into(),
+        }],
+        ..Default::default()
+    };
+    let (mut context, _) = update_context(dir.path(), &input).unwrap();
+    context.overrides.push(Override {
+        id: "e_topic".into(),
+        expected_revision: 1,
+        status: "discussed".into(),
+        saved: false,
+    });
+    let (mut context, confirmed) = update_context(dir.path(), &context).unwrap();
+    let agenda = context.agenda.clone();
+    context.agenda.clear();
+    let (mut context, removed) = update_context(dir.path(), &context).unwrap();
+    assert_eq!(removed.entities[0].status, "discussed");
+    assert!(removed.context_excluded_ids.contains(&"e_topic".into()));
+    assert_eq!(removed.events.len(), confirmed.events.len());
+    drop(runner);
+    assert_eq!(read_state(dir.path()).unwrap().entities, removed.entities);
+    context.agenda = agenda;
+    let (_, reshared) = update_context(dir.path(), &context).unwrap();
+    assert_eq!(reshared.entities[0].status, "open");
+    assert!(!reshared.entities[0].human_locked);
+    assert_eq!(reshared.events.len(), 1);
+    assert!(reshared.context_excluded_ids.is_empty());
+    let mut reopened = WorkspaceRunner::open(dir.path()).unwrap();
+    let client = TextClient::new(&crate::Connection {
+        endpoint: "http://127.0.0.1:1/v1/".into(),
+        model: "unreachable".into(),
+        mode: "local".into(),
+        cloud_consent: false,
+        api_key: String::new(),
+    })
+    .unwrap();
+    reopened
+        .update(&client, &[], &AnalysisControl::default(), "en")
+        .unwrap();
+    assert_eq!(reopened.view().entities, reshared.entities);
+    assert_eq!(reopened.view().events.len(), 1);
+}
+
+#[test]
+fn inherited_evidence_is_invalidated_before_the_first_new_model_window() {
+    for removed in [false, true] {
+        let (mut previous, mut req, mut answer) = setup();
+        let live = live::pending(
+            &[],
+            &[LiveText {
+                key: "original".into(),
+                track: "system".into(),
+                start_ms: 0,
+                end_ms: 3000,
+                text: req.transcript_sources[0].text.clone(),
+            }],
+        )
+        .remove(0);
+        let id = source_id(&live);
+        req.transcript_sources[0].id = id.clone();
+        req = Request::new(
+            "r_test".into(),
+            &WorkspaceContext::default(),
+            &previous,
+            vec![],
+            &req.transcript_sources,
+            req.transcript_sources.clone(),
+        );
+        answer["changes"][0]["evidence"][0]["sourceId"] = json!(id);
+        validate::apply(&mut previous, &req, &answer.to_string()).unwrap();
+        previous.originals = req.transcript_sources.clone();
+        previous.processed.push(live);
+        previous.entities[0].human_locked = true;
+        let dir = tempfile::tempdir().unwrap();
+        let mut runner = WorkspaceRunner::open(dir.path()).unwrap();
+        runner.set_context(Default::default()).unwrap();
+        runner.inherit_manual(&previous).unwrap();
+        assert!(runner.state.processed.is_empty());
+        drop(runner);
+        let mut runner = WorkspaceRunner::open(dir.path()).unwrap();
+        let texts = if removed {
+            vec![]
+        } else {
+            vec![LiveText {
+                key: "original".into(),
+                track: "system".into(),
+                start_ms: 0,
+                end_ms: 3000,
+                text: "Okay.".into(),
+            }]
+        };
+        let pending = runner.pending(&texts);
+        assert!(runner.context_dirty());
+        let client = TextClient::new(&crate::Connection {
+            endpoint: "http://127.0.0.1:1/v1/".into(),
+            model: "unreachable".into(),
+            mode: "local".into(),
+            cloud_consent: false,
+            api_key: String::new(),
+        })
+        .unwrap();
+        runner
+            .update(&client, &pending, &AnalysisControl::default(), "en")
+            .unwrap();
+        assert!(runner.state.superseded_sources.contains(&id));
+        assert!(runner
+            .state
+            .context_excluded_ids
+            .contains(&previous.entities[0].id));
+        assert_eq!(runner.state.originals[0], previous.originals[0]);
+        assert_eq!(runner.state.processed.len(), usize::from(!removed));
+        drop(runner);
+        let state = read_state(dir.path()).unwrap();
+        assert!(state
+            .context_excluded_ids
+            .contains(&previous.entities[0].id));
+    }
+}
+
+#[test]
+fn a_human_only_append_during_inference_rebases_without_losing_model_publication() {
+    for stale_target in [false, true] {
+        let dir = tempfile::tempdir().unwrap();
+        let mut runner = WorkspaceRunner::open(dir.path()).unwrap();
+        runner.set_context(Default::default()).unwrap();
+        let expected = runner.context.lock().unwrap().clone();
+        let (mut initial, req, answer) = setup();
+        validate::apply(&mut initial, &req, &answer.to_string()).unwrap();
+        initial.context = expected.clone();
+        runner
+            .commit(
+                initial,
+                req.transcript_sources.clone(),
+                vec![],
+                &AnalysisControl::default(),
+                &expected,
+            )
+            .unwrap();
+        let mut model = runner.state.clone();
+        // A concurrently changed target remains a conflict, never a guessed merge.
+        if stale_target {
+            model.entities[0].revision += 1;
+        }
+        let mut human = expected.clone();
+        human.overrides.push(Override {
+            id: model.entities[0].id.clone(),
+            expected_revision: 1,
+            status: "discussed".into(),
+            saved: false,
+        });
+        let (durable, _) = update_context(dir.path(), &human).unwrap();
+        *runner.context.lock().unwrap() = durable;
+        let result = runner.commit(
+            model,
+            vec![],
+            vec![],
+            &AnalysisControl::default(),
+            &expected,
+        );
+        assert_eq!(result.is_err(), stale_target, "{result:?}");
+        assert_eq!(runner.state.revision, if stale_target { 1 } else { 2 });
+        drop(runner);
+        let saved = read_state(dir.path()).unwrap();
+        assert_eq!(saved.entities[0].status, "discussed");
+        assert!(saved.entities[0].human_locked);
+        assert_eq!(saved.events.iter().filter(|event| event.human).count(), 1);
+    }
+}
 #[test]
 fn very_short_sources_are_saved_without_an_invalid_provider_schema() {
     let dir = tempfile::tempdir().unwrap();
@@ -948,6 +1158,18 @@ fn provider_context_rejection_shrinks_the_existing_frontier_before_sources() {
                     ["changes"]["items"]["anyOf"]
                     .as_array()
                     .unwrap();
+                for branch in variants {
+                    let kind = branch["properties"]["kind"]["enum"][0].as_str().unwrap();
+                    let expected = if kind == "decision" {
+                        json!(["recorded"])
+                    } else {
+                        json!(["recorded", "unclear"])
+                    };
+                    assert_eq!(
+                        branch["properties"]["status"]["enum"], expected,
+                        "new {kind} must match validator statuses"
+                    );
+                }
                 assert_eq!(variants.len(), 2); // Only new facts/decisions; the seed tasks are not valid targets.
                 assert!(variants
                     .iter()

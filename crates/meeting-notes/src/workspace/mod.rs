@@ -108,6 +108,13 @@ impl WorkspaceRunner {
             "Originalbelege der manuellen Änderungen fehlen."
         );
         next.originals = originals.clone();
+        next.inherited_sources = previous
+            .processed
+            .iter()
+            .chain(&previous.inherited_sources)
+            .filter(|source| source_ids.contains(&source_id(source)))
+            .cloned()
+            .collect();
         next.context = context.clone();
         self.commit(
             next,
@@ -169,6 +176,7 @@ impl WorkspaceRunner {
                 self.state
                     .processed
                     .iter()
+                    .chain(&self.state.inherited_sources)
                     .filter(|old| {
                         !self.state.superseded_sources.contains(&source_id(old))
                             && !current.iter().any(|new| {
@@ -183,8 +191,9 @@ impl WorkspaceRunner {
     /// Project durable state together with the latest human context for the renderer.
     pub fn view(&self) -> WorkspaceState {
         let mut state = self.state.clone();
-        if let Ok(context) = self.context.lock() {
-            let _ = state.apply_context(&context);
+        let mut projected = state.clone();
+        if context_store::project(&self.folder, &mut projected).is_ok() {
+            state = projected;
         }
         state
     }
@@ -280,7 +289,11 @@ impl WorkspaceRunner {
             .clone();
         context.validate()?;
         let mut next = self.state.clone();
-        next.apply_context(&context)?;
+        let durable = context_store::project(&self.folder, &mut next)?;
+        ensure!(
+            durable == context,
+            "Der Meetingkontext wurde inzwischen geändert. Aktuellen Stand verwenden."
+        );
         next.replay_cursor = cursor;
         let window = live::next_window(pending);
         // Preserve earlier originals and events while withdrawing their active authority
@@ -458,6 +471,8 @@ impl WorkspaceRunner {
                             serde_json::json!({"type":"string","enum":[e.id]});
                         branch["properties"]["targetRevision"] =
                             serde_json::json!({"type":"integer","enum":[e.revision]});
+                        branch["properties"]["status"]["enum"] =
+                            serde_json::json!(validate::allowed_statuses("task"));
                         branches.push(branch);
                     }
                     schema["properties"]["changes"]["items"] =
@@ -476,7 +491,11 @@ impl WorkspaceRunner {
                         branch["properties"]["targetRevision"] = serde_json::json!({"type":"null"});
                         branch["properties"]["text"]["type"] = "string".into();
                         branch["properties"]["status"]["enum"] =
-                            serde_json::json!(["recorded", "unclear"]);
+                            serde_json::json!(validate::allowed_statuses(kind)
+                                .iter()
+                                .filter(|status| !["completed", "withdrawn", "discussed"]
+                                    .contains(status))
+                                .collect::<Vec<_>>());
                         for field in ["owner", "due"] {
                             branch["properties"][field] = serde_json::json!({"type":"null"});
                         }
@@ -492,6 +511,8 @@ impl WorkspaceRunner {
                             serde_json::json!({"type":"string","enum":[entity.id]});
                         branch["properties"]["targetRevision"] =
                             serde_json::json!({"type":"integer","enum":[entity.revision]});
+                        branch["properties"]["status"]["enum"] =
+                            serde_json::json!(validate::allowed_statuses(&entity.kind));
                         for field in ["owner", "due"] {
                             branch["properties"][field] = serde_json::json!({"type":"null"});
                         }
@@ -680,9 +701,17 @@ impl WorkspaceRunner {
             .context
             .lock()
             .map_err(|_| anyhow::anyhow!("Meetingkontext ist gesperrt."))?;
-        ensure!(*current == *expected, "Der Meetingkontext wurde während der Auswertung geändert. Der neue Stand wird erneut abgeglichen.");
+        let shared_same = |context: &WorkspaceContext| {
+            context.revision >= expected.revision
+                && context.agenda == expected.agenda
+                && context.shared_notes == expected.shared_notes
+                && context.overrides.starts_with(&expected.overrides)
+        };
+        ensure!(shared_same(&current), "Der Meetingkontext wurde während der Auswertung geändert. Der neue Stand wird erneut abgeglichen.");
         let _disk_guard = context_store::lock(&self.folder)?;
-        ensure!(context_store::read(&self.folder,&self.state.context)? == *expected,"Der Meetingkontext wurde in einem anderen Fenster geändert. Der aktuelle Stand bleibt erhalten.");
+        let durable = context_store::human_suffix(&self.folder, expected)?;
+        ensure!(durable == *current && shared_same(&durable), "Der Meetingkontext wurde in einem anderen Fenster geändert. Der aktuelle Stand bleibt erhalten.");
+        next.apply_context(&durable)?;
         control.check()?;
         next.revision = self.state.revision + 1;
         let delta = store::Delta::between(&self.state, &next, originals, events);
@@ -727,8 +756,7 @@ fn quote_options(text: &str) -> Vec<String> {
 /// Loads only immutable complete revisions; no client, writer lock or directory creation.
 pub fn read_state(folder: &Path) -> Result<WorkspaceState> {
     let mut state = store::read(folder)?;
-    let context = context_store::read(folder, &state.context)?;
-    state.apply_context(&context)?;
+    context_store::project(folder, &mut state)?;
     Ok(state)
 }
 /// Explicit human input update. Caller binds this folder to its admitted meeting/run.

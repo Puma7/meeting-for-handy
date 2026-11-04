@@ -119,6 +119,8 @@ pub struct WorkspaceState {
     pub originals: Vec<Source>,
     #[serde(skip_serializing)]
     pub(crate) processed: Vec<crate::live::LiveSource>,
+    #[serde(default, skip_serializing)]
+    pub(crate) inherited_sources: Vec<crate::live::LiveSource>,
 }
 impl WorkspaceState {
     /// Apply shared inputs and human overrides, preserving original evidence and deterministic history events.

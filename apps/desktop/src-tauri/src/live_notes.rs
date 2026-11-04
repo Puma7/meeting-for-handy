@@ -527,7 +527,7 @@ impl LiveNotes {
             job.manual.store(true, Ordering::Release);
             if let Some(shared) = shared.as_mut() {
                 if let Some(view) = shared.view.as_mut() {
-                    view.workspace = Some(projected);
+                    view.attach_workspace(projected);
                 }
             }
         }
@@ -1294,6 +1294,95 @@ mod tests {
             .view
             .is_none());
         service.live_notes.stop().unwrap();
+    }
+
+    #[test]
+    fn manual_action_refreshes_classic_projection_of_a_stopped_workspace_job() {
+        let service = Arc::new(Service::new(fixture_root("stopped-workspace-projection")).unwrap());
+        let meeting_id = "c".repeat(32);
+        let mut runner = LiveRunner::start(
+            &live_root(&service, &meeting_id),
+            &meeting_id,
+            meeting_notes::Connection {
+                endpoint: "http://127.0.0.1:1235/v1/".into(),
+                model: "synthetic".into(),
+                mode: "local".into(),
+                cloud_consent: false,
+                api_key: String::new(),
+            },
+            "en",
+        )
+        .unwrap()
+        .with_workspace(Default::default())
+        .unwrap();
+        let folder = runner.workspace_folder().unwrap();
+        let context = runner.workspace_context().unwrap();
+        let run_id = runner.run().id.clone();
+        // A deterministic persisted model result: no network or user meeting is involved.
+        let entity = serde_json::json!({"id":"e_question","revision":1,"kind":"impulse","text":"Who confirms the budget?","status":"open","attention":"current","owner":null,"due":null,"evidence":[],"humanLocked":false});
+        std::fs::write(folder.join("revision-00000001.json"), serde_json::to_vec(&serde_json::json!({
+            "schema": meeting_notes::workspace::PROMPT_VERSION,"revision":1,"updatedAt":null,"context":*context.lock().unwrap(),"entities":[entity],"events":[],"overviewRefs":[],"originals":[],"processed":[]
+        })).unwrap()).unwrap();
+        // Reopen so the retained job view uses the persisted checkpoint.
+        drop(runner);
+        runner = LiveRunner::start(
+            &live_root(&service, &meeting_id),
+            &meeting_id,
+            meeting_notes::Connection {
+                endpoint: "http://127.0.0.1:1235/v1/".into(),
+                model: "synthetic".into(),
+                mode: "local".into(),
+                cloud_consent: false,
+                api_key: String::new(),
+            },
+            "en",
+        )
+        .unwrap()
+        .with_workspace(Default::default())
+        .unwrap();
+        let context = runner.workspace_context().unwrap();
+        let view = runner.view();
+        assert_eq!(view.questions.len(), 1);
+        *service.live_notes.lock().unwrap() = Some(Job {
+            workspace_folder: Some(runner.workspace_folder().unwrap()),
+            workspace_context: Some(context.clone()),
+            meeting_id: meeting_id.clone(),
+            control: AnalysisControl::default(),
+            manual: Arc::new(AtomicBool::new(false)),
+            interval_ms: Arc::new(AtomicU64::new(DEFAULT_INTERVAL_MS)),
+            shared: Arc::new(Mutex::new(Shared {
+                status: "stopped".into(),
+                update_started: None,
+                waiting_for_transcript: false,
+                error: None,
+                pending_chars: 0,
+                last_update: Instant::now(),
+                last_trigger: None,
+                retry_at: None,
+                view: Some(view),
+            })),
+            worker: None,
+            models: crate::model_sessions::Models::default(),
+        });
+        let mut action = context.lock().unwrap().clone();
+        action.overrides.push(meeting_notes::workspace::Override {
+            id: "e_question".into(),
+            expected_revision: 1,
+            status: "discussed".into(),
+            saved: false,
+        });
+        assert!(service
+            .live_notes
+            .set_workspace_context(&service, &meeting_id, &run_id, action)
+            .unwrap());
+        let classic = service.live_notes.status(&service, &meeting_id).unwrap();
+        assert_eq!(classic.status, "stopped");
+        assert!(classic.view.as_ref().unwrap().questions.is_empty());
+        assert_eq!(
+            classic.view.unwrap().workspace.unwrap().entities[0].status,
+            "discussed"
+        );
+        drop(runner);
     }
     #[test]
     fn terminal_status_never_reports_waiting_for_transcript() {

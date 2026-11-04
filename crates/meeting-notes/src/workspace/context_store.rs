@@ -30,6 +30,43 @@ pub(crate) fn lock(folder: &Path) -> Result<File> {
 }
 /// Replay contiguous human-context revisions; reject gaps or invalid entries without rewriting them.
 pub(crate) fn read(folder: &Path, fallback: &WorkspaceContext) -> Result<WorkspaceContext> {
+    replay(folder, fallback, |_| Ok(()))
+}
+/// Reconstruct every context-only transition after the model checkpoint, including withdrawn agenda entries and their human history.
+pub(crate) fn project(folder: &Path, state: &mut WorkspaceState) -> Result<WorkspaceContext> {
+    let base = state.context.clone();
+    replay(folder, &base, |context| {
+        if context.revision > base.revision {
+            state.apply_context(context)?;
+        }
+        Ok(())
+    })
+}
+/// Accept only an uninterrupted suffix of human-only revisions; a revoked and restored shared input still invalidates inference.
+pub(crate) fn human_suffix(folder: &Path, expected: &WorkspaceContext) -> Result<WorkspaceContext> {
+    replay(folder, expected, |context| {
+        if context.revision >= expected.revision {
+            ensure!(
+                context.agenda == expected.agenda
+                    && context.shared_notes == expected.shared_notes
+                    && context.overrides.starts_with(&expected.overrides),
+                "Freigegebene Eingaben wurden während der Auswertung geändert."
+            );
+            if context.revision == expected.revision {
+                ensure!(
+                    context == expected,
+                    "Die Kontextbasis wurde inzwischen geändert."
+                );
+            }
+        }
+        Ok(())
+    })
+}
+fn replay(
+    folder: &Path,
+    fallback: &WorkspaceContext,
+    mut apply: impl FnMut(&WorkspaceContext) -> Result<()>,
+) -> Result<WorkspaceContext> {
     store::check_directory(folder)?;
     let mut paths = fs::read_dir(folder)?
         .map(|e| e.map(|e| e.path()))
@@ -72,6 +109,7 @@ pub(crate) fn read(folder: &Path, fallback: &WorkspaceContext) -> Result<Workspa
         context.overrides.extend(entry.overrides);
         context.revision = entry.revision;
         context.validate()?;
+        apply(&context)?;
     }
     Ok(context)
 }
@@ -83,7 +121,7 @@ pub(crate) fn update(
     incoming.validate()?;
     let _guard = lock(folder)?;
     let mut state = store::read(folder)?;
-    let current = read(folder, &state.context)?;
+    let current = project(folder, &mut state)?;
     ensure!(
         incoming.revision == current.revision,
         "Der Meetingkontext wurde inzwischen geändert. Aktuellen Stand verwenden."
