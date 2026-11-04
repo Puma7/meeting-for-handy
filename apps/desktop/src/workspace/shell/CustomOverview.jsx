@@ -187,7 +187,9 @@ export function CustomOverview({
     }
     update((previous) => moveCard(previous, id, column, destination.beforeId));
     setAnnouncement(
-      `${t(moduleName(id))} ${t("in Spalte")} ${column + 1} ${t("abgelegt.")}`,
+      t("{module} in Spalte {n} abgelegt.")
+        .replace("{module}", () => t(moduleName(id)))
+        .replace("{n}", String(column + 1)),
     );
     focusGrip(id);
     end();

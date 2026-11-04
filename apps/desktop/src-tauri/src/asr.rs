@@ -763,7 +763,8 @@ pub(crate) fn spawn_batch(
             || {
                 let mut worker = None;
                 let mut retryable = false;
-                let attempt_result = run_batch(&store, &stop, |part, previous| {
+                let mut progressed = false;
+                let attempt_result = run_batch(&store, &stop, &mut progressed, |part, previous| {
                     let worker = match &mut worker {
                         Some(worker) => worker,
                         slot @ None => match Worker::start_mode(
@@ -798,7 +799,7 @@ pub(crate) fn spawn_batch(
                     reply
                 });
                 drop(worker);
-                (attempt_result, retryable)
+                (attempt_result, retryable, progressed)
             },
             || {
                 let _ = store.notice("Der Batch-Erkennungsprozess wurde unterbrochen und wird erneut gestartet. Gesicherte Abschnitte bleiben erhalten. / Batch recognition is restarting; saved sections are retained.");
@@ -815,26 +816,34 @@ pub(crate) fn spawn_batch(
     }
 }
 
-/// Retry transport/process loss at most twice, preserving the store's durable cursor.
+/// Retry at most two consecutive transport/process losses without durable progress.
 /// Provider rejections, bad protocol and storage failures never qualify for retry.
 fn retry_batch(
-    mut attempt: impl FnMut() -> (Result<(), String>, bool),
+    mut attempt: impl FnMut() -> (Result<(), String>, bool, bool),
     mut before_retry: impl FnMut(),
 ) -> Result<(), String> {
-    for index in 0..3 {
-        let (result, transient) = attempt();
-        if result.is_ok() || !transient || index == 2 {
+    let mut failures = 0;
+    loop {
+        let (result, transient, progressed) = attempt();
+        if result.is_ok() || !transient {
+            return result;
+        }
+        if progressed {
+            failures = 0;
+        }
+        failures += 1;
+        if failures == 3 {
             return result;
         }
         before_retry();
     }
-    unreachable!("the final attempt always returns")
 }
 
 /// Process closed track heads in time order, publishing each result before advancing the durable cursor.
 fn run_batch(
     store: &SessionStore,
     stop: &AtomicBool,
+    progressed: &mut bool,
     mut transcribe: impl FnMut(&AudioPart, Option<&AudioPart>) -> Result<Reply, String>,
 ) -> Result<(), String> {
     let model = store.model_id().map_err(|_| "Saved session unavailable")?;
@@ -886,6 +895,7 @@ fn run_batch(
             }
         };
         persist(store, part, &model, reply, samples, true, false)?;
+        *progressed = true;
     }
 }
 
@@ -1513,7 +1523,7 @@ mod tests {
             let worker_store = &store;
             let worker_stop = &stop;
             let worker = scope.spawn(move || {
-                run_batch(worker_store, worker_stop, |part, previous| {
+                run_batch(worker_store, worker_stop, &mut false, |part, previous| {
                     if part.start_sample == 0 {
                         entered
                             .send(part.source.clone())
@@ -1633,28 +1643,34 @@ mod tests {
         retry_batch(
             || {
                 attempts += 1;
-                let result = run_batch(&store, &AtomicBool::new(true), |part, _| {
-                    seen.push(part.file.clone());
-                    if seen.len() == 2 {
-                        return Err("synthetic pipe failure".into());
-                    }
-                    Ok(Reply {
-                        full: if seen.len() == 1 {
-                            "First track."
-                        } else {
-                            "Second track."
+                let mut progressed = false;
+                let result = run_batch(
+                    &store,
+                    &AtomicBool::new(true),
+                    &mut progressed,
+                    |part, _| {
+                        seen.push(part.file.clone());
+                        if seen.len() == 2 {
+                            return Err("synthetic pipe failure".into());
                         }
-                        .into(),
-                        committed: if seen.len() == 1 {
-                            "First track."
-                        } else {
-                            "Second track."
-                        }
-                        .into(),
-                        ..Reply::default()
-                    })
-                });
-                (result, true)
+                        Ok(Reply {
+                            full: if seen.len() == 1 {
+                                "First track."
+                            } else {
+                                "Second track."
+                            }
+                            .into(),
+                            committed: if seen.len() == 1 {
+                                "First track."
+                            } else {
+                                "Second track."
+                            }
+                            .into(),
+                            ..Reply::default()
+                        })
+                    },
+                );
+                (result, true, progressed)
             },
             || {
                 let saved = store.snapshot().unwrap();
@@ -1702,6 +1718,7 @@ mod tests {
                         Ok(())
                     },
                     true,
+                    false,
                 )
             },
             || restarts += 1,
@@ -1712,7 +1729,7 @@ mod tests {
         assert!(retry_batch(
             || {
                 calls += 1;
-                (Err("no response".into()), true)
+                (Err("no response".into()), true, false)
             },
             || {}
         )
@@ -1722,12 +1739,111 @@ mod tests {
         assert!(retry_batch(
             || {
                 calls += 1;
-                (Err("invalid audio hash".into()), false)
+                (Err("invalid audio hash".into()), false, false)
             },
             || panic!("must not restart")
         )
         .is_err());
         assert_eq!(calls, 1);
+        calls = 0;
+        assert!(retry_batch(
+            || {
+                calls += 1;
+                (Err("invalid hash after saved progress".into()), false, true)
+            },
+            || panic!("permanent failures must not restart after progress")
+        )
+        .is_err());
+        assert_eq!(calls, 1);
+        calls = 0;
+        assert!(retry_batch(
+            || {
+                calls += 1;
+                (Err("later stalled section".into()), true, calls == 2)
+            },
+            || {}
+        )
+        .is_err());
+        assert_eq!(calls, 4); // The progressed attempt starts a fresh three-attempt section budget.
+    }
+
+    #[test]
+    fn batch_recovers_separate_crashes_after_durable_progress_on_both_tracks() {
+        let fixture = BatchFixture::new();
+        let store = SessionStore::create(
+            &fixture.root,
+            "Synthetic progressing recovery",
+            handy_bridge::PARAKEET_ULTRA_ID,
+            "Output",
+            Some("Mic"),
+        )
+        .unwrap()
+        .with_quiet_sections();
+        for source in ["system", "microphone"] {
+            let mut writer = meeting_core::PcmWriter::new(store.clone(), source).unwrap();
+            for _ in 0..61 {
+                writer.append(&vec![3000_i16; 16_000]).unwrap();
+            }
+            writer.finish().unwrap();
+        }
+        store.set_status("recorded").unwrap();
+        let original = store.snapshot().unwrap();
+        assert_eq!(original.parts.len(), 6);
+        let mut attempts = 0;
+        let mut completed = 0;
+        retry_batch(
+            || {
+                attempts += 1;
+                let mut calls = 0;
+                let mut progressed = false;
+                let result = run_batch(
+                    &store,
+                    &AtomicBool::new(true),
+                    &mut progressed,
+                    |part, _| {
+                        calls += 1;
+                        if calls == 2 {
+                            return Err("synthetic unrelated pipe loss".into());
+                        }
+                        let text = format!("Saved {} section {}.", part.source, part.start_sample);
+                        Ok(Reply {
+                            ok: true,
+                            full: text.clone(),
+                            committed: text,
+                            ..Reply::default()
+                        })
+                    },
+                );
+                (result, true, progressed)
+            },
+            || {
+                let now = store
+                    .snapshot()
+                    .unwrap()
+                    .parts
+                    .iter()
+                    .filter(|part| part.status == "complete")
+                    .count();
+                assert!(now > completed);
+                completed = now;
+            },
+        )
+        .unwrap();
+        assert_eq!(attempts, 6);
+        let folder = store.folder().to_path_buf();
+        drop(store);
+        let reopened = SessionStore::open(&folder).unwrap().snapshot().unwrap();
+        for part in &reopened.parts {
+            assert_eq!(part.status, "complete");
+            let prior = original
+                .parts
+                .iter()
+                .find(|old| old.file == part.file)
+                .unwrap();
+            assert_eq!(part.confirmed_sha256, prior.confirmed_sha256);
+            assert!(part.text.as_deref().unwrap().starts_with("Saved "));
+        }
+        assert_eq!(crate::live_notes::live_texts(&reopened).0.len(), 6);
     }
 
     fn protocol_test_child(script: &str) -> Command {
@@ -1793,8 +1909,8 @@ mod tests {
                             PROTOCOL_FIXTURE_READY_TIMEOUT
                         },
                     ) {
-                        Ok(_) => (Ok(()), false),
-                        Err(error) => (Err(error.message), error.transient),
+                        Ok(_) => (Ok(()), false, false),
+                        Err(error) => (Err(error.message), error.transient, false),
                     }
                 },
                 || {},

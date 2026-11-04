@@ -1,0 +1,374 @@
+use super::*;
+
+#[test]
+fn edited_protocol_retains_human_confirmed_state_before_and_after_reopen() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut runner = WorkspaceRunner::open(dir.path()).unwrap();
+    let initial = WorkspaceContext {
+        shared_notes: vec![SharedNote {
+            id: "h_protocol".into(),
+            revision: 1,
+            text: "Shared context".into(),
+        }],
+        ..Default::default()
+    };
+    runner.set_context(initial).unwrap();
+    let current = runner.context.lock().unwrap().clone();
+    let (_, mut req, mut answer) = setup();
+    req.purpose = "reconcile".into();
+    answer["changes"][0]["kind"] = json!("impulse");
+    answer["changes"][0]["text"] = json!("Wer gibt den Entwurf frei?");
+    answer["changes"][0]["due"] = json!(null);
+    answer["overviewRefs"] = json!([]);
+    let mut next = runner.state.clone();
+    next.apply_context(&current).unwrap();
+    validate::apply(&mut next, &req, &answer.to_string()).unwrap();
+    next.originals = req.transcript_sources.clone();
+    let mut draft = next.entities[0].clone();
+    draft.id = "e_draft".into();
+    next.entities.push(draft);
+    let id = next.entities[0].id.clone();
+    runner
+        .commit(
+            next,
+            req.transcript_sources.clone(),
+            vec![],
+            &AnalysisControl::default(),
+            &current,
+        )
+        .unwrap();
+    let mut manual = current;
+    manual.overrides.push(Override {
+        id: id.clone(),
+        expected_revision: 1,
+        status: "discussed".into(),
+        saved: false,
+    });
+    let (mut edited, _) = update_context(dir.path(), &manual).unwrap();
+    // No inference checkpoint has incorporated the human action yet.
+    edited.shared_notes[0].text.push('!');
+    edited.shared_notes[0].revision += 1;
+    let (_, active) = update_context(dir.path(), &edited).unwrap();
+    assert!(!active.context_excluded_ids.contains(&id));
+    assert!(!active.context_excluded_ids.contains(&"e_draft".into()));
+    assert_eq!(active.entities[0].status, "discussed");
+    assert!(active.entities[0].human_locked);
+    drop(runner);
+    let reopened = read_state(dir.path()).unwrap();
+    assert!(!reopened.context_excluded_ids.contains(&id));
+    assert!(reopened.entities[0].human_locked);
+    assert_eq!(reopened.events.iter().filter(|e| e.human).count(), 1);
+    assert_eq!(reopened.originals, req.transcript_sources);
+    let mut revoked = reopened.clone();
+    let mut without_note = revoked.context.clone();
+    without_note.shared_notes.clear();
+    revoked.apply_context(&without_note).unwrap();
+    assert!(!revoked.context_excluded_ids.contains(&id));
+    assert!(revoked.context_excluded_ids.contains(&"e_draft".into()));
+    let mut withdrawn = reopened;
+    withdrawn
+        .superseded_sources
+        .push(req.transcript_sources[0].id.clone());
+    let mut edited = withdrawn.context.clone();
+    edited.shared_notes.clear();
+    withdrawn.apply_context(&edited).unwrap();
+    assert!(withdrawn.context_excluded_ids.contains(&id));
+}
+
+#[test]
+fn an_acknowledged_missing_commitment_cannot_be_only_a_touched_agenda() {
+    let (mut state, mut req, mut answer) = setup();
+    req.purpose = "reconcile".into();
+    req.transcript_sources[0].text = "There is no commitment on the budget.".into();
+    let agenda = Entity {
+        id: "e_agenda".into(),
+        revision: 1,
+        kind: "agenda".into(),
+        text: "Clarify budget".into(),
+        status: "open".into(),
+        attention: "normal".into(),
+        owner: None,
+        due: None,
+        evidence: vec![],
+        human_locked: false,
+    };
+    state.entities.push(agenda.clone());
+    req.state.push(agenda);
+    let change = &mut answer["changes"][0];
+    change["kind"] = json!("agenda");
+    change["targetId"] = json!("e_agenda");
+    change["targetRevision"] = json!(1);
+    change["text"] = json!(null);
+    change["status"] = json!("touched");
+    change["due"] = json!(null);
+    change["evidence"][0]["quote"] = json!("There is no commitment on the budget.");
+    answer["overviewRefs"] = json!([]);
+    let before = serde_json::to_vec(&state).unwrap();
+    assert!(validate::apply(&mut state, &req, &answer.to_string()).is_err());
+    assert_eq!(serde_json::to_vec(&state).unwrap(), before);
+    let mut impulse = answer["changes"][0].clone();
+    impulse["proposalId"] = json!("p_question");
+    impulse["kind"] = json!("impulse");
+    impulse["targetId"] = json!(null);
+    impulse["targetRevision"] = json!(null);
+    impulse["text"] = json!("Who can approve the budget?");
+    impulse["status"] = json!("open");
+    impulse["attention"] = json!("clarification");
+    answer["changes"].as_array_mut().unwrap().push(impulse);
+    validate::apply(&mut state, &req, &answer.to_string()).unwrap();
+    assert!(state
+        .entities
+        .iter()
+        .any(|e| e.kind == "impulse" && e.status == "open"));
+}
+
+#[test]
+fn numbered_human_agenda_can_change_status_without_generating_a_title_claim() {
+    for invalid in ["none", "many quotes", "invented quote", "rewrite title"] {
+        let (mut state, mut req, mut answer) = setup();
+        state
+            .apply_context(&WorkspaceContext {
+                agenda: vec![Agenda {
+                    id: "e_topic".into(),
+                    revision: 1,
+                    text: "1. Budget 2027".into(),
+                }],
+                ..Default::default()
+            })
+            .unwrap();
+        req.state = state.entities.clone();
+        req.purpose = "reconcile".into();
+        req.transcript_sources[0].text = "We discussed the budget.".into();
+        let change = &mut answer["changes"][0];
+        change["kind"] = json!("agenda");
+        change["targetId"] = json!("e_topic");
+        change["targetRevision"] = json!(1);
+        change["text"] = json!(null);
+        change["status"] = json!("discussed");
+        change["due"] = json!(null);
+        change["evidence"][0]["quote"] = json!("We discussed the budget.");
+        answer["overviewRefs"] = json!([]);
+        if invalid == "invented quote" {
+            answer["changes"][0]["evidence"][0]["quote"] = json!("We discussed an invented 42.");
+        }
+        if invalid == "rewrite title" {
+            answer["changes"][0]["text"] = json!("Changed human title");
+        }
+        if invalid == "many quotes" {
+            req.transcript_sources = (0..6)
+                .map(|i| Source {
+                    id: format!("s_{i}"),
+                    source: "system".into(),
+                    start_ms: i * 3000,
+                    end_ms: (i + 1) * 3000,
+                    text: format!("We discussed the budget topic {i}. {}", "a".repeat(400)),
+                })
+                .collect();
+            answer["changes"][0]["evidence"] = json!(req
+                .transcript_sources
+                .iter()
+                .map(|s| json!({"sourceId":s.id,"quote":s.text}))
+                .collect::<Vec<_>>());
+        }
+        let before = serde_json::to_vec(&state).unwrap();
+        let result = validate::apply(&mut state, &req, &answer.to_string());
+        assert_eq!(
+            result.is_ok(),
+            ["none", "many quotes"].contains(&invalid),
+            "{invalid}: {result:?}"
+        );
+        if ["none", "many quotes"].contains(&invalid) {
+            assert_eq!(state.entities[0].text, "1. Budget 2027");
+            assert_eq!(state.entities[0].status, "discussed");
+            assert_eq!(
+                state.entities[0].evidence.len(),
+                if invalid == "many quotes" { 6 } else { 1 }
+            );
+            assert!(state.entities[0].evidence.iter().all(|e| req
+                .transcript_sources
+                .iter()
+                .any(|s| s.id == e.source_id && s.text.contains(&e.quote))));
+        } else {
+            assert_eq!(serde_json::to_vec(&state).unwrap(), before);
+        }
+    }
+}
+
+#[test]
+fn durable_human_activity_selects_the_last_edited_model_without_new_inference() {
+    let root = tempfile::tempdir().unwrap();
+    let connection = |model: &str| crate::Connection {
+        endpoint: "http://127.0.0.1:1235/v1/".into(),
+        model: model.into(),
+        mode: "local".into(),
+        cloud_consent: false,
+        api_key: String::new(),
+    };
+    let mut folders = vec![];
+    for (model, at) in [
+        ("first", "2026-01-01T00:00:00Z"),
+        ("second", "2026-01-02T00:00:00Z"),
+    ] {
+        let live = crate::live::LiveRunner::start(root.path(), "meeting", connection(model), "en")
+            .unwrap()
+            .with_workspace(Default::default())
+            .unwrap();
+        let folder = live.workspace_folder().unwrap();
+        drop(live);
+        let initial = context_store::read(&folder, &Default::default()).unwrap();
+        let (mut state, mut req, mut answer) = setup();
+        req.purpose = "reconcile".into();
+        answer["changes"][0]["kind"] = json!("impulse");
+        answer["changes"][0]["text"] = json!("Who approves the draft?");
+        answer["changes"][0]["due"] = json!(null);
+        answer["overviewRefs"] = json!([]);
+        state.apply_context(&initial).unwrap();
+        validate::apply(&mut state, &req, &answer.to_string()).unwrap();
+        state.revision = 1;
+        state.updated_at = Some(at.into());
+        store::append(
+            &folder,
+            &store::Delta::between(
+                &WorkspaceState::default(),
+                &state,
+                req.transcript_sources.clone(),
+                vec![],
+            ),
+        )
+        .unwrap();
+        // Deterministic synthetic history, not the host clock or a user record.
+        let file = folder.join("context-00000001.json");
+        let mut entry: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&file).unwrap()).unwrap();
+        entry["createdAt"] = json!(at);
+        std::fs::write(&file, serde_json::to_vec(&entry).unwrap()).unwrap();
+        folders.push(folder);
+    }
+    assert_eq!(
+        crate::live::read_latest_workspace(root.path(), "meeting")
+            .unwrap()
+            .unwrap()
+            .model,
+        "second"
+    );
+    let first = read_state(&folders[0]).unwrap();
+    let mut context = first.context.clone();
+    context.overrides.push(Override {
+        id: first.entities[0].id.clone(),
+        expected_revision: 1,
+        status: "discussed".into(),
+        saved: false,
+    });
+    update_context(&folders[0], &context).unwrap();
+    for selected in [
+        crate::live::read_latest(root.path(), "meeting")
+            .unwrap()
+            .unwrap(),
+        crate::live::read_latest_workspace(root.path(), "meeting")
+            .unwrap()
+            .unwrap(),
+    ] {
+        assert_eq!(selected.model, "first");
+        assert_eq!(selected.updated_at.as_deref(), Some("2026-01-01T00:00:00Z")); // A human edit is not a new model inference.
+        assert_eq!(selected.workspace.unwrap().entities[0].status, "discussed");
+    }
+    let third = crate::live::LiveRunner::start(root.path(), "meeting", connection("third"), "en")
+        .unwrap()
+        .with_workspace(Default::default())
+        .unwrap();
+    assert_eq!(
+        third.view().workspace.unwrap().entities[0].status,
+        "discussed"
+    );
+}
+
+#[test]
+fn ambiguous_legacy_human_conflicts_require_confirmation_without_replacing_saved_bytes() {
+    let (mut previous, req, answer) = setup();
+    validate::apply(&mut previous, &req, &answer.to_string()).unwrap();
+    previous.originals = req.transcript_sources;
+    previous.entities[0].human_locked = true;
+    let dir = tempfile::tempdir().unwrap();
+    let mut runner = WorkspaceRunner::open(dir.path()).unwrap();
+    runner.set_context(Default::default()).unwrap();
+    runner.inherit_manual(&previous).unwrap();
+    let path = dir.path().join("revision-00000001.json");
+    let bytes = std::fs::read(&path).unwrap();
+    let mut identical_confirmation = previous.clone();
+    identical_confirmation.entities[0].revision += 10;
+    runner.inherit_manual(&identical_confirmation).unwrap();
+    assert_eq!(runner.state.revision, 1);
+    assert_eq!(
+        runner.state.entities[0].revision,
+        previous.entities[0].revision
+    );
+    previous.entities[0].status = "discussed".into();
+    assert!(runner
+        .inherit_manual(&previous)
+        .unwrap_err()
+        .to_string()
+        .contains("neu bestätigen"));
+    assert_eq!(runner.state.entities[0].status, "open");
+    assert_eq!(std::fs::read(path).unwrap(), bytes);
+    assert!(!dir.path().join("revision-00000002.json").exists());
+}
+
+#[test]
+fn oversized_shared_notes_are_rejected_before_publication_and_keep_the_prior_context() {
+    for escaped in [false, true] {
+        let dir = tempfile::tempdir().unwrap();
+        let runner = WorkspaceRunner::open(dir.path()).unwrap();
+        let (mut context, _) = update_context(dir.path(), &WorkspaceContext::default()).unwrap();
+        let path = dir.path().join("context-00000001.json");
+        let bytes = std::fs::read(&path).unwrap();
+        let text = if escaped {
+            "\"".repeat(1600)
+        } else {
+            "a".repeat(1600)
+        };
+        context.shared_notes = (0..if escaped { 12 } else { 20 })
+            .map(|i| SharedNote {
+                id: format!("h_note_{i}"),
+                revision: 1,
+                text: text.clone(),
+            })
+            .collect();
+        let draft = context.shared_notes.clone();
+        let error = update_context(dir.path(), &context).unwrap_err();
+        assert!(error.to_string().contains("kürzen"));
+        assert_eq!(context.shared_notes, draft);
+        assert_eq!(std::fs::read(path).unwrap(), bytes);
+        assert!(!dir.path().join("context-00000002.json").exists());
+        assert!(read_state(dir.path())
+            .unwrap()
+            .context
+            .shared_notes
+            .is_empty());
+        drop(runner);
+    }
+}
+
+#[test]
+fn oversized_legacy_shared_context_remains_readable_and_can_be_shortened() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("context-00000001.json");
+    let notes = (0..20)
+        .map(|i| SharedNote {
+            id: format!("h_old_{i}"),
+            revision: 1,
+            text: "x".repeat(1600),
+        })
+        .collect::<Vec<_>>();
+    let bytes = serde_json::to_vec(&json!({"createdAt":"2026-01-01T00:00:00Z","revision":1,"reset":true,"agenda":[],"sharedNotes":notes,"overrides":[]})).unwrap();
+    std::fs::write(&path, &bytes).unwrap();
+    let runner = WorkspaceRunner::open(dir.path()).unwrap();
+    let mut context = runner.context.lock().unwrap().clone();
+    assert_eq!(context.shared_notes.len(), 20);
+    assert_eq!(read_state(dir.path()).unwrap().context, context);
+    context.shared_notes[0].text = "Shorter released context".into();
+    context.shared_notes.truncate(1);
+    let (_, saved) = update_context(dir.path(), &context).unwrap();
+    assert_eq!(saved.context.shared_notes, context.shared_notes);
+    assert_eq!(std::fs::read(path).unwrap(), bytes);
+    assert_eq!(read_state(dir.path()).unwrap().context, saved.context);
+}

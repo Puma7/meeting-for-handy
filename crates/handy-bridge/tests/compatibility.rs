@@ -83,6 +83,24 @@ fn unavailable_and_downloading_models_are_not_selectable() {
 }
 
 #[test]
+fn batch_only_model_is_rejected_by_streaming_policy_before_any_path_resolution() {
+    let mut value = model();
+    value["id"] = json!(handy_bridge::PARAKEET_ULTRA_ID);
+    value["supports_streaming"] = json!(false);
+    // Deliberately unsafe/unresolvable input would yield another error if the
+    // streaming gate were bypassed. Agent starts use this same resolver gate.
+    value["filename"] = json!("../not-a-real-model");
+    value["source"] = json!({});
+    let parsed = parse(value);
+    assert!(parsed.ready_for_batch());
+    assert!(!parsed.ready_for_streaming());
+    assert!(matches!(
+        ModelRoots::default().resolve(&parsed),
+        Err(BridgeError::ModelUnavailable)
+    ));
+}
+
+#[test]
 fn rejects_cross_platform_filename_traversal() {
     for filename in [
         "../secret.gguf",

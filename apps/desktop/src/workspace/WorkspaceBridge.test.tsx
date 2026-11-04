@@ -675,20 +675,34 @@ it("shows a relevant result only once inside the live overview", async () => {
   expect(screen.queryByRole("region", { name: "Jetzt relevant" })).toBeNull();
 });
 
-it.each([false, true])(
-  "moves a card using the pointer grip (stacked=%s)",
-  (stacked) => {
+it.each([
+  [false, "de"],
+  [true, "de"],
+  [false, "en"],
+  [true, "en"],
+] as const)(
+  "moves a card using the pointer grip (stacked=%s, language=%s)",
+  (stacked, language) => {
     const f = fixture();
     render(
       <LiveWorkspace
         adapter={f.adapter}
         meeting={f.meeting}
+        language={language}
         onBack={() => {}}
       />,
     );
-    fireEvent.click(screen.getByRole("button", { name: "Anordnen" }));
-    const left = screen.getByLabelText("Überblick Spalte 1");
-    const right = screen.getByLabelText("Überblick Spalte 2");
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: language === "en" ? "Arrange" : "Anordnen",
+      }),
+    );
+    const left = screen.getByLabelText(
+      language === "en" ? "Overview column 1" : "Überblick Spalte 1",
+    );
+    const right = screen.getByLabelText(
+      language === "en" ? "Overview column 2" : "Überblick Spalte 2",
+    );
     vi.spyOn(left, "getBoundingClientRect").mockReturnValue(
       new DOMRect(0, 0, 400, 600),
     );
@@ -710,7 +724,10 @@ it.each([false, true])(
       );
     }
     const grip = within(right).getByRole("button", {
-      name: "Gesprächsimpulse verschieben",
+      name:
+        language === "en"
+          ? "Conversation prompts move"
+          : "Gesprächsimpulse verschieben",
     });
     Object.defineProperty(grip, "setPointerCapture", { value: vi.fn() });
     const pointer = (type: string, x: number, y: number) =>
@@ -731,14 +748,29 @@ it.each([false, true])(
     pointer("pointerup", 250, 30);
     expect(
       within(left).getByRole("button", {
-        name: "Gesprächsimpulse verschieben",
+        name:
+          language === "en"
+            ? "Conversation prompts move"
+            : "Gesprächsimpulse verschieben",
       }),
     ).toBeTruthy();
     expect(
       within(right).queryByRole("button", {
-        name: "Gesprächsimpulse verschieben",
+        name:
+          language === "en"
+            ? "Conversation prompts move"
+            : "Gesprächsimpulse verschieben",
       }),
     ).toBeNull();
+    expect(
+      screen
+        .getByText(
+          language === "en"
+            ? "Conversation prompts dropped in column 1."
+            : "Gesprächsimpulse in Spalte 1 abgelegt.",
+        )
+        .getAttribute("aria-live"),
+    ).toBe("polite");
   },
 );
 
