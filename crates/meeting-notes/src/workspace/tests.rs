@@ -1824,6 +1824,14 @@ fn ambiguous_legacy_human_conflicts_require_confirmation_without_replacing_saved
     runner.inherit_manual(&previous).unwrap();
     let path = dir.path().join("revision-00000001.json");
     let bytes = std::fs::read(&path).unwrap();
+    let mut identical_confirmation = previous.clone();
+    identical_confirmation.entities[0].revision += 10;
+    runner.inherit_manual(&identical_confirmation).unwrap();
+    assert_eq!(runner.state.revision, 1);
+    assert_eq!(
+        runner.state.entities[0].revision,
+        previous.entities[0].revision
+    );
     previous.entities[0].status = "discussed".into();
     assert!(runner
         .inherit_manual(&previous)
@@ -1876,6 +1884,7 @@ fn facts_frontier_survives_an_empty_tasks_phase_with_more_than_six_selected_fact
     let endpoint = format!("http://{}/v1/", listener.local_addr().unwrap());
     let server = thread::spawn(move || {
         let mut facts = HashSet::new();
+        let mut queued_versions = Vec::new();
         let started = Instant::now();
         loop {
             assert!(
@@ -1930,8 +1939,24 @@ fn facts_frontier_survives_an_empty_tasks_phase_with_more_than_six_selected_fact
                         facts.insert(entity["id"].as_str().unwrap().to_owned());
                     }
                 }
+                if let Some(entity) = req["state"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .find(|e| e["id"] == "e_fact_7")
+                {
+                    queued_versions.push((
+                        entity["revision"].as_u64().unwrap(),
+                        entity["text"].as_str().unwrap().to_owned(),
+                    ));
+                }
             }
-            let answer=json!({"contractVersion":CONTRACT_VERSION,"requestId":req["requestId"],"changes":[],"overviewRefs":[],"unresolvedContextIds":[],"moreChangesPossible":false}).to_string();
+            let changes = if req["purpose"] == "facts" && queued_versions.len() == 1 {
+                json!([{"proposalId":"p_seed","kind":"fact","targetId":"e_fact_7","targetRevision":1,"text":"Aktueller Entwurf","status":"recorded","attention":"normal","owner":null,"due":null,"evidence":[{"sourceId":"s_one","quote":"Ich gebe den Entwurf morgen frei."}],"relatedEntityIds":[]}])
+            } else {
+                json!([])
+            };
+            let answer=json!({"contractVersion":CONTRACT_VERSION,"requestId":req["requestId"],"changes":changes,"overviewRefs":[],"unresolvedContextIds":[],"moreChangesPossible":false}).to_string();
             let payload = format!(
                 "data: {}\n\ndata: {}\n\n",
                 json!({"choices":[{"delta":{"content":answer},"finish_reason":null}]}),
@@ -1942,7 +1967,7 @@ fn facts_frontier_survives_an_empty_tasks_phase_with_more_than_six_selected_fact
                 break;
             }
         }
-        facts
+        (facts, queued_versions)
     });
     let dir = tempfile::tempdir().unwrap();
     let mut runner = WorkspaceRunner::open(dir.path()).unwrap();
@@ -1991,10 +2016,107 @@ fn facts_frontier_survives_an_empty_tasks_phase_with_more_than_six_selected_fact
     runner
         .update(&client, &pending, &AnalysisControl::default(), "en")
         .unwrap();
-    assert_eq!(
-        server.join().unwrap(),
-        (0..8).map(|i| format!("e_fact_{i}")).collect()
+    let (facts, versions) = server.join().unwrap();
+    assert_eq!(facts, (0..8).map(|i| format!("e_fact_{i}")).collect());
+    assert!(versions.len() >= 2);
+    assert_eq!(versions[0].0, 1);
+    assert!(
+        versions[1..]
+            .iter()
+            .all(|(revision, text)| *revision == 2 && text == "Aktueller Entwurf"),
+        "{versions:?}"
     );
+}
+
+#[test]
+fn a_request_snapshot_cannot_overwrite_a_newer_current_entity() {
+    let (mut state, mut request, mut answer) = setup();
+    validate::apply(&mut state, &request, &answer.to_string()).unwrap();
+    request.state = state.entities.clone();
+    answer["changes"][0]["targetId"] = json!(state.entities[0].id);
+    answer["changes"][0]["targetRevision"] = json!(1);
+    answer["changes"][0]["text"] = json!("Aktueller Entwurf");
+    validate::apply(&mut state, &request, &answer.to_string()).unwrap();
+    assert_eq!(state.entities[0].revision, 2);
+    let bytes = serde_json::to_vec(&state).unwrap();
+    answer["changes"][0]["text"] = json!("Überholter Entwurf");
+    assert!(validate::apply(&mut state, &request, &answer.to_string()).is_err());
+    assert_eq!(serde_json::to_vec(&state).unwrap(), bytes);
+}
+
+#[test]
+fn numeric_task_status_retains_original_text_evidence_without_accepting_new_numbers_or_promised_completion(
+) {
+    let (mut state, mut request, mut answer) = setup();
+    request.transcript_sources[0].text = "I will send 3 reports.".into();
+    answer["changes"][0]["text"] = json!("Send 3 reports");
+    answer["changes"][0]["due"] = json!(null);
+    answer["changes"][0]["evidence"][0]["quote"] = json!("I will send 3 reports.");
+    validate::apply(&mut state, &request, &answer.to_string()).unwrap();
+    state.originals = request.transcript_sources.clone();
+    let original = state.entities[0].evidence[0].clone();
+    let done = Source {
+        id: "s_done".into(),
+        source: "microphone".into(),
+        start_ms: 3000,
+        end_ms: 6000,
+        text: "I have sent the reports.".into(),
+    };
+    let mut sources = state.originals.clone();
+    sources.push(done.clone());
+    let mut completion = Request::new(
+        "r_done".into(),
+        &WorkspaceContext::default(),
+        &state,
+        state.entities.clone(),
+        std::slice::from_ref(&done),
+        sources.clone(),
+    );
+    completion.purpose = "tasks".into();
+    answer["requestId"] = json!("r_done");
+    answer["changes"][0]["targetId"] = json!(state.entities[0].id);
+    answer["changes"][0]["targetRevision"] = json!(1);
+    answer["changes"][0]["text"] = json!(null);
+    answer["changes"][0]["status"] = json!("completed");
+    answer["changes"][0]["evidence"] =
+        json!([{"sourceId":"s_done","quote":"I have sent the reports."}]);
+    let before = state.clone();
+    validate::apply(&mut state, &completion, &answer.to_string()).unwrap();
+    assert_eq!(state.entities[0].status, "completed");
+    assert_eq!(state.entities[0].text, "Send 3 reports");
+    assert!(state.entities[0].evidence.contains(&original));
+    assert!(state.entities[0]
+        .evidence
+        .iter()
+        .any(|e| e.source_id == "s_done"));
+    state.originals = sources.clone();
+    state.revision = 1;
+    let dir = tempfile::tempdir().unwrap();
+    store::append(
+        dir.path(),
+        &store::Delta::between(&WorkspaceState::default(), &state, sources, vec![]),
+    )
+    .unwrap();
+    assert_eq!(read_state(dir.path()).unwrap().entities, state.entities);
+    let bytes = serde_json::to_vec(&before).unwrap();
+    let mut rejected = before.clone();
+    let mut changed = answer.clone();
+    changed["changes"][0]["text"] = json!("Send 30 reports");
+    assert!(validate::apply(&mut rejected, &completion, &changed.to_string()).is_err());
+    assert_eq!(serde_json::to_vec(&rejected).unwrap(), bytes);
+    completion.transcript_sources[1].text = "I will send the reports.".into();
+    answer["changes"][0]["evidence"][0]["quote"] = json!("I will send the reports.");
+    assert!(validate::apply(&mut rejected, &completion, &answer.to_string()).is_err());
+    assert_eq!(serde_json::to_vec(&rejected).unwrap(), bytes);
+    completion.transcript_sources[1].text = "We might cancel the reports.".into();
+    answer["changes"][0]["status"] = json!("withdrawn");
+    answer["changes"][0]["evidence"][0]["quote"] = json!("We might cancel the reports.");
+    assert!(validate::apply(&mut rejected, &completion, &answer.to_string()).is_err());
+    assert_eq!(serde_json::to_vec(&rejected).unwrap(), bytes);
+    answer["changes"][0]["status"] = json!("open");
+    answer["changes"][0]["evidence"] = json!([]);
+    assert!(validate::apply(&mut rejected, &completion, &answer.to_string()).is_err());
+    assert_eq!(serde_json::to_vec(&rejected).unwrap(), bytes);
 }
 
 #[test]

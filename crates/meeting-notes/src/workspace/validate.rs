@@ -84,6 +84,11 @@ pub(crate) fn apply(
             .transpose()?;
         if let Some(old) = old {
             ensure!(
+                next.entities.iter().any(|current| current == old)
+                    && !next.context_excluded_ids.contains(&old.id),
+                "Die Modellantwort verwendet einen inzwischen geänderten Eintrag."
+            );
+            ensure!(
                 !old.human_locked,
                 "Eine Modellantwort darf menschlich bestätigte Einträge nicht verändern."
             );
@@ -126,6 +131,39 @@ pub(crate) fn apply(
         } else {
             crate::Kind::Summary
         };
+        let mut text_evidence = c.evidence.clone();
+        if c.text.is_none() && c.kind != "agenda" {
+            if let Some(old) = old {
+                // Old text evidence may support its unchanged numbers, but it
+                // cannot rescue an unsupported/nonbinding new status claim.
+                let status = crate::Fact {
+                    text: c
+                        .evidence
+                        .first()
+                        .map(|e| e.quote.clone())
+                        .unwrap_or_default(),
+                    owner: c.owner.clone(),
+                    due: c.due.clone(),
+                    evidence: c.evidence.clone(),
+                };
+                let status = crate::validation::screen_facts(
+                    vec![status],
+                    &request.transcript_sources,
+                    &kind,
+                    "workspace",
+                    1,
+                );
+                ensure!(
+                    status.items.len() == 1 && status.rejected.is_empty(),
+                    "Der neue Status hat keinen eigenständig zulässigen Originalbeleg."
+                );
+                for evidence in &old.evidence {
+                    if !text_evidence.contains(evidence) {
+                        text_evidence.push(evidence.clone());
+                    }
+                }
+            }
+        }
         let fact = crate::Fact {
             // Agenda titles are unchanged human input, not generated claims.
             // Screen the status evidence itself, retaining every literal-source
@@ -140,7 +178,7 @@ pub(crate) fn apply(
             },
             owner: c.owner.clone(),
             due: c.due.clone(),
-            evidence: c.evidence.clone(),
+            evidence: text_evidence,
         };
         let checked = crate::validation::screen_facts(
             vec![fact],
@@ -222,10 +260,11 @@ pub(crate) fn apply(
             existing.attention = c.attention;
             existing.evidence = c.evidence.clone();
             for evidence in &before.evidence {
-                if (existing
-                    .owner
-                    .as_ref()
-                    .is_some_and(|v| evidence.quote.to_lowercase().contains(&v.to_lowercase()))
+                if ((c.text.is_none() && c.kind != "agenda")
+                    || existing
+                        .owner
+                        .as_ref()
+                        .is_some_and(|v| evidence.quote.to_lowercase().contains(&v.to_lowercase()))
                     || existing
                         .due
                         .as_ref()

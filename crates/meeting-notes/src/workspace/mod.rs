@@ -87,7 +87,9 @@ impl WorkspaceRunner {
             }
             if let Some(old) = next.entities.iter().find(|old| old.id == entity.id) {
                 if incoming.is_none() && current.is_none() && old.human_locked {
-                    ensure!(old == &entity,
+                    let mut same_confirmation = entity.clone();
+                    same_confirmation.revision = old.revision;
+                    ensure!(old == &same_confirmation,
                         "Die Reihenfolge älterer menschlicher Änderungen ist unbekannt. Den gewünschten Stand im aktuellen Lauf neu bestätigen.");
                     continue;
                 }
@@ -428,6 +430,17 @@ impl WorkspaceRunner {
                 frontier.chunks(6).map(|g| (g.to_vec(), true)).collect()
             };
             'groups: while let Some((mut group, seeds)) = groups.pop_front() {
+                // A preceding group's optional context may have updated one of
+                // these queued IDs. Requests must use its current revision.
+                for entity in &mut group {
+                    *entity = next
+                        .entities
+                        .iter()
+                        .find(|current| current.id == entity.id)
+                        .context("Ein Eintrag der Abgleichsfront fehlt.")?
+                        .clone();
+                }
+                group.retain(|entity| !next.context_excluded_ids.contains(&entity.id));
                 let base_group = group.clone();
                 control.check()?;
                 if ["facts", "reconcile"].contains(&phase) && seeds {
