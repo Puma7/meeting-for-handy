@@ -195,12 +195,6 @@ pub(crate) fn apply(
         );
         // Promise/completion/withdrawal are different transitions. Narrow, explicit evidence
         // guards complement the semantic model judgement; uncertainty never closes an item.
-        let quotes = c
-            .evidence
-            .iter()
-            .map(|e| e.quote.to_lowercase())
-            .collect::<Vec<_>>()
-            .join(" ");
         if c.status == "completed" {
             ensure!(
                 c.evidence
@@ -211,25 +205,17 @@ pub(crate) fn apply(
         }
         if c.status == "withdrawn" {
             ensure!(
-                ["zurück", "widerruf", "nicht mehr", "withdraw", "cancel"]
+                c.evidence
                     .iter()
-                    .any(|s| quotes.contains(s)),
+                    .any(|e| withdrawal_quote_allowed(&e.quote)),
                 "Eine Rücknahme benötigt einen ausdrücklichen Beleg."
             );
         }
         if c.kind == "decision" && c.status == "recorded" {
             ensure!(
-                [
-                    "entscheiden",
-                    "beschließen",
-                    "beschlossen",
-                    "entschieden",
-                    "we decide",
-                    "we decided",
-                    "agreed to"
-                ]
-                .iter()
-                .any(|s| quotes.contains(s)),
+                c.evidence
+                    .iter()
+                    .any(|e| recorded_decision_quote_allowed(&e.quote)),
                 "Ein Vorschlag ist kein Beschluss."
             );
         }
@@ -348,6 +334,178 @@ pub(crate) fn apply(
     Ok(events)
 }
 
+// Shared exact-word polarity screen. Completion keeps its existing rules;
+// withdrawal handles only the specific "nicht mehr needed" exception below.
+const UNCERTAIN_TERMINAL_WORDS: &[&str] = &[
+    "nicht",
+    "kein",
+    "keine",
+    "keinen",
+    "noch",
+    "falls",
+    "wenn",
+    "würde",
+    "werde",
+    "vielleicht",
+    "not",
+    "never",
+    "no",
+    "if",
+    "unless",
+    "would",
+    "will",
+    "might",
+    "maybe",
+    "could",
+    "should",
+    "haven",
+    "hasn",
+    "didn",
+    "isn",
+    "wasn",
+    "won",
+];
+
+const ADDITIONAL_UNCERTAIN_TERMINAL_WORDS: &[&str] = &[
+    "nobody",
+    "noone",
+    "keineswegs",
+    "nie",
+    "niemals",
+    "keinem",
+    "keiner",
+    "keines",
+    "niemand",
+    "unsicher",
+    "eventuell",
+    "möglicherweise",
+    "könnte",
+    "könnten",
+    "sollte",
+    "sollten",
+    "würden",
+    "werden",
+    "cannot",
+    "dont",
+    "don",
+    "doesn",
+    "weren",
+    "hadn",
+    "wouldn",
+    "shouldn",
+    "couldn",
+    "mustn",
+    "ob",
+    "whether",
+];
+
+/// A recorded decision needs affirmative decision wording in a single literal
+/// quote. Negated, conditional, future and merely similar words are insufficient.
+pub(super) fn recorded_decision_quote_allowed(quote: &str) -> bool {
+    let lower = quote.to_lowercase();
+    let words: Vec<_> = lower
+        .split(|c: char| !c.is_alphabetic())
+        .filter(|w| !w.is_empty())
+        .collect();
+    if quote.contains('?')
+        || words.iter().any(|word| {
+            UNCERTAIN_TERMINAL_WORDS.contains(word)
+                || ADDITIONAL_UNCERTAIN_TERMINAL_WORDS.contains(word)
+        })
+    {
+        return false;
+    }
+    words
+        .iter()
+        .any(|word| ["entscheiden", "beschließen", "beschlossen", "entschieden"].contains(word))
+        || words.windows(2).any(|part| {
+            [["we", "decide"], ["we", "decided"], ["agreed", "to"]].contains(&[part[0], part[1]])
+        })
+}
+
+/// Require explicit withdrawal wording in one literal quote, not a negation,
+/// conditional, question, unrelated return or a phrase assembled across sources.
+pub(super) fn withdrawal_quote_allowed(quote: &str) -> bool {
+    let lower = quote.to_lowercase();
+    let tokenize = |s: &str| {
+        s.split(|c: char| !c.is_alphabetic())
+            .filter(|w| !w.is_empty())
+            .map(str::to_owned)
+            .collect::<Vec<_>>()
+    };
+    let words = tokenize(&lower);
+    if quote.contains('?')
+        || words.iter().any(|word| {
+            (word != "nicht" && UNCERTAIN_TERMINAL_WORDS.contains(&word.as_str()))
+                || ADDITIONAL_UNCERTAIN_TERMINAL_WORDS.contains(&word.as_str())
+        })
+    {
+        return false;
+    }
+    let clauses: Vec<_> = lower
+        .split(['.', '!', ';', '\n', ','])
+        .map(tokenize)
+        .collect();
+    if words.iter().any(|w| w == "nicht") {
+        // "No longer needed" withdraws a requirement. A bare "nicht mehr" is
+        // insufficient: "nicht mehr zurücknehmen" states the opposite intent.
+        return words.iter().filter(|w| *w == "nicht").count() == 1
+            && clauses.iter().any(|p| {
+                p.len() >= 5
+                    && ["ich", "wir"].contains(&p[0].as_str())
+                    && ["brauche", "brauchen", "benötige", "benötigen"].contains(&p[1].as_str())
+                    && p[p.len() - 2] == "nicht"
+                    && p[p.len() - 1] == "mehr"
+            });
+    }
+    if words.iter().any(|word| {
+        [
+            "zurückgezogen",
+            "zurückgenommen",
+            "widerrufe",
+            "widerrufen",
+            "widerruft",
+            "widerrief",
+            "widerriefen",
+            "storniere",
+            "stornieren",
+            "storniert",
+            "stornierte",
+            "stornierten",
+            "withdraw",
+            "withdraws",
+            "withdrawn",
+            "withdrew",
+            "cancel",
+            "cancels",
+            "cancelled",
+            "canceled",
+            "revoke",
+            "revokes",
+            "revoked",
+            "rescind",
+            "rescinds",
+            "rescinded",
+        ]
+        .contains(&word.as_str())
+    }) {
+        return true;
+    }
+    clauses.iter().any(|p| {
+        p.last().is_some_and(|w| w == "zurück")
+            && p.iter().enumerate().any(|(index, word)| {
+                ["ziehen", "ziehe", "zieht", "nehmen", "nehme", "nimmt"].contains(&word.as_str())
+                    && !p[index + 1..].iter().any(|w| {
+                        [
+                            "kommen", "komme", "kommt", "gehen", "gehe", "geht", "kehre", "kehren",
+                            "kehrt",
+                        ]
+                        .contains(&w.as_str())
+                    })
+            })
+    })
+}
+
 /// Explicit past or completed-state wording, with negation and uncertainty rejected.
 pub(super) fn completion_quote_allowed(quote: &str) -> bool {
     let lower = quote.to_lowercase();
@@ -356,38 +514,9 @@ pub(super) fn completion_quote_allowed(quote: &str) -> bool {
         .filter(|s| !s.is_empty())
         .collect();
     if quote.contains('?')
-        || words.iter().any(|word| {
-            [
-                "nicht",
-                "kein",
-                "keine",
-                "keinen",
-                "noch",
-                "falls",
-                "wenn",
-                "würde",
-                "werde",
-                "vielleicht",
-                "not",
-                "never",
-                "no",
-                "if",
-                "unless",
-                "would",
-                "will",
-                "might",
-                "maybe",
-                "could",
-                "should",
-                "haven",
-                "hasn",
-                "didn",
-                "isn",
-                "wasn",
-                "won",
-            ]
-            .contains(word)
-        })
+        || words
+            .iter()
+            .any(|word| UNCERTAIN_TERMINAL_WORDS.contains(word))
     {
         return false;
     }

@@ -14,6 +14,46 @@ import { LiveWorkspace } from "./shell/LiveWorkspace.jsx";
 import { fitColumn } from "./shell/fitOverview.mjs";
 import { workspaceText } from "./shell/workspaceLocale.jsx";
 
+it("localizes every built-in module and its conversation-history controls", () => {
+  for (const label of [
+    "Transkript",
+    "Live-Überblick",
+    "Wichtige Details",
+    "Gesprächsverlauf",
+    "Vorbereitung",
+    "Gesprächsimpulse",
+    "Jetzt relevant",
+  ]) {
+    expect(workspaceText("en", label), label).not.toBe(label);
+  }
+  const f = fixture();
+  render(
+    <LiveWorkspace
+      adapter={f.adapter}
+      meeting={f.meeting}
+      onBack={() => {}}
+      language="en"
+    />,
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Arrange" }));
+  const grip = screen.getByRole("button", {
+    name: "Conversation history move",
+  });
+  expect(grip).toBeTruthy();
+  expect(
+    screen.queryByRole("button", { name: "Gesprächsverlauf move" }),
+  ).toBeNull();
+  expect(
+    screen.getByRole("button", { name: "Conversation history arrange" }),
+  ).toBeTruthy();
+  const picker = screen.getByRole("combobox", {
+    name: "Conversation history replace module",
+  });
+  expect(
+    within(picker).getByRole("option", { name: "Conversation history" }),
+  ).toBeTruthy();
+});
+
 it("translates only dictionary entries and preserves inherited object names", () => {
   for (const name of ["constructor", "toString", "valueOf", "__proto__"]) {
     expect(workspaceText("en", name)).toBe(name);

@@ -33,6 +33,7 @@ const english = {
   "Live-Überblick": "Live overview",
   "Jetzt relevant": "Relevant now",
   "Änderungen im Gespräch": "Changes in the conversation",
+  Gesprächsverlauf: "Conversation history",
   Gesprächsimpulse: "Conversation prompts",
   "Zur Standardansicht": "Standard view",
   "Aufnahme prüfen": "Check recording",

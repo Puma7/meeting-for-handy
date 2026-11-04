@@ -1,6 +1,172 @@
 use super::*;
 
 #[test]
+fn recorded_decisions_reject_negation_and_uncertainty_without_publishing_state() {
+    let invalid = [
+        "Wir haben den Pilotstart nicht beschlossen.",
+        "Wir haben keinen Pilotstart beschlossen.",
+        "Wir werden morgen entscheiden.",
+        "Vielleicht beschließen wir den Pilotstart.",
+        "Wenn alles passt, beschließen wir den Pilotstart.",
+        "Haben wir den Pilotstart beschlossen?",
+        "We have not agreed to start the pilot.",
+        "If approved, we decided to start the pilot.",
+        "We might have agreed to start the pilot.",
+        "We haven't agreed to start the pilot.",
+        "Wir müssen noch über den Pilotstart entscheiden.",
+        "Das ist ein entscheidender Hinweis auf den Pilotstart.",
+        "Nobody agreed to start the pilot.",
+        "Noone agreed to start the pilot.",
+        "Wir haben keineswegs den Pilotstart beschlossen.",
+    ];
+    let valid = [
+        "Wir beschließen den Pilotstart.",
+        "Wir entscheiden uns für den Pilotstart.",
+        "Wir haben den Pilotstart beschlossen.",
+        "Der Pilotstart ist beschlossen.",
+        "We decide to start the pilot.",
+        "We decided to start the pilot.",
+        "We agreed to start the pilot.",
+    ];
+    let mut accepted_invalid = Vec::new();
+    for (quote, allowed) in invalid
+        .iter()
+        .map(|q| (*q, false))
+        .chain(valid.iter().map(|q| (*q, true)))
+    {
+        let (mut state, mut request, mut answer) = setup();
+        let before = serde_json::to_vec(&state).unwrap();
+        request.purpose = "facts".into();
+        request.transcript_sources[0].text = quote.into();
+        answer["changes"][0]["kind"] = json!("decision");
+        answer["changes"][0]["text"] = json!("Pilotstart");
+        answer["changes"][0]["status"] = json!("recorded");
+        answer["changes"][0]["due"] = json!(null);
+        answer["changes"][0]["evidence"][0]["quote"] = json!(quote);
+        let result = validate::apply(&mut state, &request, &answer.to_string());
+        if allowed {
+            result.unwrap_or_else(|e| panic!("{quote}: {e}"));
+            assert_eq!(state.entities[0].status, "recorded");
+        } else if result.is_ok() {
+            accepted_invalid.push(quote);
+        } else {
+            assert_eq!(serde_json::to_vec(&state).unwrap(), before);
+        }
+    }
+    assert!(
+        accepted_invalid.is_empty(),
+        "Invalid recorded decision accepted: {accepted_invalid:?}"
+    );
+}
+
+#[test]
+fn withdrawal_requires_explicit_current_intent_and_rejection_preserves_both_kinds() {
+    let invalid = [
+        "Wir nehmen den Beschluss nicht zurück.",
+        "Wir widerrufen das nicht.",
+        "Darauf kommen wir morgen zurück.",
+        "Wir kommen auf den Bericht zurück.",
+        "Der Beschluss ist nicht zurückgenommen.",
+        "Wir nehmen den Beschluss nicht mehr zurück.",
+        "Wir wissen nicht mehr, was der Beschluss war.",
+        "Wir brauchen den Beschluss nicht mehr zurückzunehmen.",
+        "Vielleicht nehmen wir den Beschluss zurück.",
+        "Wenn nötig nehmen wir den Beschluss zurück.",
+        "Wir würden den Beschluss zurücknehmen.",
+        "Wir ziehen den Beschluss zurück?",
+        "Das Widerrufsformular ist angekommen.",
+        "We do not withdraw the decision.",
+        "We didn't cancel the report.",
+        "We don’t cancel the report.",
+        "We never cancelled the report.",
+        "We might cancel the report.",
+        "If needed, we withdraw the decision.",
+        "The report is uncancelled.",
+        "We discuss the cancellation policy.",
+        "Nobody cancelled the report.",
+        "Noone withdrew the decision.",
+        "Wir haben die Zusage keineswegs widerrufen.",
+    ];
+    let valid = [
+        "Wir nehmen den Beschluss zurück.",
+        "Wir ziehen die Zusage zurück.",
+        "Der Beschluss wurde zurückgenommen.",
+        "Ich widerrufe die Zusage.",
+        "Wir widerrufen den Beschluss.",
+        "Wir brauchen den Bericht nicht mehr.",
+        "Wir nehmen den Beschluss jedenfalls zurück.",
+        "We withdraw the decision.",
+        "The decision has been withdrawn.",
+        "We cancelled the report.",
+    ];
+    let mut accepted_invalid = Vec::new();
+    for kind in ["task", "decision"] {
+        let (mut state, mut request, mut answer) = setup();
+        if kind == "decision" {
+            request.purpose = "facts".into();
+            request.transcript_sources[0].text = "Wir beschließen den Pilotstart.".into();
+            answer["changes"][0]["kind"] = json!("decision");
+            answer["changes"][0]["text"] = json!("Pilotstart beschlossen");
+            answer["changes"][0]["status"] = json!("recorded");
+            answer["changes"][0]["evidence"][0]["quote"] = json!("Wir beschließen den Pilotstart.");
+        }
+        answer["changes"][0]["due"] = json!(null);
+        validate::apply(&mut state, &request, &answer.to_string()).unwrap();
+        let bytes = serde_json::to_vec(&state).unwrap();
+        for (quote, allowed) in invalid
+            .iter()
+            .map(|q| (*q, false))
+            .chain(valid.iter().map(|q| (*q, true)))
+        {
+            let source = Source {
+                id: "s_status".into(),
+                source: "system".into(),
+                start_ms: 3000,
+                end_ms: 6000,
+                text: quote.into(),
+            };
+            let mut sources = request.transcript_sources.clone();
+            sources.push(source.clone());
+            let mut status = Request::new(
+                "r_status".into(),
+                &Default::default(),
+                &state,
+                state.entities.clone(),
+                std::slice::from_ref(&source),
+                sources,
+            );
+            status.purpose = if kind == "task" { "tasks" } else { "facts" }.into();
+            let mut change = answer.clone();
+            change["requestId"] = json!("r_status");
+            change["changes"][0]["targetId"] = json!(state.entities[0].id);
+            change["changes"][0]["targetRevision"] = json!(state.entities[0].revision);
+            change["changes"][0]["text"] = json!(null);
+            change["changes"][0]["status"] = json!("withdrawn");
+            change["changes"][0]["evidence"] = json!([{"sourceId":"s_status","quote":quote}]);
+            let mut next = state.clone();
+            let result = validate::apply(&mut next, &status, &change.to_string());
+            if allowed {
+                result.unwrap_or_else(|e| panic!("{kind}: {quote}: {e}"));
+                assert_eq!(next.entities[0].status, "withdrawn");
+                assert_eq!(next.entities[0].text, state.entities[0].text);
+                assert!(state.entities[0]
+                    .evidence
+                    .iter()
+                    .all(|e| next.entities[0].evidence.contains(e)));
+            } else if result.is_ok() {
+                accepted_invalid.push(format!("{kind}: {quote}"));
+            } else {
+                assert_eq!(serde_json::to_vec(&next).unwrap(), bytes, "{quote}");
+            }
+        }
+    }
+    assert!(
+        accepted_invalid.is_empty(),
+        "Invalid withdrawal accepted: {accepted_invalid:?}"
+    );
+}
+
+#[test]
 fn acknowledged_open_questions_get_a_bounded_request_and_ignored_constraints_do_not_loop() {
     use std::{
         io::{Read, Write},

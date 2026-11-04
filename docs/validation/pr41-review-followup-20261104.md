@@ -28,13 +28,13 @@ Der vollständige TEST_REPORT bleibt byteunverändert; er wurde für diese Nacha
 
 | Prüfung | Ergebnis und Bezug |
 | --- | --- |
-| Rust-Workspace / alle Targets | 537 frisch bestanden, darunter 141 Notizen- und 34 Providerprotokolltests; drei bestehende besondere Einstiege regulär ignoriert. Zwei neue Ollama-Regressionen sind enthalten. |
+| Rust-Workspace / alle Targets | 539 frisch bestanden, darunter 143 Notizen- und 34 Providerprotokolltests; drei bestehende besondere Einstiege regulär ignoriert. Neue Rücknahme-/Beschlussregressionen sind enthalten. |
 | Rustformat / Clippy | Auf diesem Korrekturstand frisch bestanden; gesperrte Abhängigkeiten und Warnungen als Fehler. |
-| Oberfläche | 374 Tests, TypeScript, Produktionsbuild und Format frisch bestanden. Sechs neue Layoutnamenfälle ergänzen die bisher 368 Fälle. |
+| Oberfläche | 375 Tests, TypeScript, Produktionsbuild und Format frisch bestanden. Die neue Modulnamenprüfung ergänzt die sechs zuletzt hinzugefügten Layoutnamenfälle. |
 | Projektfreigabe | `verify.ps1` vor jeder Bereitstellung: 47 PCM-, 35 Notizen-, 28 Vorlagen-, acht Agenten- und Monitorprüfungen bestanden. Der folgende Quellupload bleibt an einen abschließenden erfolgreichen Lauf gebunden. |
-| Echte lokale englische Referenz | Auf diesem Kontext-/Layoutkorrekturstand 129,685532 s, keine Validierungswiederholung. Positive Aufgabe, unverbindliche Aussage, Impulserhalt, menschlicher Status nach Protokolländerung und bytegleiche Wiederöffnung bestanden. Der frühere Lauf auf `34c1b20` mit 138,0743712 s bleibt erhalten und wird nicht als neu ausgeführt gezählt. |
+| Echte lokale englische Referenz | Auf diesem Status-/Modulnamenkorrekturstand 138,1599687 s, keine Validierungswiederholung. Positive Aufgabe, unverbindliche Aussage, Impulserhalt, menschlicher Status nach Protokolländerung und bytegleiche Wiederöffnung bestanden. Die früheren Läufe auf `1768125` mit 129,685532 s und auf `34c1b20` mit 138,0743712 s bleiben erhalten und werden nicht als neu ausgeführt gezählt. |
 | Frühere lokale Referenzen | Deutsch 100,9989873 s und Englisch 125,0518623 s auf dem Elternstand `3d4d013`, jeweils ohne Validierungswiederholung. Die deutsche Zusage enthält tatsächlich „jedenfalls“. Diese Läufe werden nicht als erneut ausgeführt ausgegeben. |
-| Langsammodell / zwei Spuren | Auf diesem Korrekturstand zusätzlich ausdrücklich ausgeführter besonderer Test: 244,43 s Laufzeit, 210 s kontrollierte SSE-Antwortpause, nächster Refresh nach 210,0497661 s, maximal eine Modellanfrage, ein erhaltener Impuls. Je 3.706.880 Samples / 16.000 Hz = 231,68 s pro synthetischer Spur. Beide dauerhaften PCM-Schreiber liefen nach dem Auswertungsstopp weiter. Der frühere Lauf auf `3d4d013` bleibt historischer Beleg. |
+| Langsammodell / zwei Spuren | Historischer, ausdrücklich ausgeführter besonderer Test auf `1768125`: 244,43 s Laufzeit, 210 s kontrollierte SSE-Antwortpause, nächster Refresh nach 210,0497661 s, maximal eine Modellanfrage, ein erhaltener Impuls. Je 3.706.880 Samples / 16.000 Hz = 231,68 s pro synthetischer Spur. Beide dauerhaften PCM-Schreiber liefen nach dem Auswertungsstopp weiter. Der frühere Lauf auf `3d4d013` bleibt ebenfalls historischer Beleg. Für diese reine Status-/Beschriftungsnacharbeit wurde der lange Test nicht erneut ausgeführt; sein Worker-/Transport-/Aufnahmecode ist byteunverändert. |
 | Browsergegenprüfung | Tatsächliche Sidebar-/RecordingStatus-Komponenten auf `3d4d013`, danach unveränderte Sidebar-/Status-/CSS-Bytes: bei 390/740/1280 px ausgeklappt alle vier Statusfelder sichtbar, eingeklappt verborgen; Rechnerdetails erreichbar, keine Konsolenfehler. |
 
 Die echten Referenzen verwendeten ausschließlich synthetischen Text und das vorhandene
@@ -43,11 +43,12 @@ Windows 11 Pro **26200**, Intel **i7-13700** und rund **64 GiB** physischem RAM.
 Keine Downloads, Cloud oder Nutzermeetings. UI-Prüfungen liefen zeitweise parallel.
 Die Referenzdauer umfasst Modellverarbeitung, Abschluss und Wiederöffnung.
 Bei den früheren Referenzen wurden Working Set, Private Bytes und Grafikspeicher nicht gemessen.
-Beim neuen englischen Lauf wurde am 4. November um 20:20:14 UTC eine einzelne Stichprobe des
+Beim vorherigen englischen Lauf auf `1768125` wurde am 4. November um 20:20:14 UTC eine einzelne Stichprobe des
 Modellprozesses erfasst: Working Set 6.540.374.016 Byte, Private Bytes 6.484.041.728 Byte.
 Diese Werte werden nicht addiert und sind weder Höchstwerte noch Grafikspeicher. Grafikspeicher
 wurde nicht gemessen; die vorhandene RTX 4070 begründet allein keinen GPU-Prüfnachweis.
 Nutzerprozesse liefen unverändert weiter; dies war keine kontrollierte Leerlaufumgebung.
+Beim aktuellen Lauf wurde keine neue Speicherstichprobe erfasst.
 
 Der 210-Sekunden-Test nutzt den tatsächlichen nativen Worker und dauerhafte Audio-Schreiber,
 aber einen kontrollierten HTTP-/SSE-Anbieter und erzeugte PCM-Samples: keine physischen Geräte
@@ -119,12 +120,43 @@ identischen Bytes bestand mit 9,053 / 9,057 Sekunden und 144.799 / 144.399 quali
 Sie bleibt ausdrücklich `passed-with-startup-gaps`, `completeCapture=false`. Der Fehlversuch bleibt erhalten;
 dieser historische Erfolg ersetzt keine CI auf dem neuen Korrekturstand.
 
+## Rücknahmen, Beschlüsse und englische Modulnamen: weitere Gegenprüfung
+
+Die vollständige CodeRabbit-Runde auf `1768125` prüfte alle 100 vorgesehenen Dateien ohne
+Verfügbarkeitslücke. Sie fand die fehlende englische Modulbezeichnung „Gesprächsverlauf“,
+eine zu lockere Rücknahmeprüfung und einen nicht entfernten eigenen Testordner.
+Die beiden früheren Kontext-/Layoutnamenkorrekturen waren dabei bereits bestätigt.
+
+Der aktuelle Stand prüft Rücknahmesignale pro Originalzitat als ganze Wörter und in passenden
+Mehrwortfolgen. Verneinungen, Fragen, Bedingungen und unklare Rückkehrformulierungen werden in den
+abgesicherten Gegenfällen abgewiesen. „Nicht mehr“ allein reicht nicht: Eine ausdrücklich nicht
+mehr benötigte Anforderung bleibt zulässig, „nicht mehr zurücknehmen“ wird nicht umgekehrt.
+Die Gegenprüfung wies denselben Fehler für neue Beschlüsse nach; auch diese müssen nun ein
+bejahendes, nicht nur ähnlich geschriebenes Beschlusssignal aus einem einzelnen Zitat tragen.
+Die bisherigen 27 Wörter der Erledigungsprüfung sind unverändert, weitere Negationen gelten für
+die beiden neuen Prüfungen. Das ist ein begrenzter lexikalischer Schutz, kein Beweis der inhaltlichen Deutung.
+
+Vorher akzeptierte die native Validierung 40 von 42 unzulässigen Rücknahmefällen und alle zwölf
+zunächst geprüften falschen Beschlussfälle. Zusätzliche Fälle mit „nobody“, „noone“ und „keineswegs“
+belegten neun weitere unzulässige Übergänge während der Gegenprüfung. Nachher bestehen insgesamt
+90 Fallprüfungen: 48 abgewiesene und 20 gültige Rücknahmen auf Aufgaben/Beschlüssen sowie 15
+abgewiesene und sieben gültige neue Beschlüsse. Abweisung bewahrt die gesamten serialisierten
+Zustandsbytes; gültige Statusänderungen erhalten ursprünglichen Text und Belege.
+
+Alle sieben bestehenden Modulnamen haben eine englische Übersetzung. Der vollständige
+Komponententest prüft zusätzlich die tatsächlichen englischen Karten-, Verschiebe- und
+Modulauswahlnamen. Eigene Layoutnamen bleiben wörtlich. Dieser Test behauptet keine echte
+Browser-Popover-, Screenreader- oder native IPC-Prüfung.
+Der Archivquellentest schließt seinen Dienst und entfernt nur seinen frisch erzeugten Testordner
+mit dem vorhandenen geprüften Hilfsaufruf: kanonischer unmittelbarer Temp-Unterordner, eigener
+Namenspräfix und kein symbolischer Link. Alte Testreste oder Nutzerordner werden dabei nicht gesucht.
+
 ## Reviewabdeckung und Veröffentlichung
 
 Alle 16 ursprünglichen Sourcery-Anmerkungen und sämtliche bisherigen CodeRabbit-/Codex-Befunde
 bis einschließlich der vorherigen Runde haben individuelle Antworten und Dispositionen in PR 41.
-Die zwei gerade beschriebenen neuen Befunde werden mit dieser Korrektur beantwortet.
-Zwei saubere Codex-Runden auf `ae6d062` und zwei auf `d96491a`
+Die in den jeweiligen Abschnitten beschriebenen neuen Befunde werden mit ihren Korrekturen beantwortet.
+Zwei saubere Codex-Runden auf `ae6d062`, zwei auf `d96491a` und zwei auf `1768125`
 bleiben historische Nachweise und werden nicht auf einen späteren Quellstand übertragen.
 
 Der CodeRabbit-Lauf `bc2f7615-f3e6-4fdd-9ef3-f72621db511d` auf `ae6d062` veröffentlichte keine
@@ -136,12 +168,12 @@ Der vollständige Basis-bis-Head-Diff umfasst 102 Dateien, davon 100 nach den bi
 zwei Anbieterfilter-Ausnahmen für Lockdateien. Drei kleine neue Test-/Typdateien wurden fachlich
 gebündelt, ohne neue Filter oder Prüfregeländerungen. Zwei isolierte Markerfälle wurden in vier
 bestehende vollständige Interaktionsfälle übernommen; damals deshalb 368 statt zuvor 370 Tests.
-Die sechs neuen Layoutregressionen erhöhen die aktuelle Anzahl auf 374.
+Die sechs Layoutregressionen ergaben zuletzt 374; der neue Modulnamenfall erhöht die aktuelle Anzahl auf 375.
 Die ursprüngliche Fünf-Sekunden-Frist des verschobenen Vorschautests bleibt ausdrücklich erhalten.
 
 Vor Veröffentlichung werden Git-Root, Branch und bisheriger Remote-Head geprüft; normaler Fast-forward.
 Alle Dateien des tatsächlichen unveränderlichen Remote-ZIP werden mit Git-Blobs und lokalen Bytes verglichen.
-Alte Belege und Gitfassungen bleiben erhalten. Abhängigkeiten, Schutz-/Reviewerregeln,
+Alte Belege und Gitfassungen bleiben erhalten. Abhängigkeiten, Datenschutz-/Reviewer-Konfiguration,
 Dokumentationsgrenze von 80 Prozent und Version bleiben unverändert.
 Frische unabhängige Reviews und aktuelle CI müssen am selben finalen Head tatsächlich abschließen.
 Alte oder leere Security-Flags sind kein aktueller formaler Securitynachweis.

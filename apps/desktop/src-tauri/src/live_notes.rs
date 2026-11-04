@@ -1714,6 +1714,8 @@ mod tests {
         std::fs::write(&marker, b"broken").unwrap();
         assert!(service.live_snapshot(&id, None).is_err());
         assert_eq!(std::fs::read(marker).unwrap(), b"broken");
+        drop(service);
+        remove_fixture_root(root);
     }
 
     #[test]
