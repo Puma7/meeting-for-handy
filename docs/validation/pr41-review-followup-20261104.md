@@ -1,12 +1,12 @@
 # PR 41: Validierungsstand
 
 Stand: 5. November 2026. Version: **1.1.0-beta.1**, unverändert.
-Diese Fassung blockiert zusätzlich ausdrückliche negative Erledigt-Meldungen und zeigt den
-aktuellen Meetingnamen kompakt in der vorhandenen Aktionszeile der klassischen Ansicht.
-Die vorherigen Kontraktions-, Intervall-, Testserver-, Speicherhinweis- und Titelkorrekturen
-bleiben enthalten. Aktuell ändern sich nur der Erledigt-Filter samt Gegenfällen, die kompakte
-Meetingkennung, deren Browserprüfer und dieser bereinigte Vermerk. Prompts, Schemas, Transport,
-Audio/ASR, Modellreservierungen, Abhängigkeiten und Schutz-/Reviewerregeln bleiben unverändert.
+Diese Fassung vervollständigt den Abschlussfilter zusätzlich für neither. Drei weitere
+falsche Abschlüsse aus derselben Fehlergruppe sind vorher reproduziert und jetzt gesperrt.
+Die kompakte Meetingkennung und alle vorigen Korrekturen bleiben enthalten. Aktuell ändern
+sich nur dieser native Abschlussfilter, dessen Gegenfälle und der bereinigte Vermerk.
+Oberfläche, Browserprüfer, Prompts, Schemas, Transport, Audio/ASR, Modellreservierungen,
+Abhängigkeiten und Schutz-/Reviewerregeln bleiben gegenüber `93d48e2` unverändert.
 Der vollständige TEST_REPORT wurde nicht für diese Nacharbeit neu veröffentlicht.
 
 Die [ausführliche bisherige Fassung](https://github.com/Puma7/meeting-for-handy/blob/96109374c3fa7d72ed0a3cea68706a90280fc484/docs/validation/pr41-review-followup-20261104.md)
@@ -44,23 +44,23 @@ nicht protokolliert oder als Klartext gespeichert. Keine Nutzermeetings wurden f
 
 ## Prüfungen und genauer Bezug
 
-Rusttests, Clippy, Rustformat, Oberfläche, TypeScript, Build, vollständiges Frontendformat,
-Browserprüfung und beide echten lokalen Modellreferenzen sind für diese Korrektur frisch
-bestanden. Alle folgenden historischen Nachweise bleiben ihren ausdrücklich genannten
-Vorständen zugeordnet.
+Rusttests, Clippy, Rustformat und beide abschließenden echten lokalen Modellreferenzen sind
+für die neither-Erweiterung frisch bestanden. Die vollständige Oberfläche mit 408 Fällen,
+TypeScript, Build und Format sowie die Browserprüfung stammen vom hier bytegleichen
+`93d48e2`-UI-Stand und wurden nicht erneut ausgeführt.
 Ältere Paket-/Langsammodellnachweise werden nicht als neu ausgeführt ausgegeben.
 `verify.ps1` ist nach dem letzten Dokumentedit vor Quellupload frisch erforderlich.
 
 | Prüfung | Tatsächliches Ergebnis |
 | --- | --- |
-| Rust-Workspace, alle Targets | Frisch 560 bestanden, darunter 161 Notizen- und 37 Providerprotokolltests; drei bestehende besondere Einstiege regulär ignoriert. Der erweiterte Erledigt-Fall reproduzierte sieben falsche negative Abschlüsse und erhält positive Kontraktionen, Originalbelege, alte Checkpoints und wiederholte Wiederöffnung. Frühere 559/558/557/555 Zahlen sind historisch. |
+| Rust-Workspace, alle Targets | Frisch 560 bestanden, darunter 161 Notizen- und 37 Providerprotokolltests; drei bestehende besondere Einstiege regulär ignoriert. Der erweiterte Erledigt-Fall erhält alle bisherigen positiven/negativen Fälle sowie drei zusätzlich vorher falsch akzeptierte neither-Aussagen. Insgesamt sind sieben frühere und drei weitere falsche Abschlüsse reproduziert. Frühere 559/558/557/555 Zahlen sind historisch. |
 | Rustformat und Clippy | Frisch bestanden; gesperrte Abhängigkeiten und Warnungen als Fehler. |
-| Oberfläche | Frisch 408 Tests in 21 Dateien, TypeScript, Produktionsbuild und vollständige Frontendformatprüfung bestanden. Zwei DE/EN-Titelgegenfälle scheiterten vorher am fehlenden sichtbaren Bezeichner. Der Name folgt jetzt dem tatsächlich angezeigten Meeting, nicht einem unbestätigten Einrichtungsentwurf, und bleibt bei geschlossener Einrichtung sichtbar. Meter- und Agentensteuerungsschutz bleiben erhalten. Zwei Testworker, unveränderte Fristen. Frühere 406/399/395/391/385 Zahlen sind historisch. |
+| Oberfläche | 408 Tests in 21 Dateien auf dem hier bytegleichen `93d48e2`-UI-Stand, nicht wiederholt; TypeScript, Produktionsbuild und vollständige Frontendformatprüfung dort bestanden. Zwei DE/EN-Titelgegenfälle scheiterten vorher am fehlenden sichtbaren Bezeichner. Der Name folgt jetzt dem tatsächlich angezeigten Meeting, nicht einem unbestätigten Einrichtungsentwurf, und bleibt bei geschlossener Einrichtung sichtbar. Meter- und Agentensteuerungsschutz bleiben erhalten. Zwei Testworker, unveränderte Fristen. Frühere 406/399/395/391/385 Zahlen sind historisch. |
 | Projektprüfung | Vorherige veröffentlichte Stände bestanden 47 PCM-, 35 Notizen-, 28 Vorlagen-, acht Agenten- und Monitorprüfungen. Für jede Quellveröffentlichung nach dem letzten Dokumentedit erneut vor Upload erforderlich. |
-| Echte lokale Referenzen | Frisch bestanden: Deutsch 93.1802408 s mit 0 regulären Validierungswiederholungen, Englisch 131.2533023 s mit 1. Die vorab unverändert erlaubte vollständig validierte Wiederholung je Anfrage wurde nicht erhöht; null Wiederholungen sind keine Freigabeschwelle. Die konkrete Ursache des englischen Zwischenversuchs wurde vom Referenzhelfer nicht separat gespeichert und wird nicht erfunden. Positive Aufgabe, unverbindliche Aussage, Impulserhalt, menschlicher Status nach Protokolländerung und bytegleiche Wiederöffnung bestanden. Wörtliches „I’ll“ bleibt erhalten. Die negativen Erledigt-Aussagen wurden zusätzlich kontrolliert über die tatsächliche Validierungs-/Speicherschnittstelle geprüft; reale Referenztexte bleiben unverändert. Frühere Referenzen bleiben historisch. |
+| Echte lokale Referenzen | Abschließendes neues Paar frisch bestanden: Deutsch 97.2575113 s, Englisch 123.3753123 s, jeweils 0 reguläre Validierungswiederholungen. Die vorab unverändert erlaubte vollständig validierte Wiederholung je Anfrage wurde nicht erhöht; null Wiederholungen sind keine Freigabeschwelle. Positive Aufgabe, unverbindliche Aussage, Impulserhalt, menschlicher Status nach Protokolländerung und bytegleiche Wiederöffnung bestanden; wörtliches „I’ll“ bleibt erhalten. Ein vorheriger echter deutscher Versuch hielt im zweiten Fenster wegen einer nichtleeren unresolvedContextIds-Antwort sicher an und bleibt ausdrücklich ein Fehllauf. Der konkrete angeforderte Kontext wurde nicht separat gespeichert; eine weitergehende Ursache wird nicht erfunden. Native Quellen, Prompts, Modell und Kriterien blieben für das folgende erfolgreiche Paar unverändert. Die konkreten negativen Abschlussformen sind zusätzlich kontrolliert über die echte Validierungs-/Speicherschnittstelle geprüft. |
 | Paketregression | 21 Prüfungen auf `91f0985`; Paketdateien seitdem unverändert. Tatsächlich erzeugter synthetischer ZIP prüft Streaming- oder Batchhinweis, Launcher, Fingerprint und Nichtüberschreibung. Kein lokales Produktpaket oder Installer daraus bereitgestellt. |
 | Kontrolliertes Langsammodell | Auf `35d53e8`: 244.33 s Gesamtlauf, 210 s SSE-Antwortpause, nächster Refresh nach 210.0421383 s, maximal eine Modellanfrage, ein erhaltener Impuls. 3737920 Samples je Spur / 16000 Hz = 233.62 s je Spur. Beide PCM-Schreiber liefen nach Auswertungsstopp weiter. Hier nicht erneut ausgeführt. |
-| Sidebar und klassische Ansicht im Browser | Frisch 24 tatsächliche Layoutabläufe, 24 kombinierte Warn-Titel und 24 Meetingtitel-Zustände: 390/740/1280 Pixel, DE/EN, hell/dunkel, ein-/ausgeklappt. Langer Meetingname bleibt einzeilig, im Fenster und mit vollständigem Titelattribut zugänglich; Einrichtung bleibt geschlossen. Eigener Server/Browser beendet, keine Seiten-/Konsolenfehler, Fremdanfragen oder horizontalen Überläufe. Zwei Screenshots visuell geprüft. Nur synthetische Komponenten-/DOM-Prüfung, kein nativer OS-Tooltip-, IPC-, Aufnahme- oder Screenreader-Sprachnachweis. |
+| Sidebar und klassische Ansicht im Browser | Auf `93d48e2`, hier nicht erneut ausgeführt: 24 tatsächliche Layoutabläufe, 24 kombinierte Warn-Titel und 24 Meetingtitel-Zustände: 390/740/1280 Pixel, DE/EN, hell/dunkel, ein-/ausgeklappt. Langer Meetingname bleibt einzeilig, im Fenster und mit vollständigem Titelattribut zugänglich; Einrichtung bleibt geschlossen. Eigener Server/Browser beendet, keine Seiten-/Konsolenfehler, Fremdanfragen oder horizontalen Überläufe. Zwei Screenshots visuell geprüft. Nur synthetische Komponenten-/DOM-Prüfung, kein nativer OS-Tooltip-, IPC-, Aufnahme- oder Screenreader-Sprachnachweis. |
 
 Die echten Referenzen verwendeten ausschließlich synthetischen Text und das vorhandene
 **google/gemma-4-e4b Q4_K_M**, 6.326.936.720 Modellbytes, laufendes LM Studio mit Dateiversion **0.4.26+4**,
@@ -269,6 +269,35 @@ Die zwei sauberen Codex-Codequittungen auf dem vorherigen `87eba39` sind
 Der vollständige CodeRabbit-Lauf war wegen des gültigen Titelbefunds kein sauberer Abschluss.
 Die folgende reine UI-/Prüferkorrektur benötigt eigene frische Reviews und CI auf ihrem Head.
 Die damaligen Rust-/Modellnachweise bleiben ihrem `87eba39`-Stand zugeordnet; die obige aktuelle Tabelle weist die erneut ausgeführten Rusttests getrennt aus.
+
+## Ergänzende neither-Gegenprobe und abschließende Referenz
+
+Vor einer neuen Vollreview wurde dieselbe Fehlergruppe mit „I have sent neither report.“,
+„We've completed neither report.“ und „We’ve completed neither report.“ geprüft. Alle drei
+konnten vorher über die tatsächliche Validierung eine Aufgabe fälschlich schließen. Der
+Abschlussfilter enthält jetzt auch das vollständige Wort neither; alle übrigen Regeln bleiben
+unverändert. Die alte Revision und wörtliche Belege bleiben erhalten. Danach bestehen die
+vollständigen Rust-/Clippy-/Formatprüfungen einschließlich aller bisherigen Gegenfälle.
+Auf dem Zwischenstand `93d48e2` wurde deshalb kein zusätzlicher Botauftrag verbraucht.
+
+Der erste echte deutsche Referenzversuch dieses nativen Stands speicherte Fenster 1, hielt
+aber in Fenster 2 bei der bestehenden strikten Prüfung für eine nichtleere Liste fehlenden
+Kontexts an. Es blieb genau eine gespeicherte Auswertungsrevision neben den vorhandenen
+menschlichen Kontextfassungen erhalten; ein vollständiges Referenzergebnis entstand nicht.
+Die konkrete Modellantwort mit den angeforderten Kennungen speichert der Referenzhelfer
+nicht. Die Fehlermeldung belegt diese Schutzprüfung, keine nachgewiesene Kontextkürzung,
+Hardwareursache oder allgemeine Anbieterunzuverlässigkeit. Dieser Fehllauf bleibt privat
+mit Log, erstem View, Checkpoint und Protokolländerung erhalten und zählt nicht als bestanden.
+
+Ein anschließend vorab protokolliertes neues Paar mit denselben unveränderten Quellen,
+Prompts, Modell und Kriterien bestand beide Sprachen mit den oben genannten Zeiten.
+Während der echten Modellverarbeitung liefen keine anderen eigenen Prüfungen. Es wurden
+weder Validierung noch Wiederholungsbudget gelockert. Nach Abschluss war beim ausgewählten
+Modell rein lesend keine geladene Instanz mehr vorhanden; die Nachprobe entlud selbst nichts.
+Der vorherige Fehllauf und die im vorherigen englischen Durchlauf regulär nötige Wiederholung
+bleiben erkennbare Grenzen: Ein lokales kleines Modell kann unbrauchbare Antworten liefern.
+Die App erhält dann gesicherte Arbeit, statt eine Antwort ungeprüft zu übernehmen. Eine
+universelle Modellzuverlässigkeit wird aus dem erfolgreichen Paar nicht abgeleitet.
 
 ## Negative Abschlüsse und kompakte Meetingkennung
 

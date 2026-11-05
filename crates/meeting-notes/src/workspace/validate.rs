@@ -707,7 +707,7 @@ pub(super) fn completion_quote_allowed(quote: &str) -> bool {
         || words.iter().any(|word| {
             UNCERTAIN_TERMINAL_WORDS.contains(word)
                 || ADDITIONAL_UNCERTAIN_TERMINAL_WORDS.contains(word)
-                || ["nichts", "nothing", "none"].contains(word)
+                || ["nichts", "nothing", "none", "neither"].contains(word)
         })
     {
         return false;
