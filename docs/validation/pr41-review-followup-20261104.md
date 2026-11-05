@@ -28,14 +28,14 @@ Der vollständige TEST_REPORT bleibt byteunverändert; er wurde für diese Nacha
 
 | Prüfung | Ergebnis und Bezug |
 | --- | --- |
-| Rust-Workspace / alle Targets | Auf `5b20e40` bestanden 551; native Quellen/Tests/Abhängigkeiten sind seitdem bytegleich, deshalb lokal nicht erneut ausgeführt. Darunter 155 Notizen- und 34 Providerprotokolltests; drei bestehende besondere Einstiege regulär ignoriert. Die bisherigen Kapazitäts-, Zahlen- und Wiederöffnungsfälle bleiben erhalten. Zwei neue Fälle prüfen Zahl und Verbindlichkeit bei unterschiedlicher Reihenfolge gültiger Fristbelege. |
-| Rustformat / Clippy | Auf dem bytegleichen nativen Stand `5b20e40` bestanden, lokal nicht erneut ausgeführt; gesperrte Abhängigkeiten und Warnungen als Fehler. |
-| Oberfläche | 391 Tests, TypeScript, Produktionsbuild und vollständiger Formatcheck unter src frisch bestanden. Vier neue vollständige App-Fälle prüfen später eingehende Agentenanfragen und Geräteverluste in Deutsch/Englisch. Ein zusätzlicher tatsächlicher Bridge-/Shadow-DOM-Fall prüft, dass wechselnde globale Hinweise den gewählten Tab und die laufende Oberfläche erhalten. |
+| Rust-Workspace / alle Targets | 554 frisch bestanden, darunter unverändert 155 Notizen- und jetzt 37 Providerprotokolltests; drei bestehende besondere Einstiege regulär ignoriert. Drei vorhandene Kontextfälle wurden mit identischen Funktionskörpern in ihr bestehendes Eltern-Testmodul übernommen; keine Fälle oder Fristen entfernt. |
+| Rustformat / Clippy | Auf diesem nativen Korrekturstand frisch bestanden; gesperrte Abhängigkeiten, Warnungen als Fehler. |
+| Oberfläche | 391 Tests, TypeScript, Produktionsbuild und vollständiger Formatcheck auf `1a52520` bestanden. Sämtliche Frontend-Produktions-, Typ- und Testbytes bleiben seitdem unverändert; lokal nicht erneut ausgeführt. Der zusätzlich veröffentlichte Python-Browsertest ist separat unten nachgewiesen. |
 | Projektfreigabe | `verify.ps1` vor jeder Bereitstellung: 47 PCM-, 35 Notizen-, 28 Vorlagen-, acht Agenten- und Monitorprüfungen bestanden. Der folgende Quellupload bleibt an einen abschließenden erfolgreichen Lauf gebunden. |
-| Echte lokale Referenzen Deutsch und Englisch | Auf `5b20e40`, vor der anschließenden reinen UI-Fehlermeldungsformatierung: Deutsch 116.6886547 s (0 reguläre Validierungswiederholungen), Englisch 127.5065369 s (0 Wiederholungen). Beide bestanden positive Aufgabe, unverbindliche Aussage, Impulserhalt, menschlichen Status nach Protokolländerung und bytegleiche Wiederöffnung; englische Aufgaben behalten das wörtliche „I’ll“. Unverändert ist eine vollständig validierte Wiederholung je Anfrage zulässig; null Wiederholungen sind keine Freigabeschwelle. Die vorherigen Läufe auf `7fb1ad2` mit DE 106,8706213 s und EN 111,7106681 s bleiben historische Nachweise. |
+| Echte lokale Referenzen Deutsch und Englisch | Nach den abschließenden nativen Korrekturen frisch: Deutsch 99.8319887 s (0 reguläre Validierungswiederholungen), Englisch 135.4364915 s (0 Wiederholungen). Beide bestanden positive Aufgabe, unverbindliche Aussage, Impulserhalt, menschlichen Status nach Protokolländerung und bytegleiche Wiederöffnung; Englisch behält wörtliches „I’ll“. Eine vollständig validierte Wiederholung je Anfrage bleibt zulässig; null Wiederholungen sind keine Freigabeschwelle. Die frühere DE/EN-Referenz auf `5b20e40` bleibt historisch. |
 | Frühere lokale Referenzen | Deutsch 100,9989873 s und Englisch 125,0518623 s auf dem Elternstand `3d4d013`, jeweils ohne Validierungswiederholung. Die deutsche Zusage enthält tatsächlich „jedenfalls“. Diese Läufe werden nicht als erneut ausgeführt ausgegeben. |
-| Langsammodell / zwei Spuren | Auf `5b20e40` ausdrücklich ausgeführter besonderer Test; bytegleicher nativer Stand, hier nicht wiederholt: 244,23 s Laufzeit, 210 s kontrollierte SSE-Antwortpause, nächster Refresh nach 210,0402066 s, maximal eine Modellanfrage, ein erhaltener Impuls. Samples je Spur 3749440/3749440, geteilt durch 16.000 Hz = 234,34/234,34 s. Beide dauerhaften PCM-Schreiber liefen nach dem Auswertungsstopp weiter. Tatsächlicher nativer Worker mit kontrollierter Antwort und generiertem PCM, keine Geräte/ASR oder Zweistundenprüfung. Frühere Läufe bleiben historische Belege. |
-| Browsergegenprüfung | Auf `5b20e40` acht Abläufe mit tatsächlicher vollständiger App einschließlich Workspace/Shadow-DOM bei 390×844 dunkel und 740×900 px hell, jeweils Deutsch/Englisch: späte Agentenanfrage sichtbar, Prüfen erreichbar, bestehende Ablehnung versendet exakt einmal false; Geräteverlust während synthetischer Aufnahme sichtbar und schließbar. Keine Aufnahme-/Modellstarts oder -stopps, keine Konsolen-/Seitenfehler und kein horizontaler Überlauf. Bestehender Edge 156 / Playwright 1.57 mit synthetischem IPC-Adapter, kein nativer Geräte-/Agentenprozess oder echter Löschlauf. Sechs Pollfehlerabläufe auf `f728081` und frühere Sidebarprüfung bleiben historische Nachweise. |
+| Langsammodell / zwei Spuren | Auf diesem nativen Korrekturstand frisch: 244.33 s Gesamtlauf, 210 s kontrollierte SSE-Antwortpause, nächster Refresh nach 210.0421383 s, maximal eine Modellanfrage, ein erhaltener Impuls. Samples je Spur 3737920/3737920, geteilt durch 16.000 Hz = 233.62/233.62 s. Beide dauerhaften PCM-Schreiber liefen nach dem Auswertungsstopp weiter. Nativer Worker mit kontrollierter Antwort und generiertem PCM, keine Geräte/echte ASR/Zweistundenprüfung. |
+| Browsergegenprüfung | Frisch 24 Abläufe mit tatsächlichem Sidebar und RecordingStatus, vorhandenem Edge 156.0.4314.58 / Playwright 1.57.0: 390/740/1280 × Deutsch/Englisch × hell/dunkel × ausgeklappt/eingeklappt. Geöffnete Rechnerdetails bleiben innerhalb des Fensters, kein horizontaler Überlauf, keine Konsolen-/Seitenfehler oder fremden Netzwerkanfragen; eigener lokaler Server beendet. CPU-/RAM-Werte sind synthetische Fixturewerte, keine Rechnermessung. Die acht Full-App-Hinweisabläufe auf `5b20e40` bleiben historische Belege. |
 
 Die echten Referenzen verwendeten ausschließlich synthetischen Text und das vorhandene
 **google/gemma-4-e4b Q4_K_M** mit 6.326.936.720 Modellbytes, LM Studio **0.4.26.0**,
@@ -463,6 +463,67 @@ Das behebt oder versteckt keinen Testfehler. Der vollständige Lauf deckte alle 
 vorgesehenen Dateien ab, war wegen des gültigen Fehlermeldungsbefunds aber nicht sauber.
 Zwei saubere Codex-Codeprüfungen auf `5b20e40` bleiben historische Nachweise;
 neue Reviews und aktuelle CI müssen am endgültigen Head tatsächlich abschließen.
+
+## Nachgestellte Bedingungen und Ollama-Kontextwechsel
+
+Der vollständige CodeRabbit-Lauf auf `1a52520` deckte alle 100 vorgesehenen Dateien ab,
+war aber nicht sauber. Zwei konkrete native Befunde sind am tatsächlichen Code bestätigt.
+Die zusätzlichen pauschalen „Testhygiene“-Aussagen nahm der Anbieter ausdrücklich als
+unbelegt zurück; sein separater Browserabdeckungswunsch blieb bestehen und ist umgesetzt.
+
+Die Entscheidungserkennung akzeptierte vorher tatsächlich sowohl „We decided to start the
+pilot if approved.“ als auch „Wir haben den Pilotstart beschlossen, falls das Budget kommt.“.
+Beide falschen Annahmen sind im erhaltenen Vorherlauf gemeinsam ausgewiesen. Nachgestellte
+Bedingungen mit if/unless/falls/wenn/sofern werden jetzt wie vorangestellte Bedingungen
+zurückgewiesen; der Zustand bleibt bei jeder Ablehnung bytegleich. Die bereits zulässige
+negative Entscheidungsalternative bleibt erhalten. Eine feste Entscheidung, etwas zu prüfen
+oder zu fragen („ob/whether“ als Gegenstand), wird nicht pauschal zur bloß bedingten Zusage.
+Diese technische Wortprüfung beweist weiterhin keine inhaltliche Interpretation des KI-Entwurfs.
+
+Beim vorhandenen Ollama-Modell und beim Übergang einer klassischen Reservierung zum
+Workspace fehlte vorher die Speicherprüfung für einen anderen oder unbestätigten Kontext.
+Vier tatsächliche unerlaubte Kontextänderungen sind im ersten Vorherlauf belegt. Der echte
+60-Sekunden-Erneuerungstimer reproduzierte denselben Fehler; eine weitere Gegenprobe fand
+ihn vor dem nächsten Timer auch bei zwischengespeichertem Workspace-Kontext.
+
+Vor Wiederverwendung und Erneuerung liest die App jetzt die tatsächliche geladene
+Kontextlänge aus /api/ps. Bei gleichem bestätigtem Kontext ist keine neue Speicherzulassung
+nötig. Bei Abweichung oder unbekannter Länge gilt die bestehende Zulassung vor einer
+mutierenden Anfrage: Größe aus /api/ps beim geladenen Modell beziehungsweise /api/tags
+beim kalten Laden. Unbekannte Größe blockiert. Die bisherige konservative Formel mit
+30 Prozent Zuschlag und 2 GiB Reserve bleibt byteunverändert; sie garantiert keine reale
+KV-Cache-Belegung. Bereits laufende Audiosicherung wird dadurch weder beendet noch pausiert.
+Ausstehende Änderungen können nach wieder passendem Zustand ausdrücklich fortgesetzt werden.
+Unendliche fremde Reservierungen, endliche 300-Sekunden-TTL, 60-Sekunden-Timer, begrenzte
+Verwaltungsanfragen und das Verbot fremder Entladung bleiben erhalten.
+
+Die drei zusätzlichen Protokollfälle verwenden eigene synthetische Loopbackdienste,
+keine realen Modelle oder OOM-Erzeugung. Der Hintergrundfall verwendet weiterhin den
+echten 60-Sekunden-Timer und die unveränderte 75-Sekunden-Wartegrenze. Gleiche warme
+Kontexte benötigen selbst bei unbekannter Größenangabe keinen neuen Ladeversuch;
+Wiederherstellung und ausbleibende Entladeanfragen werden geprüft. Alle 37 Providerfälle bestehen.
+Die neu ausgeführten echten lokalen Referenzen verwenden das vorhandene LM-Studio-Modell;
+sie sind kein Nachweis realer Ollama-Allokation oder fremder gleichzeitiger Providerprozesse.
+Das mögliche Neuladen bei geänderten Runneroptionen ist zusätzlich anhand des aktuellen
+[Ollama-Schedulers](https://github.com/ollama/ollama/blob/main/server/sched.go) und der
+[offiziellen /api/ps-Dokumentation](https://docs.ollama.com/api/ps) geprüft worden; kein
+installierter Ollama-Versionsnachweis wird daraus abgeleitet.
+
+Der wiederholbare Browsertest ist unter scripts/check-sidebar-browser.py veröffentlicht.
+Mit bereits vorhandenem Playwright 1.57.0, den gesperrten Desktop-Abhängigkeiten, Node und
+vorhandenem Edge lautet der Aufruf: `python -X utf8 scripts/check-sidebar-browser.py --browser msedge`.
+Er installiert nichts, baut nur eine neue kleine synthetische Fixture, erhält frühere Belege
+und beendet seinen eigenen HTTP-Server sowie seine eigenen Browserkontexte. Alle 24
+Kombinationen bestehen; zwei Beispielbilder wurden zusätzlich visuell geprüft. Die bestehende
+CI-Konfiguration wurde nicht geändert und wird nicht als automatischer Playwright-Lauf ausgegeben.
+
+Drei bisher getrennte Kontexttests sind ohne Funktionskörperänderung in ihr Elternmodul
+zusammengeführt. Die ursprünglichen veröffentlichten Bytes bleiben in Git und privaten
+Hashbelegen erhalten. Der Gesamtdiff bleibt dadurch trotz zusätzlichem Browserprüfer bei
+102 tatsächlichen Dateien beziehungsweise 100 nach den unveränderten Lockdatei-Filtern.
+Alle 155 Notizentests bleiben erhalten. Die zwei sauberen Codex-Runden und alle 22 grünen/
+regulär übersprungenen CI-Checks auf `1a52520` sind historisch; neue Reviews und aktuelle CI
+müssen am neuen endgültigen Head tatsächlich abschließen.
 
 ## Reviewabdeckung und Veröffentlichung
 

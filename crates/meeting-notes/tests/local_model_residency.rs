@@ -1529,7 +1529,7 @@ fn workspace_context_requests(classic_first: bool, observe_renewal: bool) {
             let expiry = chrono::Utc::now() + chrono::Duration::seconds(300);
             return (
                 200,
-                json!({"models":[{"name":"synthetic","expires_at":expiry.to_rfc3339()}]}),
+                json!({"models":[{"name":"synthetic","size":0,"context_length":8192,"expires_at":expiry.to_rfc3339()}]}),
             );
         }
         if path == "/api/generate" && body["options"]["num_ctx"] == 8192 {
@@ -1628,4 +1628,167 @@ fn workspace_ollama_context_survives_streams_classic_reuse_and_real_renewal_time
 #[test]
 fn workspace_ollama_context_upgrades_an_existing_classic_reservation() {
     workspace_context_requests(true, false);
+}
+
+/// Both first use of a resident model and a classic-to-workspace renewal must
+/// refuse a context change with unconfirmed allocation size. The same context
+/// remains usable without making available RAM a test-machine prerequisite.
+#[test]
+fn workspace_context_changes_require_known_headroom_before_mutation() {
+    let mut accepted = Vec::new();
+    for classic_first in [false, true] {
+        for context in [Some(4096u64), None, Some(8192u64)] {
+            let actual = Arc::new(std::sync::atomic::AtomicU64::new(context.unwrap_or(0)));
+            let observed = actual.clone();
+            let server = Server::new(move |path, body| {
+                if path == "/api/ps" {
+                    return (
+                        200,
+                        json!({"models":[{"name":"synthetic","size":0,"context_length":observed.load(Ordering::Acquire),"expires_at":(chrono::Utc::now()+chrono::Duration::seconds(300)).to_rfc3339()}]}),
+                    );
+                }
+                ollama(path, body)
+            });
+            let pool = LocalModelPool::default();
+            let lease = pool
+                .reserve(&server.connection(), LocalProvider::Ollama)
+                .unwrap();
+            if classic_first {
+                lease.prepare(&AnalysisControl::default()).unwrap();
+            }
+            let initial_loads = usize::from(classic_first);
+            let result = lease.prepare_workspace(&AnalysisControl::default());
+            if context == Some(8192) {
+                result.unwrap();
+            } else if result.is_ok() {
+                accepted.push(format!("classic_first={classic_first},context={context:?}"));
+            } else {
+                assert_eq!(
+                    server
+                        .seen()
+                        .iter()
+                        .filter(|(p, _)| p == "/api/generate")
+                        .count(),
+                    initial_loads
+                );
+                actual.store(8192, Ordering::Release);
+                lease
+                    .prepare_workspace(&AnalysisControl::default())
+                    .unwrap();
+            }
+            drop(lease);
+            assert!(!server
+                .seen()
+                .iter()
+                .any(|(p, b)| p == "/api/generate" && b["keep_alive"] == 0));
+        }
+    }
+    assert!(
+        accepted.is_empty(),
+        "Unconfirmed context reload was sent: {accepted:?}"
+    );
+}
+
+/// Use the unchanged real 60-second renewal timer and bounded 75-second wait.
+/// A later external context change must not trigger a new KV-cache allocation
+/// without confirmed headroom; returning to the warm context permits recovery.
+#[test]
+fn workspace_background_context_change_requires_headroom_before_renewal() {
+    let context = Arc::new(std::sync::atomic::AtomicU64::new(8192));
+    let current = context.clone();
+    let (sent, observed) = std::sync::mpsc::channel();
+    let server = Server::new(move |path, body| {
+        let actual = current.load(Ordering::Acquire);
+        if actual != 8192 && ["/api/ps", "/api/generate"].contains(&path) {
+            let _ = sent.send(());
+        }
+        if path == "/api/ps" {
+            return (
+                200,
+                json!({"models":[{"name":"synthetic","size":0,"context_length":actual,"expires_at":(chrono::Utc::now()+chrono::Duration::seconds(300)).to_rfc3339()}]}),
+            );
+        }
+        ollama(path, body)
+    });
+    let pool = LocalModelPool::default();
+    let conn = server.connection();
+    let lease = pool.reserve(&conn, LocalProvider::Ollama).unwrap();
+    lease
+        .prepare_workspace(&AnalysisControl::default())
+        .unwrap();
+    context.store(4096, Ordering::Release);
+    observed.recv_timeout(Duration::from_secs(75)).unwrap();
+    let client = TextClient::new(&conn)
+        .unwrap()
+        .with_residency(Arc::clone(&lease))
+        .unwrap();
+    assert!(
+        generate(&client).is_err(),
+        "A background context reload bypassed the admission check"
+    );
+    assert_eq!(
+        server
+            .seen()
+            .iter()
+            .filter(|(p, _)| p == "/api/generate")
+            .count(),
+        1
+    );
+    assert!(!server.seen().iter().any(|(p, _)| p == "/api/chat"));
+    context.store(8192, Ordering::Release);
+    assert!(generate(&client).is_ok());
+    drop(client);
+    drop(lease);
+    assert!(!server
+        .seen()
+        .iter()
+        .any(|(p, b)| p == "/api/generate" && b["keep_alive"] == 0));
+}
+
+/// A cached policy must not let a context changed by another client reload on
+/// the next workspace inference before the periodic renewal notices the change.
+#[test]
+fn workspace_cached_context_change_requires_headroom_before_inference() {
+    let context = Arc::new(std::sync::atomic::AtomicU64::new(8192));
+    let current = context.clone();
+    let server = Server::new(move |path, body| {
+        if path == "/api/ps" {
+            return (
+                200,
+                json!({"models":[{"name":"synthetic","size":0,"context_length":current.load(Ordering::Acquire),"expires_at":(chrono::Utc::now()+chrono::Duration::seconds(300)).to_rfc3339()}]}),
+            );
+        }
+        ollama(path, body)
+    });
+    let pool = LocalModelPool::default();
+    let lease = pool
+        .reserve(&server.connection(), LocalProvider::Ollama)
+        .unwrap();
+    lease
+        .prepare_workspace(&AnalysisControl::default())
+        .unwrap();
+    context.store(4096, Ordering::Release);
+    assert!(
+        lease
+            .prepare_workspace(&AnalysisControl::default())
+            .is_err(),
+        "Cached workspace state bypassed the current provider context"
+    );
+    assert_eq!(
+        server
+            .seen()
+            .iter()
+            .filter(|(p, _)| p == "/api/generate")
+            .count(),
+        1
+    );
+    context.store(8192, Ordering::Release);
+    lease
+        .prepare_workspace(&AnalysisControl::default())
+        .unwrap();
+    drop(lease);
+    assert!(!server
+        .seen()
+        .iter()
+        .any(|(p, b)| p == "/api/generate" && b["keep_alive"] == 0));
 }

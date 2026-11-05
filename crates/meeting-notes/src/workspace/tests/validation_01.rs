@@ -601,6 +601,11 @@ fn recorded_decisions_reject_negation_and_uncertainty_without_publishing_state()
         "Haben wir den Pilotstart beschlossen?",
         "We have not agreed to start the pilot.",
         "If approved, we decided to start the pilot.",
+        "We decided to start the pilot if approved.",
+        "We decided to start the pilot unless approval fails.",
+        "Wir haben den Pilotstart beschlossen, wenn das Budget kommt.",
+        "Wir haben den Pilotstart beschlossen, sofern das Budget kommt.",
+        "Wir haben den Pilotstart beschlossen, falls das Budget kommt.",
         "We might have agreed to start the pilot.",
         "We haven't agreed to start the pilot.",
         "Wir müssen noch über den Pilotstart entscheiden.",
@@ -617,6 +622,10 @@ fn recorded_decisions_reject_negation_and_uncertainty_without_publishing_state()
         "We decide to start the pilot.",
         "We decided to start the pilot.",
         "We agreed to start the pilot.",
+        "We decided not to start the pilot.",
+        "Wir haben beschlossen, den Piloten nicht zu starten.",
+        "We decided to ask whether the pilot should start.",
+        "Wir haben beschlossen, zu prüfen, ob der Pilot starten soll.",
     ];
     let mut accepted_invalid = Vec::new();
     for (quote, allowed) in invalid

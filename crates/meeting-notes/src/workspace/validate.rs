@@ -582,7 +582,13 @@ pub(super) fn recorded_decision_quote_allowed(quote: &str) -> bool {
     } else {
         return false;
     };
+    // Conditions qualify the asserted decision even when they follow its
+    // predicate. A decision to ask "whether/ob" something holds is different:
+    // that may be an unconditional decision with an uncertain object.
     if quote.contains('?')
+        || words
+            .iter()
+            .any(|word| ["if", "unless", "falls", "wenn", "sofern"].contains(word))
         || words[..assertion_end].iter().any(|word| {
             UNCERTAIN_TERMINAL_WORDS.contains(word)
                 || ADDITIONAL_UNCERTAIN_TERMINAL_WORDS.contains(word)

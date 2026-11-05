@@ -210,6 +210,22 @@ impl ModelLease {
             }
         }
         if state.loaded.is_some() {
+            if let Some(Loaded::Ollama {
+                context_length: Some(length),
+                ..
+            }) = &state.loaded
+            {
+                // A cached app policy is not proof that another client left the
+                // runner's context unchanged since the last renewal.
+                if check_ollama_context_change(
+                    &state.client,
+                    *length,
+                    control,
+                    Duration::from_secs(10),
+                )? {
+                    state.refresh_failed = true;
+                }
+            }
             if state.refresh_failed {
                 renew_ollama(&mut state, Duration::from_secs(300))?;
             }
@@ -230,19 +246,8 @@ impl ModelLease {
                 let found = models
                     .iter()
                     .find(|m| model_name_matches(m["name"].as_str(), &client.model));
-                if context_length.is_some() && found.is_none() {
-                    let available =
-                        client.model_request("api/tags", None, control, Duration::from_secs(10))?;
-                    let size = available["models"]
-                        .as_array()
-                        .and_then(|models| {
-                            models
-                                .iter()
-                                .find(|m| model_name_matches(m["name"].as_str(), &client.model))
-                        })
-                        .and_then(|m| m["size"].as_u64())
-                        .unwrap_or(0);
-                    crate::workspace::memory::require_load_headroom(size)?;
+                if let Some(length) = context_length {
+                    require_ollama_context_headroom(client, found, length, control)?;
                 }
                 let release_after = match found {
                     None => 0,
@@ -552,6 +557,14 @@ fn renew_ollama(state: &mut State, timeout: Duration) -> Result<()> {
         Some(Loaded::Ollama { context_length, .. }) => context_length,
         _ => None,
     };
+    if let Some(length) = context_length {
+        check_ollama_context_change(
+            &state.client,
+            length,
+            &AnalysisControl::default(),
+            timeout.min(Duration::from_secs(10)),
+        )?;
+    }
     let response = state.client.model_request(
         "api/generate",
         Some(&ollama_reservation(
@@ -568,6 +581,56 @@ fn renew_ollama(state: &mut State, timeout: Duration) -> Result<()> {
     );
     state.refresh_failed = false;
     Ok(())
+}
+
+/// Read the provider's current runner before a warm inference or renewal. An
+/// external change requires the same admission guard as a first context load.
+fn check_ollama_context_change(
+    client: &TextClient,
+    requested: u64,
+    control: &AnalysisControl,
+    timeout: Duration,
+) -> Result<bool> {
+    let before = client.model_request("api/ps", None, control, timeout)?;
+    let models = before["models"]
+        .as_array()
+        .context("Ungültige geladene Modellliste.")?;
+    ensure!(models.len() <= 10_000, "Geladene Modellliste ist zu groß.");
+    let found = models
+        .iter()
+        .find(|model| model_name_matches(model["name"].as_str(), &client.model));
+    let unchanged = found.is_some_and(|model| model["context_length"].as_u64() == Some(requested));
+    require_ollama_context_headroom(client, found, requested, control)?;
+    Ok(!unchanged)
+}
+
+/// A different or unconfirmed context can reload an existing Ollama runner.
+/// Admit that allocation like a cold load; identical observed contexts need no
+/// new headroom. Provider metadata is not a guarantee about actual allocation.
+fn require_ollama_context_headroom(
+    client: &TextClient,
+    found: Option<&serde_json::Value>,
+    requested: u64,
+    control: &AnalysisControl,
+) -> Result<()> {
+    if found.is_some_and(|model| model["context_length"].as_u64() == Some(requested)) {
+        return Ok(());
+    }
+    let size = if let Some(model) = found {
+        model["size"].as_u64().unwrap_or(0)
+    } else {
+        let available = client.model_request("api/tags", None, control, Duration::from_secs(10))?;
+        available["models"]
+            .as_array()
+            .and_then(|models| {
+                models
+                    .iter()
+                    .find(|model| model_name_matches(model["name"].as_str(), &client.model))
+            })
+            .and_then(|model| model["size"].as_u64())
+            .unwrap_or(0)
+    };
+    crate::workspace::memory::require_load_headroom(size)
 }
 
 /// Renew the established workspace context as well as its TTL; classic-only
