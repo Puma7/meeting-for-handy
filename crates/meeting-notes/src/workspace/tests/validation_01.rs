@@ -1,6 +1,181 @@
 use super::*;
 
 #[test]
+fn terminal_replay_uses_immutable_promise_history_after_evidence_minimization() {
+    let mut duplicates = Vec::new();
+    for terminal in ["completed", "withdrawn"] {
+        let directory = tempfile::tempdir().unwrap();
+        let (_writer, empty) = store::load(directory.path()).unwrap();
+        let (mut state, mut request, mut answer) = setup();
+        request.purpose = "tasks".into();
+        request.transcript_sources[0].text = "I will send the report tomorrow.".into();
+        let alternative = Source {
+            id: "s_other_promise".into(),
+            source: "microphone".into(),
+            start_ms: 3000,
+            end_ms: 6000,
+            text: "I promise to send the report tomorrow.".into(),
+        };
+        request.transcript_sources.push(alternative.clone());
+        answer["changes"][0]["text"] = json!("Send the report");
+        answer["changes"][0]["due"] = json!("tomorrow");
+        answer["changes"][0]["evidence"] = json!([{"sourceId":"s_one","quote":"I will send the report tomorrow."},{"sourceId":alternative.id,"quote":alternative.text}]);
+        let events = validate::apply(&mut state, &request, &answer.to_string()).unwrap();
+        assert_eq!(state.entities[0].evidence.len(), 2);
+        state.revision = 1;
+        store::append(
+            directory.path(),
+            &store::Delta::between(&empty, &state, request.transcript_sources.clone(), events),
+        )
+        .unwrap();
+        let seed = read_state(directory.path()).unwrap();
+        let done = Source {
+            id: "s_terminal".into(),
+            source: "system".into(),
+            start_ms: 6000,
+            end_ms: 9000,
+            text: if terminal == "completed" {
+                "I have sent the report."
+            } else {
+                "I withdraw the report task."
+            }
+            .into(),
+        };
+        let mut sources = seed.originals.clone();
+        sources.push(done.clone());
+        let mut completion = Request::new(
+            "r_terminal".into(),
+            &seed.context,
+            &seed,
+            seed.entities.clone(),
+            std::slice::from_ref(&done),
+            sources,
+        );
+        completion.purpose = "tasks".into();
+        answer["requestId"] = json!("r_terminal");
+        answer["changes"][0]["targetId"] = json!(seed.entities[0].id);
+        answer["changes"][0]["targetRevision"] = json!(seed.entities[0].revision);
+        answer["changes"][0]["text"] = json!(null);
+        answer["changes"][0]["due"] = json!(null);
+        answer["changes"][0]["status"] = json!(terminal);
+        answer["changes"][0]["evidence"] = json!([{"sourceId":done.id,"quote":done.text}]);
+        let mut next = seed.clone();
+        let events = validate::apply(&mut next, &completion, &answer.to_string()).unwrap();
+        next.revision = 2;
+        store::append(
+            directory.path(),
+            &store::Delta::between(&seed, &next, vec![done], events),
+        )
+        .unwrap();
+        let terminal_state = read_state(directory.path()).unwrap();
+        assert_eq!(terminal_state.entities[0].evidence.len(), 2);
+        let omitted = seed.entities[0]
+            .evidence
+            .iter()
+            .find(|e| !terminal_state.entities[0].evidence.contains(e))
+            .unwrap()
+            .clone();
+        assert!(terminal_state
+            .events
+            .iter()
+            .any(|e| e.entity_id == seed.entities[0].id
+                && e.revision == 1
+                && e.evidence.contains(&omitted)));
+        let old_files = (1..=2)
+            .map(|i| {
+                let path = directory.path().join(format!("revision-{i:08}.json"));
+                let bytes = std::fs::read(&path).unwrap();
+                (path, bytes)
+            })
+            .collect::<Vec<_>>();
+        let source = terminal_state
+            .originals
+            .iter()
+            .find(|s| s.id == omitted.source_id)
+            .unwrap()
+            .clone();
+        let mut replay = Request::new(
+            "r_replay".into(),
+            &terminal_state.context,
+            &terminal_state,
+            terminal_state.entities.clone(),
+            std::slice::from_ref(&source),
+            terminal_state.originals.clone(),
+        );
+        replay.purpose = "tasks".into();
+        answer["requestId"] = json!("r_replay");
+        answer["changes"][0]["targetId"] = json!(null);
+        answer["changes"][0]["targetRevision"] = json!(null);
+        answer["changes"][0]["text"] = json!("Send the report");
+        answer["changes"][0]["status"] = json!("open");
+        answer["changes"][0]["evidence"] =
+            json!([{"sourceId":omitted.source_id,"quote":omitted.quote}]);
+        let mut replayed = terminal_state.clone();
+        let events = validate::apply(&mut replayed, &replay, &answer.to_string()).unwrap();
+        if replayed.entities != terminal_state.entities || !events.is_empty() {
+            duplicates.push(format!("{terminal}: minimized current evidence lost the original promise identity; entities={}, events={}",replayed.entities.len(),events.len()));
+        }
+        replayed.revision += 1;
+        store::append(
+            directory.path(),
+            &store::Delta::between(&terminal_state, &replayed, vec![], events),
+        )
+        .unwrap();
+        let reopened = read_state(directory.path()).unwrap();
+        assert_eq!(reopened.entities, replayed.entities);
+        assert_eq!(
+            serde_json::to_vec(&reopened).unwrap(),
+            serde_json::to_vec(&read_state(directory.path()).unwrap()).unwrap()
+        );
+        let fresh = Source {
+            id: "s_fresh_promise".into(),
+            source: "microphone".into(),
+            start_ms: 9000,
+            end_ms: 12000,
+            text: source.text.clone(),
+        };
+        let mut sources = reopened.originals.clone();
+        sources.push(fresh.clone());
+        let mut req = Request::new(
+            "r_fresh".into(),
+            &reopened.context,
+            &reopened,
+            reopened.entities.clone(),
+            std::slice::from_ref(&fresh),
+            sources,
+        );
+        req.purpose = "tasks".into();
+        answer["requestId"] = json!("r_fresh");
+        answer["changes"][0]["evidence"] = json!([{"sourceId":fresh.id,"quote":fresh.text}]);
+        let mut renewed = reopened.clone();
+        validate::apply(&mut renewed, &req, &answer.to_string()).unwrap();
+        assert_eq!(
+            renewed
+                .entities
+                .iter()
+                .filter(|e| e.kind == "task" && e.status == "open")
+                .count(),
+            1
+        );
+        assert_eq!(
+            renewed
+                .entities
+                .iter()
+                .find(|e| e.id == terminal_state.entities[0].id)
+                .unwrap(),
+            &terminal_state.entities[0]
+        );
+        for (path, bytes) in old_files {
+            assert_eq!(std::fs::read(path).unwrap(), bytes);
+        }
+    }
+    assert!(
+        duplicates.is_empty(),
+        "Historical replay duplicates: {duplicates:?}"
+    );
+}
+
+#[test]
 fn perfect_decisions_validate_literal_sources_and_durable_reopen() {
     let mut mismatches = Vec::new();
     for (quote, allowed) in [

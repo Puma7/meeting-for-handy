@@ -243,7 +243,9 @@ pub(crate) fn apply(
                         let terminal_promise = c.kind == "task"
                             && ["completed", "withdrawn"].contains(&e.status.as_str())
                             && !c.evidence.is_empty()
-                            && c.evidence.iter().all(|v| e.evidence.contains(v));
+                            && c.evidence
+                                .iter()
+                                .all(|v| retained_task_witness(&next, e, v));
                         !next.context_excluded_ids.contains(&e.id)
                             && e.kind == c.kind
                             && e.text == text
@@ -356,6 +358,29 @@ pub(crate) fn apply(
     next.events.extend(events.clone());
     *state = next;
     Ok(events)
+}
+
+/// Match an original promise without enlarging the bounded current evidence set.
+/// Only this task's uninterrupted current-text history can supply an omitted witness.
+fn retained_task_witness(
+    state: &WorkspaceState,
+    task: &Entity,
+    evidence: &crate::Evidence,
+) -> bool {
+    task.evidence.contains(evidence)
+        || (task_quote_allowed(&evidence.quote)
+            && !state.superseded_sources.contains(&evidence.source_id)
+            && state
+                .originals
+                .iter()
+                .any(|s| s.id == evidence.source_id && s.text.contains(&evidence.quote))
+            && state
+                .events
+                .iter()
+                .rev()
+                .filter(|event| event.entity_id == task.id)
+                .take_while(|event| event.text == task.text)
+                .any(|event| event.evidence.contains(evidence)))
 }
 
 /// Select text and metadata witnesses within the unchanged combined six-evidence budget.

@@ -8,7 +8,7 @@ const english = {
   "Freigegebene Vorbereitung und Notizen sind zu groß. Bitte Text kürzen oder weniger Themen freigeben; private Entwürfe bleiben erhalten.":
     "Shared preparation and notes are too long. Shorten the text or share fewer topics; private drafts are retained.",
   durchsuchen: "search",
-  Protokollnotiz: "Protocol note",
+  Protokollnotiz: "Minutes note",
   " Die Höhe bleibt nur für diese Ansicht erhalten; der frühere Browserstand wird bewahrt.":
     " The height is kept only for this view; the previous browser state is retained.",
   Vorbereitung: "Preparation",
@@ -91,7 +91,7 @@ const english = {
   "kein Textmodell aktiv": "no text model active",
   "· KI-Entwürfe mit Originalbelegen": "· AI drafts with original evidence",
   Originalbeleg: "Original evidence",
-  "Früherer Transkriptstand ·": "Earlier transcript revision ·",
+  "Früherer Transkriptstand ·": "Earlier transcript version ·",
   "· Abschnittszeiten": "· Section times",
   "Im Transkript ansehen": "View in transcript",
   "Der Originalabschnitt ist in diesem Stand nicht verfügbar.":
@@ -151,7 +151,7 @@ const english = {
   Privat: "Private",
   "Fürs Protokoll": "For the minutes",
   "Nicht im Protokoll": "Excluded from minutes",
-  "Eigene Protokollnotiz": "My meeting note",
+  "Eigene Protokollnotiz": "My minutes note",
   "Chat wird gesondert angeschlossen. Die lokale Kachelauswertung ist davon unabhängig.":
     "Meeting chat will be connected separately. Local card analysis works independently.",
   "Meeting fragen": "Ask meeting",

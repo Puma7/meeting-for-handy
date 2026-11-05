@@ -793,7 +793,14 @@ describe("Native workspace boundary", () => {
       screen.getByRole("textbox", { name: "Transcript search" }),
     ).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "For the minutes" }));
-    expect(screen.getByRole("textbox", { name: "Protocol note" })).toBeTruthy();
+    expect(screen.getByRole("textbox", { name: "Minutes note" })).toBeTruthy();
+    expect(screen.getByText("My minutes note")).toBeTruthy();
+    expect(workspaceText("en", "Früherer Transkriptstand ·")).toBe(
+      "Earlier transcript version ·",
+    );
+    expect(workspaceText("en", "Früherer Transkriptstand · ")).toBe(
+      "Earlier transcript version · ",
+    );
     expect(
       screen.getByText(/The height is kept only for this view/),
     ).toBeTruthy();
@@ -891,6 +898,57 @@ describe("Native workspace boundary", () => {
     ]);
     expect(screen.getByText("Welche Freigabe fehlt?")).toBeTruthy();
   });
+  it.each([5, 10, 15, 30, 60])(
+    "uses actual minute boundaries for the production %i-minute transcript picker",
+    async (minutes) => {
+      const f = fixture();
+      const cutoff = 7200 - minutes * 60;
+      f.meeting.parts = [
+        {
+          file: "before",
+          source: "system",
+          startSample: (cutoff - 30) * 16000,
+          sampleCount: 30 * 16000,
+          status: "complete",
+          text: "Outside the selected minutes",
+        },
+        {
+          file: "boundary",
+          source: "system",
+          startSample: cutoff * 16000,
+          sampleCount: 30 * 16000,
+          status: "complete",
+          text: "Inside the selected minutes",
+        },
+        {
+          file: "last",
+          source: "microphone",
+          startSample: 7170 * 16000,
+          sampleCount: 30 * 16000,
+          status: "complete",
+          text: "Latest synthetic section",
+        },
+      ];
+      render(
+        <LiveWorkspace
+          adapter={f.adapter}
+          meeting={f.meeting}
+          onBack={() => {}}
+        />,
+      );
+      fireEvent.click(await screen.findByRole("tab", { name: "Transkript" }));
+      const panel = within(
+        screen.getByRole("tabpanel", { name: "Transkript" }),
+      );
+      fireEvent.change(
+        panel.getByRole("combobox", { name: "Transkriptzeitraum" }),
+        { target: { value: String(minutes) } },
+      );
+      expect(panel.queryByText("Outside the selected minutes")).toBeNull();
+      expect(panel.getByText("Inside the selected minutes")).toBeTruthy();
+      expect(panel.getByText("Latest synthetic section")).toBeTruthy();
+    },
+  );
   it("filters a custom transcript interval at section boundaries", async () => {
     const f = fixture();
     render(
