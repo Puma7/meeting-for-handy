@@ -1,12 +1,13 @@
 # PR 41: Validierungsstand
 
 Stand: 5. November 2026. Version: **1.1.0-beta.1**, unverändert.
-Diese Fassung vervollständigt den Abschlussfilter zusätzlich für neither. Drei weitere
-falsche Abschlüsse aus derselben Fehlergruppe sind vorher reproduziert und jetzt gesperrt.
+Diese Fassung korrigiert den Abgleich verbleibender Transkriptquellen nach Entfernung oder
+Verkürzung eines alten Abschnitts während einer mehrteiligen Kontextprüfung. Vier tatsächliche
+Auslassungen sind vorher reproduziert und jetzt behoben, auch nach Fehler und Wiederöffnung.
 Die kompakte Meetingkennung und alle vorigen Korrekturen bleiben enthalten. Aktuell ändern
-sich nur dieser native Abschlussfilter, dessen Gegenfälle und der bereinigte Vermerk.
+sich nur die native Wiederaufnahmesteuerung, deren Regression und der bereinigte Vermerk.
 Oberfläche, Browserprüfer, Prompts, Schemas, Transport, Audio/ASR, Modellreservierungen,
-Abhängigkeiten und Schutz-/Reviewerregeln bleiben gegenüber `93d48e2` unverändert.
+Abhängigkeiten und Schutz-/Reviewerregeln bleiben gegenüber `da6b5c2` unverändert.
 Der vollständige TEST_REPORT wurde nicht für diese Nacharbeit neu veröffentlicht.
 
 Die [ausführliche bisherige Fassung](https://github.com/Puma7/meeting-for-handy/blob/96109374c3fa7d72ed0a3cea68706a90280fc484/docs/validation/pr41-review-followup-20261104.md)
@@ -45,7 +46,7 @@ nicht protokolliert oder als Klartext gespeichert. Keine Nutzermeetings wurden f
 ## Prüfungen und genauer Bezug
 
 Rusttests, Clippy, Rustformat und beide abschließenden echten lokalen Modellreferenzen sind
-für die neither-Erweiterung frisch bestanden. Die vollständige Oberfläche mit 408 Fällen,
+für die Wiederaufnahmekorrektur frisch bestanden. Die vollständige Oberfläche mit 408 Fällen,
 TypeScript, Build und Format sowie die Browserprüfung stammen vom hier bytegleichen
 `93d48e2`-UI-Stand und wurden nicht erneut ausgeführt.
 Ältere Paket-/Langsammodellnachweise werden nicht als neu ausgeführt ausgegeben.
@@ -53,11 +54,11 @@ TypeScript, Build und Format sowie die Browserprüfung stammen vom hier byteglei
 
 | Prüfung | Tatsächliches Ergebnis |
 | --- | --- |
-| Rust-Workspace, alle Targets | Frisch 560 bestanden, darunter 161 Notizen- und 37 Providerprotokolltests; drei bestehende besondere Einstiege regulär ignoriert. Der erweiterte Erledigt-Fall erhält alle bisherigen positiven/negativen Fälle sowie drei zusätzlich vorher falsch akzeptierte neither-Aussagen. Insgesamt sind sieben frühere und drei weitere falsche Abschlüsse reproduziert. Frühere 559/558/557/555 Zahlen sind historisch. |
+| Rust-Workspace, alle Targets | Frisch 561 bestanden, darunter 162 Notizen- und 37 Providerprotokolltests; drei bestehende besondere Einstiege regulär ignoriert. Die neue tatsächliche Runnerregression reproduzierte vorher vier ausgelassene Quellen nach Entfernung/Verkürzung, jeweils mit und ohne Wiederöffnung. Nachher werden alle verbleibenden Quellen abgeglichen; injizierte HTTP-500-Fehler erhalten Cursor und alte Checkpointbytes. Alle bisherigen Abschlussgegenfälle bleiben enthalten. Frühere 560/559/558/557/555 Zahlen sind historisch. |
 | Rustformat und Clippy | Frisch bestanden; gesperrte Abhängigkeiten und Warnungen als Fehler. |
 | Oberfläche | 408 Tests in 21 Dateien auf dem hier bytegleichen `93d48e2`-UI-Stand, nicht wiederholt; TypeScript, Produktionsbuild und vollständige Frontendformatprüfung dort bestanden. Zwei DE/EN-Titelgegenfälle scheiterten vorher am fehlenden sichtbaren Bezeichner. Der Name folgt jetzt dem tatsächlich angezeigten Meeting, nicht einem unbestätigten Einrichtungsentwurf, und bleibt bei geschlossener Einrichtung sichtbar. Meter- und Agentensteuerungsschutz bleiben erhalten. Zwei Testworker, unveränderte Fristen. Frühere 406/399/395/391/385 Zahlen sind historisch. |
 | Projektprüfung | Vorherige veröffentlichte Stände bestanden 47 PCM-, 35 Notizen-, 28 Vorlagen-, acht Agenten- und Monitorprüfungen. Für jede Quellveröffentlichung nach dem letzten Dokumentedit erneut vor Upload erforderlich. |
-| Echte lokale Referenzen | Abschließendes neues Paar frisch bestanden: Deutsch 97.2575113 s, Englisch 123.3753123 s, jeweils 0 reguläre Validierungswiederholungen. Die vorab unverändert erlaubte vollständig validierte Wiederholung je Anfrage wurde nicht erhöht; null Wiederholungen sind keine Freigabeschwelle. Positive Aufgabe, unverbindliche Aussage, Impulserhalt, menschlicher Status nach Protokolländerung und bytegleiche Wiederöffnung bestanden; wörtliches „I’ll“ bleibt erhalten. Ein vorheriger echter deutscher Versuch hielt im zweiten Fenster wegen einer nichtleeren unresolvedContextIds-Antwort sicher an und bleibt ausdrücklich ein Fehllauf. Der konkrete angeforderte Kontext wurde nicht separat gespeichert; eine weitergehende Ursache wird nicht erfunden. Native Quellen, Prompts, Modell und Kriterien blieben für das folgende erfolgreiche Paar unverändert. Die konkreten negativen Abschlussformen sind zusätzlich kontrolliert über die echte Validierungs-/Speicherschnittstelle geprüft. |
+| Echte lokale Referenzen | Abschließendes neues Paar frisch bestanden: Deutsch 104.0804789 s, Englisch 151.1052301 s; reguläre Validierungswiederholungen: Deutsch 0, Englisch 0. Die vorab unverändert erlaubte vollständig validierte Wiederholung je Anfrage wurde nicht erhöht; null Wiederholungen sind keine Freigabeschwelle. Positive Aufgabe, unverbindliche Aussage, Impulserhalt, menschlicher Status nach Protokolländerung und bytegleiche Wiederöffnung bestanden; wörtliches „I’ll“ bleibt erhalten. Ein vorheriger echter deutscher Versuch auf `da6b5c2` hielt im zweiten Fenster wegen einer nichtleeren unresolvedContextIds-Antwort sicher an und bleibt ausdrücklich ein Fehllauf. Der konkrete angeforderte Kontext wurde nicht separat gespeichert; eine weitergehende Ursache wird nicht erfunden. Native Quellen, Prompts, Modell und Kriterien blieben auf diesem früheren Stand für das danach erfolgreiche 97.2575113/123.3753123-s-Paar unverändert. Dieses Paar ist historisch und ersetzt die hier erneut ausgeführten Referenzen nicht. Die konkreten negativen Abschlussformen sind zusätzlich kontrolliert über die echte Validierungs-/Speicherschnittstelle geprüft. |
 | Paketregression | 21 Prüfungen auf `91f0985`; Paketdateien seitdem unverändert. Tatsächlich erzeugter synthetischer ZIP prüft Streaming- oder Batchhinweis, Launcher, Fingerprint und Nichtüberschreibung. Kein lokales Produktpaket oder Installer daraus bereitgestellt. |
 | Kontrolliertes Langsammodell | Auf `35d53e8`: 244.33 s Gesamtlauf, 210 s SSE-Antwortpause, nächster Refresh nach 210.0421383 s, maximal eine Modellanfrage, ein erhaltener Impuls. 3737920 Samples je Spur / 16000 Hz = 233.62 s je Spur. Beide PCM-Schreiber liefen nach Auswertungsstopp weiter. Hier nicht erneut ausgeführt. |
 | Sidebar und klassische Ansicht im Browser | Auf `93d48e2`, hier nicht erneut ausgeführt: 24 tatsächliche Layoutabläufe, 24 kombinierte Warn-Titel und 24 Meetingtitel-Zustände: 390/740/1280 Pixel, DE/EN, hell/dunkel, ein-/ausgeklappt. Langer Meetingname bleibt einzeilig, im Fenster und mit vollständigem Titelattribut zugänglich; Einrichtung bleibt geschlossen. Eigener Server/Browser beendet, keine Seiten-/Konsolenfehler, Fremdanfragen oder horizontalen Überläufe. Zwei Screenshots visuell geprüft. Nur synthetische Komponenten-/DOM-Prüfung, kein nativer OS-Tooltip-, IPC-, Aufnahme- oder Screenreader-Sprachnachweis. |
@@ -213,7 +214,7 @@ werden in der dafür vorgesehenen reconcile-Phase geprüft. Die facts-Phase erh�
 ihren eingeschränkten Kontext. Dies ändert weder Phasenauftrag noch Schutzgrenzen.
 
 Wiederöffnung ist bytegleich, derselbe Lauf und ein neuer Modelllauf behalten die neuen
-Freigaben beziehungsweise den Widerruf. Alle 159 Notizenprüfungen bestehen. Diese Prüfung
+Freigaben beziehungsweise den Widerruf. Damals bestanden alle 159 Notizenprüfungen; dies ist ein historischer Zwischenstand (aktuell 162, siehe Prüftabelle). Diese Prüfung
 belegt den lokalen serialisierten Start-/Wiederaufnahmepfad, keine atomare Koordination
 beliebiger fremder Programme. Eine Zwischenreferenz vor dieser Kontextkorrektur scheiterte
 an einem verworfenen Modellvorschlag als Beschluss; sie bleibt erhalten und zählt nicht als
@@ -270,6 +271,42 @@ Der vollständige CodeRabbit-Lauf war wegen des gültigen Titelbefunds kein saub
 Die folgende reine UI-/Prüferkorrektur benötigt eigene frische Reviews und CI auf ihrem Head.
 Die damaligen Rust-/Modellnachweise bleiben ihrem `87eba39`-Stand zugeordnet; die obige aktuelle Tabelle weist die erneut ausgeführten Rusttests getrennt aus.
 
+## Wiederaufnahme nach Entfernung oder Verkürzung einer Quelle
+
+Die [Codex-Prüfung auf `da6b5c2`](https://github.com/Puma7/meeting-for-handy/pull/41#pullrequestreview-5788317794)
+fand einen gültigen P2-Befund: Ein gespeicherter numerischer Abgleichcursor konnte nach dem
+Wegfall eines bereits geprüften Präfixabschnitts eine verbleibende Quelle überspringen. Die
+Oberfläche konnte den Kontext trotzdem als vollständig abgeglichen anzeigen. Der Cursor wird
+bei ungültig gewordenen Quellen während eines laufenden Abgleichs jetzt auf den Beginn der
+verbleibenden Quellen zurückgesetzt. Neue Textarbeit behält Vorrang; Fenster bleiben begrenzt.
+Erst eine vollständig validierte und dauerhaft gespeicherte Aktualisierung bestätigt den Neustart.
+Bereits geprüfte verbleibende Quellen können erneut geprüft werden; ihre Identitäten bleiben erhalten.
+
+Die neue Regression verwendet den tatsächlichen WorkspaceRunner und erfasst seine ausgehenden
+lokalen Modellanfragen. Acht Quellen werden zunächst in zwei begrenzten Fenstern verarbeitet.
+Danach werden gemeinsame Agenda und Notiz geändert und vier Quellen neu abgeglichen. Entfernung
+oder Verkürzung des ersten Abschnitts reproduzierten vorher jeweils eine ausgelassene verbleibende
+Quelle, mit und ohne Wiederöffnung: vier echte Fehler bei trotzdem beendetem Kontextabgleich.
+In den Wiederöffnungsvarianten scheitert zusätzlich die erste Anfrage kontrolliert mit HTTP 500.
+Nachher erreichen sämtliche verbleibenden Quellen die tatsächliche Abgleichphase mit der neuen
+Notiz. Fehler behalten den vorherigen Cursor; Neustarts nach Fehler und nach erfolgreichen
+Fenstern funktionieren. Alle früheren Revisionen und Originalquellen bleiben erhalten, alte
+Checkpointbytes unverändert und der endgültige Zustand nach Wiederöffnung bytegleich.
+Das sind kontrollierte lokale Protokolltests, keine echten Nutzermeetings oder physische Aufnahme.
+
+Anschließend bestand das vorab geplante neue DE/EN-Paar mit dem echten kleinen lokalen Modell
+alle fünf unveränderten Kriterien; Zeiten und Wiederholungen stehen in der aktuellen Prüftabelle.
+Frontend und Browserprüfung sind zum geprüften `93d48e2`-UI-Stand bytegleich, nicht erneut ausgeführt.
+
+Der vollständige [CodeRabbit-Lauf auf `da6b5c2`](https://github.com/Puma7/meeting-for-handy/pull/41#pullrequestreview-5788449187)
+prüfte alle 100 zulässigen Dateinamen gegen die 102 vollständig paginierten PR-Patches. Sein
+einziger zusätzlicher Befund war die unklar historische Zahl 159 Notizenprüfungen. Diese Passage
+ist jetzt ausdrücklich historisch und nennt den aktuellen Bezug zur Prüftabelle. Risiko Low
+behielt genau diese Dokumentationsanmerkung; eine separate Architekturwertung wurde nicht
+geliefert. Dokumentationsquote 85,27 Prozent bei unverändert 80 Prozent. LanguageTool blieb
+unvollständig, Ursache unbekannt. Codex und CodeRabbit waren deshalb kein sauberer Abschluss
+auf diesem Head. Der folgende veröffentlichte Stand benötigt eigene frische saubere Reviews und CI.
+
 ## Ergänzende neither-Gegenprobe und abschließende Referenz
 
 Vor einer neuen Vollreview wurde dieselbe Fehlergruppe mit „I have sent neither report.“,
@@ -290,7 +327,7 @@ Hardwareursache oder allgemeine Anbieterunzuverlässigkeit. Dieser Fehllauf blei
 mit Log, erstem View, Checkpoint und Protokolländerung erhalten und zählt nicht als bestanden.
 
 Ein anschließend vorab protokolliertes neues Paar mit denselben unveränderten Quellen,
-Prompts, Modell und Kriterien bestand beide Sprachen mit den oben genannten Zeiten.
+Prompts, Modell und Kriterien bestand auf `da6b5c2` beide Sprachen in 97.2575113 beziehungsweise 123.3753123 s. Diese historischen Zeiten werden nicht dem folgenden Wiederaufnahmefix zugeordnet.
 Während der echten Modellverarbeitung liefen keine anderen eigenen Prüfungen. Es wurden
 weder Validierung noch Wiederholungsbudget gelockert. Nach Abschluss war beim ausgewählten
 Modell rein lesend keine geladene Instanz mehr vorhanden; die Nachprobe entlud selbst nichts.
@@ -367,10 +404,10 @@ und wiederholt identische Wiederöffnung. Das ist kein vollständiger englischer
 oder Bedeutungsnachweis. Die Änderung erweitert weder neue Aufgaben noch künftige Zusagen
 zu einer Erledigung. Prompts, Schema, Transport und Prüfgrenzen bleiben unverändert.
 
-Frisch bestanden sind 560 Rusttests, 161 Notizenfälle, 37 Providerprotokollfälle, Clippy mit
-Warnungen als Fehler und Rustformat. Beide vorab geplanten echten lokalen Referenzen mit
-synthetischen positiven/unverbindlichen Aussagen sind ebenfalls neu bestanden, wie oben
-getrennt von den kontrollierten Kontraktionsgegenfällen dokumentiert. Frühere Prüfungen auf
+Auf dem früheren veröffentlichten Stand `da6b5c2` bestanden 560 Rusttests, 161 Notizenfälle,
+37 Providerprotokollfälle, Clippy mit Warnungen als Fehler und Rustformat. Die damaligen
+abschließenden echten lokalen Referenzen mit synthetischen positiven/unverbindlichen Aussagen
+sind historische Belege, getrennt von den kontrollierten Kontraktionsgegenfällen. Frühere Prüfungen auf
 `fc8433f` ersetzen keine frische saubere Reviewrunde oder CI auf dem folgenden Head.
 Eine vollständige CodeRabbit-Runde auf `fc8433f` wurde wegen dieses offenen echten Codex-
 Befunds nicht erneut beauftragt; die nächste Vollprüfung gilt dem korrigierten Endstand.

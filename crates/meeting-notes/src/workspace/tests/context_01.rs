@@ -1,6 +1,249 @@
 use super::*;
 
 #[test]
+fn replay_rechecks_every_retained_source_after_removal_or_shortening_and_restart() {
+    use std::{
+        io::{Read, Write},
+        net::TcpListener,
+        sync::{
+            atomic::{AtomicBool, Ordering},
+            Arc,
+        },
+        thread,
+        time::{Duration, Instant},
+    };
+    let mut omissions = Vec::new();
+    for shorten in [false, true] {
+        for restart in [false, true] {
+            let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+            let endpoint = format!("http://{}/v1/", listener.local_addr().unwrap());
+            let stop = Arc::new(AtomicBool::new(false));
+            let reject_next = Arc::new(AtomicBool::new(false));
+            let server_reject = reject_next.clone();
+            let server_stop = stop.clone();
+            let server = thread::spawn(move || {
+                let mut requests = Vec::new();
+                let end = Instant::now() + Duration::from_secs(10);
+                while !server_stop.load(Ordering::SeqCst) {
+                    assert!(
+                        Instant::now() < end,
+                        "synthetic replay server exceeded its bound"
+                    );
+                    let mut stream = match accept_synthetic_before(
+                        &listener,
+                        Instant::now() + Duration::from_millis(100),
+                    ) {
+                        Ok(stream) => stream,
+                        Err(e) if e.kind() == std::io::ErrorKind::TimedOut => continue,
+                        Err(e) => panic!("{e}"),
+                    };
+                    let mut bytes = Vec::new();
+                    let mut buffer = [0; 8192];
+                    let header = loop {
+                        let n = stream.read(&mut buffer).unwrap();
+                        assert!(n > 0 && bytes.len() < 500000);
+                        bytes.extend_from_slice(&buffer[..n]);
+                        if let Some(at) = bytes.windows(4).position(|b| b == b"\r\n\r\n") {
+                            break at + 4;
+                        }
+                    };
+                    let size = String::from_utf8_lossy(&bytes[..header])
+                        .lines()
+                        .filter_map(|s| s.split_once(':'))
+                        .find(|(k, _)| k.eq_ignore_ascii_case("content-length"))
+                        .unwrap()
+                        .1
+                        .trim()
+                        .parse::<usize>()
+                        .unwrap();
+                    assert!(size < 500000);
+                    while bytes.len() < header + size {
+                        let n = stream.read(&mut buffer).unwrap();
+                        assert!(n > 0);
+                        bytes.extend_from_slice(&buffer[..n]);
+                    }
+                    let body: serde_json::Value =
+                        serde_json::from_slice(&bytes[header..header + size]).unwrap();
+                    let req: serde_json::Value =
+                        serde_json::from_str(body["messages"][1]["content"].as_str().unwrap())
+                            .unwrap();
+                    if server_reject.swap(false, Ordering::SeqCst) {
+                        let error = "{\"error\":{\"message\":\"synthetic unavailable\"}}";
+                        write!(stream,"HTTP/1.1 500 Internal Server Error\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{error}",error.len()).unwrap();
+                        continue;
+                    }
+                    let answer=json!({"contractVersion":CONTRACT_VERSION,"requestId":req["requestId"],"changes":[],"overviewRefs":[],"unresolvedContextIds":[],"moreChangesPossible":false}).to_string();
+                    requests.push(req);
+                    let payload = format!(
+                        "data: {}\n\ndata: {}\n\n",
+                        json!({"choices":[{"delta":{"content":answer},"finish_reason":null}]}),
+                        json!({"choices":[{"delta":{},"finish_reason":"stop"}]})
+                    );
+                    write!(stream,"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{payload}",payload.len()).unwrap();
+                }
+                requests
+            });
+            let directory = tempfile::tempdir().unwrap();
+            let client = TextClient::new(&crate::Connection {
+                endpoint,
+                model: "synthetic-replay".into(),
+                mode: "local".into(),
+                cloud_consent: false,
+                api_key: String::new(),
+            })
+            .unwrap();
+            let mut runner = WorkspaceRunner::open(directory.path()).unwrap();
+            runner.set_context(Default::default()).unwrap();
+            let part = |i: usize| {
+                let prefix = format!("Synthetic neutral source {i}. ");
+                format!("{prefix}{}", "z".repeat(1600 - prefix.len()))
+            };
+            let mut texts = (0..if shorten { 7 } else { 8 })
+                .map(|i| LiveText {
+                    key: format!("part-{i}"),
+                    track: "system".into(),
+                    start_ms: i as u64 * 30000,
+                    end_ms: (i as u64 + 1) * 30000,
+                    text: if shorten && i == 0 {
+                        format!("{}{}", part(0), part(8))
+                    } else {
+                        part(i)
+                    },
+                })
+                .collect::<Vec<_>>();
+            let originals = live::pending(&[], &texts);
+            assert_eq!(originals.len(), 8);
+            for _ in 0..2 {
+                let pending = runner.pending(&texts);
+                assert_eq!(
+                    runner
+                        .update(&client, &pending, &AnalysisControl::default(), "en")
+                        .unwrap(),
+                    4
+                );
+            }
+            assert!(runner.pending(&texts).is_empty());
+            assert!(!runner.context_dirty());
+            let mut context = runner.context.lock().unwrap().clone();
+            context.shared_notes.push(SharedNote {
+                id: "h_replay".into(),
+                revision: 1,
+                text: "New synthetic shared context".into(),
+            });
+            context.agenda.push(Agenda {
+                id: "e_replay".into(),
+                revision: 1,
+                text: "Review every retained source".into(),
+            });
+            let (context, _) = update_context(directory.path(), &context).unwrap();
+            *runner.context.lock().unwrap() = context;
+            runner
+                .update(&client, &[], &AnalysisControl::default(), "en")
+                .unwrap();
+            assert_eq!(runner.state.replay_cursor, Some(4));
+            assert!(runner.context_dirty());
+            let retained_files = std::fs::read_dir(directory.path())
+                .unwrap()
+                .map(Result::unwrap)
+                .filter(|e| e.file_name().to_string_lossy().starts_with("revision-"))
+                .map(|e| (e.path(), std::fs::read(e.path()).unwrap()))
+                .collect::<Vec<_>>();
+            if restart {
+                drop(runner);
+                runner = WorkspaceRunner::open(directory.path()).unwrap();
+                assert_eq!(runner.state.replay_cursor, Some(4));
+            }
+            if shorten {
+                texts[0].text = part(0);
+            } else {
+                texts.remove(0);
+            }
+            if restart {
+                let pending = runner.pending(&texts);
+                reject_next.store(true, Ordering::SeqCst);
+                assert!(runner
+                    .update(&client, &pending, &AnalysisControl::default(), "en")
+                    .unwrap_err()
+                    .to_string()
+                    .contains("500"));
+                assert_eq!(runner.state.replay_cursor, Some(4));
+                assert!(runner.context_dirty());
+                for (path, bytes) in &retained_files {
+                    assert_eq!(&std::fs::read(path).unwrap(), bytes);
+                }
+                drop(runner);
+                runner = WorkspaceRunner::open(directory.path()).unwrap();
+                assert_eq!(runner.state.replay_cursor, Some(4));
+            }
+            let latest = live::pending(&[], &texts);
+            let retained = originals
+                .iter()
+                .filter(|old| {
+                    latest.iter().any(|new| {
+                        new.key == old.key && new.chunk == old.chunk && new.text == old.text
+                    })
+                })
+                .map(source_id)
+                .collect::<HashSet<_>>();
+            for _ in 0..8 {
+                let pending = runner.pending(&texts);
+                if pending.is_empty() && !runner.context_dirty() {
+                    break;
+                }
+                runner
+                    .update(&client, &pending, &AnalysisControl::default(), "en")
+                    .unwrap();
+                if restart {
+                    drop(runner);
+                    runner = WorkspaceRunner::open(directory.path()).unwrap();
+                }
+            }
+            assert!(runner.pending(&texts).is_empty());
+            assert!(!runner.context_dirty());
+            assert!(originals.iter().all(|s| runner
+                .state
+                .originals
+                .iter()
+                .any(|o| o.id == source_id(s))));
+            for (path, bytes) in retained_files {
+                assert_eq!(std::fs::read(path).unwrap(), bytes);
+            }
+            let final_bytes = serde_json::to_vec(&runner.view()).unwrap();
+            drop(runner);
+            assert_eq!(
+                serde_json::to_vec(&read_state(directory.path()).unwrap()).unwrap(),
+                final_bytes
+            );
+            stop.store(true, Ordering::SeqCst);
+            let requests = server.join().unwrap();
+            let seen = requests
+                .iter()
+                .filter(|r| {
+                    r["purpose"] == "reconcile"
+                        && r["humanContext"]
+                            .as_array()
+                            .unwrap()
+                            .iter()
+                            .any(|h| h["id"] == "h_replay")
+                })
+                .flat_map(|r| {
+                    r["window"]["requiredSourceIds"]
+                        .as_array()
+                        .unwrap()
+                        .iter()
+                        .map(|s| s.as_str().unwrap().to_owned())
+                })
+                .collect::<HashSet<_>>();
+            let missing = retained.difference(&seen).cloned().collect::<Vec<_>>();
+            if !missing.is_empty() {
+                omissions.push(format!("shorten={shorten} restart={restart}: context_dirty=false but retained sources never reconciled: {missing:?}"));
+            }
+        }
+    }
+    assert!(omissions.is_empty(), "Replay omissions: {omissions:?}");
+}
+
+#[test]
 fn source_dto_has_track_and_no_path_or_private_context() {
     let (_, req, _) = setup();
     let v = serde_json::to_value(req).unwrap();

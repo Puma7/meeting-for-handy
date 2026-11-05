@@ -326,7 +326,14 @@ impl WorkspaceRunner {
             .clone();
         let changed_inputs = context.agenda != self.state.context.agenda
             || context.shared_notes != self.state.context.shared_notes;
-        let cursor = if changed_inputs && !self.state.processed.is_empty() {
+        let changed_sources = self.changed_source_ids();
+        // Removing or shortening a source shifts the retained replay sequence.
+        // Restart its bounded scan rather than reusing an index into the old prefix.
+        // The restart is published only with a fully validated window below.
+        let cursor = if !self.state.processed.is_empty()
+            && (changed_inputs
+                || (self.state.replay_cursor.is_some() && !changed_sources.is_empty()))
+        {
             Some(0)
         } else {
             self.state.replay_cursor
@@ -334,7 +341,6 @@ impl WorkspaceRunner {
         let replay = pending.is_empty() && cursor.is_some();
         // New text has priority. A changed shared agenda/note is then reconciled against
         // every retained latest transcript slice in bounded windows, never summaries alone.
-        let changed_sources = self.changed_source_ids();
         let prior = self
             .active_sources()
             .into_iter()
