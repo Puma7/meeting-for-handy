@@ -307,6 +307,7 @@ class WindowsZipContract(unittest.TestCase):
                 self.assertIn('open ' + launcher.name + '.', instructions)
                 self.assertIn('Meeting for Handy ' + version, instructions)
                 self.assertIn('HandyMeeting/RustBeta', instructions)
+                self.assertIn('either a compatible downloaded streaming model or a compatible downloaded batch model', instructions)
                 self.assertEqual(package.read('HandyMeeting/' + dist.name + '/HandyMeeting.exe'), executable.read_bytes())
             original = archive.read_bytes()
             repeated = invoke('-OutputDirectory', str(output))

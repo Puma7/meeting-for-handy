@@ -602,6 +602,10 @@ fn recorded_decisions_reject_negation_and_uncertainty_without_publishing_state()
         "We have not agreed to start the pilot.",
         "If approved, we decided to start the pilot.",
         "We decided to start the pilot if approved.",
+        "We decided to check the report if the tests pass.",
+        "We decided to check if the report is ready if the tests pass.",
+        "If approved, we decided to check if the report is ready.",
+        "We decided to ask if the report is ready unless the owner objects.",
         "We decided to start the pilot unless approval fails.",
         "Wir haben den Pilotstart beschlossen, wenn das Budget kommt.",
         "Wir haben den Pilotstart beschlossen, sofern das Budget kommt.",
@@ -625,9 +629,14 @@ fn recorded_decisions_reject_negation_and_uncertainty_without_publishing_state()
         "We decided not to start the pilot.",
         "Wir haben beschlossen, den Piloten nicht zu starten.",
         "We decided to ask whether the pilot should start.",
+        "We decided to check if the report is ready.",
+        "We decided to ask if the report is ready.",
+        "We decided to ask if the report is ready and check if the pilot can start.",
+        "We agreed not to check if the report is ready.",
         "Wir haben beschlossen, zu prüfen, ob der Pilot starten soll.",
     ];
     let mut accepted_invalid = Vec::new();
+    let mut rejected_valid = Vec::new();
     for (quote, allowed) in invalid
         .iter()
         .map(|q| (*q, false))
@@ -644,14 +653,22 @@ fn recorded_decisions_reject_negation_and_uncertainty_without_publishing_state()
         answer["changes"][0]["evidence"][0]["quote"] = json!(quote);
         let result = validate::apply(&mut state, &request, &answer.to_string());
         if allowed {
-            result.unwrap_or_else(|e| panic!("{quote}: {e}"));
-            assert_eq!(state.entities[0].status, "recorded");
+            if let Err(error) = result {
+                rejected_valid.push(format!("{quote}: {error}"));
+                assert_eq!(serde_json::to_vec(&state).unwrap(), before);
+            } else {
+                assert_eq!(state.entities[0].status, "recorded");
+            }
         } else if result.is_ok() {
             accepted_invalid.push(quote);
         } else {
             assert_eq!(serde_json::to_vec(&state).unwrap(), before);
         }
     }
+    assert!(
+        rejected_valid.is_empty(),
+        "Unconditional decision rejected: {rejected_valid:?}"
+    );
     assert!(
         accepted_invalid.is_empty(),
         "Invalid recorded decision accepted: {accepted_invalid:?}"

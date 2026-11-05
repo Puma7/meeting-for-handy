@@ -582,13 +582,19 @@ pub(super) fn recorded_decision_quote_allowed(quote: &str) -> bool {
     } else {
         return false;
     };
-    // Conditions qualify the asserted decision even when they follow its
-    // predicate. A decision to ask "whether/ob" something holds is different:
-    // that may be an unconditional decision with an uncertain object.
+    // Conditions qualify the asserted decision even after its predicate. An
+    // explicit English "check if"/"ask if" complement is an embedded question,
+    // like "whether/ob", not a condition on taking the decision. Inspect every
+    // marker independently so a later separate condition still rejects.
     if quote.contains('?')
-        || words
-            .iter()
-            .any(|word| ["if", "unless", "falls", "wenn", "sofern"].contains(word))
+        || words.iter().enumerate().any(|(index, word)| {
+            let embedded_question = *word == "if"
+                && german.is_none()
+                && english.is_some()
+                && index > assertion_end
+                && ["check", "ask"].contains(&words[index - 1]);
+            ["if", "unless", "falls", "wenn", "sofern"].contains(word) && !embedded_question
+        })
         || words[..assertion_end].iter().any(|word| {
             UNCERTAIN_TERMINAL_WORDS.contains(word)
                 || ADDITIONAL_UNCERTAIN_TERMINAL_WORDS.contains(word)

@@ -28,14 +28,14 @@ Der vollständige TEST_REPORT bleibt byteunverändert; er wurde für diese Nacha
 
 | Prüfung | Ergebnis und Bezug |
 | --- | --- |
-| Rust-Workspace / alle Targets | 554 frisch bestanden, darunter unverändert 155 Notizen- und jetzt 37 Providerprotokolltests; drei bestehende besondere Einstiege regulär ignoriert. Drei vorhandene Kontextfälle wurden mit identischen Funktionskörpern in ihr bestehendes Eltern-Testmodul übernommen; keine Fälle oder Fristen entfernt. |
+| Rust-Workspace / alle Targets | Nach der Unterscheidung eingebetteter englischer Fragen frisch 554 bestanden, darunter unverändert 155 Notizen- und 37 Providerprotokolltests; drei bestehende besondere Einstiege regulär ignoriert. Die zuvor zusammengeführten Kontextfälle bleiben mit identischen Funktionskörpern erhalten. |
 | Rustformat / Clippy | Auf diesem nativen Korrekturstand frisch bestanden; gesperrte Abhängigkeiten, Warnungen als Fehler. |
 | Oberfläche | 391 Tests, TypeScript, Produktionsbuild und vollständiger Formatcheck auf `1a52520` bestanden. Sämtliche Frontend-Produktions-, Typ- und Testbytes bleiben seitdem unverändert; lokal nicht erneut ausgeführt. Der zusätzlich veröffentlichte Python-Browsertest ist separat unten nachgewiesen. |
 | Projektfreigabe | `verify.ps1` vor jeder Bereitstellung: 47 PCM-, 35 Notizen-, 28 Vorlagen-, acht Agenten- und Monitorprüfungen bestanden. Der folgende Quellupload bleibt an einen abschließenden erfolgreichen Lauf gebunden. |
-| Echte lokale Referenzen Deutsch und Englisch | Nach den abschließenden nativen Korrekturen frisch: Deutsch 99.8319887 s (0 reguläre Validierungswiederholungen), Englisch 135.4364915 s (0 Wiederholungen). Beide bestanden positive Aufgabe, unverbindliche Aussage, Impulserhalt, menschlichen Status nach Protokolländerung und bytegleiche Wiederöffnung; Englisch behält wörtliches „I’ll“. Eine vollständig validierte Wiederholung je Anfrage bleibt zulässig; null Wiederholungen sind keine Freigabeschwelle. Die frühere DE/EN-Referenz auf `5b20e40` bleibt historisch. |
+| Echte lokale Referenzen Deutsch und Englisch | Nach der Korrektur eingebetteter englischer Fragen frisch: Deutsch 114.2343031 s (1 reguläre Validierungswiederholungen), Englisch 134.2473711 s (0 Wiederholungen). Beide bestanden positive Aufgabe, unverbindliche Aussage, Impulserhalt, menschlichen Status nach Protokolländerung und bytegleiche Wiederöffnung; Englisch behält wörtliches „I’ll“. Eine vollständig validierte Wiederholung je Anfrage bleibt zulässig; null Wiederholungen sind keine Freigabeschwelle. Die früheren Referenzen auf `35d53e8` und `5b20e40` bleiben historisch. |
 | Frühere lokale Referenzen | Deutsch 100,9989873 s und Englisch 125,0518623 s auf dem Elternstand `3d4d013`, jeweils ohne Validierungswiederholung. Die deutsche Zusage enthält tatsächlich „jedenfalls“. Diese Läufe werden nicht als erneut ausgeführt ausgegeben. |
-| Langsammodell / zwei Spuren | Auf diesem nativen Korrekturstand frisch: 244.33 s Gesamtlauf, 210 s kontrollierte SSE-Antwortpause, nächster Refresh nach 210.0421383 s, maximal eine Modellanfrage, ein erhaltener Impuls. Samples je Spur 3737920/3737920, geteilt durch 16.000 Hz = 233.62/233.62 s. Beide dauerhaften PCM-Schreiber liefen nach dem Auswertungsstopp weiter. Nativer Worker mit kontrollierter Antwort und generiertem PCM, keine Geräte/echte ASR/Zweistundenprüfung. |
-| Browsergegenprüfung | Frisch 24 Abläufe mit tatsächlichem Sidebar und RecordingStatus, vorhandenem Edge 156.0.4314.58 / Playwright 1.57.0: 390/740/1280 × Deutsch/Englisch × hell/dunkel × ausgeklappt/eingeklappt. Geöffnete Rechnerdetails bleiben innerhalb des Fensters, kein horizontaler Überlauf, keine Konsolen-/Seitenfehler oder fremden Netzwerkanfragen; eigener lokaler Server beendet. CPU-/RAM-Werte sind synthetische Fixturewerte, keine Rechnermessung. Die acht Full-App-Hinweisabläufe auf `5b20e40` bleiben historische Belege. |
+| Langsammodell / zwei Spuren | Auf dem Elternstand `35d53e8`, für diese Validator-/Pakettextkorrektur nicht erneut ausgeführt: 244.33 s Gesamtlauf, 210 s kontrollierte SSE-Antwortpause, nächster Refresh nach 210.0421383 s, maximal eine Modellanfrage, ein erhaltener Impuls. Samples je Spur 3737920/3737920, geteilt durch 16.000 Hz = 233.62/233.62 s. Beide dauerhaften PCM-Schreiber liefen nach dem Auswertungsstopp weiter. Nativer Worker mit kontrollierter Antwort und generiertem PCM, keine Geräte/echte ASR/Zweistundenprüfung. |
+| Browsergegenprüfung | 24 Abläufe auf dem Elternstand `35d53e8`, bei unveränderten Frontend- und Browserprüferbytes nicht erneut ausgeführt, mit tatsächlichem Sidebar und RecordingStatus, vorhandenem Edge 156.0.4314.58 / Playwright 1.57.0: 390/740/1280 × Deutsch/Englisch × hell/dunkel × ausgeklappt/eingeklappt. Geöffnete Rechnerdetails bleiben innerhalb des Fensters, kein horizontaler Überlauf, keine Konsolen-/Seitenfehler oder fremden Netzwerkanfragen; eigener lokaler Server beendet. CPU-/RAM-Werte sind synthetische Fixturewerte, keine Rechnermessung. Die acht Full-App-Hinweisabläufe auf `5b20e40` bleiben historische Belege. |
 
 Die echten Referenzen verwendeten ausschließlich synthetischen Text und das vorhandene
 **google/gemma-4-e4b Q4_K_M** mit 6.326.936.720 Modellbytes, LM Studio **0.4.26.0**,
@@ -524,6 +524,39 @@ Hashbelegen erhalten. Der Gesamtdiff bleibt dadurch trotz zusätzlichem Browserp
 Alle 155 Notizentests bleiben erhalten. Die zwei sauberen Codex-Runden und alle 22 grünen/
 regulär übersprungenen CI-Checks auf `1a52520` sind historisch; neue Reviews und aktuelle CI
 müssen am neuen endgültigen Head tatsächlich abschließen.
+
+## Eingebettete englische Fragen und Pakethinweis
+
+Die Codex-Codeprüfung auf `35d53e8` fand einen gültigen Gegenfall zur vorherigen
+Bedingungsprüfung. „We decided to check if the report is ready.“ ist eine feste Entscheidung,
+deren Gegenstand eine offene Frage ist. Die technische Prüfung lehnte vier solche Varianten
+mit check/ask if fälschlich ab; alle vier tatsächlichen Vorherfehler sind erhalten.
+Die entsprechenden unverbindlichen/negierten Zusagen und unabhängigen Bedingungen bleiben
+weiterhin gesperrt. Insbesondere blockieren „check the report if the tests pass“, ein zweites
+eigenständiges „if the tests pass“, eine vorangestellte Bedingung und ein nachgestelltes unless
+weiterhin die Veröffentlichung; Ablehnungen lassen den Zustand bytegleich.
+
+Die Korrektur erkennt ausschließlich die unmittelbar eingebetteten englischen Wortfolgen
+„check if“ und „ask if“ hinter dem bejahten Entscheidungsausdruck. Jeder andere Bedingungsmarker
+wird weiterhin unabhängig geprüft. Feste negative Entscheidungsalternativen sowie die bisherigen
+ob/whether-Gegenfälle bleiben erhalten. Dies ist eine begrenzte technische Wortprüfung,
+kein vollständiger grammatischer oder inhaltlicher Richtigkeitsnachweis.
+
+Der vollständige CodeRabbit-Lauf c42f4c18-dec4-4220-a2e8-42d4175efb47 auf `35d53e8` hat
+alle 100 vorgesehenen Dateien geprüft und einen gültigen Befund außerhalb des Diffs veröffentlicht:
+Der tatsächlich erzeugte Windows-Pakettext verlangte weiterhin ein Streamingmodell.
+START-HERE.txt nennt jetzt ausdrücklich entweder ein unterstütztes vorhandenes Streamingmodell
+oder ein unterstütztes vorhandenes Batchmodell. Es werden nicht beide vorausgesetzt.
+Der erhaltene Vorherlauf prüfte einen tatsächlich erzeugten synthetischen ZIP und scheiterte
+am fehlenden Batchhinweis. Danach bestanden alle 21 Paketprüfungen einschließlich unveränderter
+Launcher-, Fingerprint-, Nutzerdaten- und Nichtüberschreibungsprüfungen. Das sind ausschließlich
+isolierte, nicht ausführbare Fixturebytes; kein Installer oder Produktpaket wurde bereitgestellt.
+
+Den zusätzlichen pauschalen Satz zu einem „Test-Endpunkt“ nahm CodeRabbit nach Prüfung seiner
+eigenen veröffentlichten Reviewbelege ausdrücklich als unbelegt zurück. Keine Prüfschwelle,
+Konfiguration oder Netzwerkregel wurde dafür geändert. Die frischen nativen Tests und echten
+synthetischen DE/EN-Modellreferenzen stehen oben; die kontrollierte Langsammodell- und
+Browserprüfung vom Elternstand wird nicht als erneut ausgeführt ausgegeben.
 
 ## Reviewabdeckung und Veröffentlichung
 
