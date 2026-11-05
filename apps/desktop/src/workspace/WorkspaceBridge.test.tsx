@@ -82,6 +82,73 @@ it("forwards changing global notices without resetting the selected workspace ta
 });
 
 describe("Status polling error recovery", () => {
+  it.each([
+    ["de", true],
+    ["de", false],
+    ["en", true],
+    ["en", false],
+  ] as const)(
+    "shows saved verification failures in %s with readable fallback=%s and clears them after recovery",
+    async (language, readable) => {
+      vi.useFakeTimers();
+      const f = fixture();
+      Object.assign(f.status, {
+        error: null,
+        running: false,
+        status: "stopped",
+      });
+      Object.assign(f.status.view, { damagedRuns: 2 });
+      if (!readable) Object.assign(f.status.view, { workspace: null });
+      const mounted = render(
+        <LiveWorkspace
+          language={language}
+          adapter={f.adapter}
+          meeting={f.meeting}
+          onBack={() => {}}
+        />,
+      );
+      try {
+        await act(async () => {});
+        const label =
+          language === "en" ? "Saved analyses" : "Gespeicherte Auswertungen";
+        const warning = screen.getByRole("status", { name: label });
+        expect(warning.textContent).toContain(
+          language === "en"
+            ? "could not be verified"
+            : "konnten nicht geprüft werden",
+        );
+        expect(warning.textContent).toContain(
+          language === "en"
+            ? readable
+              ? "An earlier readable revision is displayed."
+              : "Saved results are currently unavailable."
+            : readable
+              ? "Ein früherer lesbarer Stand wird angezeigt."
+              : "Gespeicherte Ergebnisse sind derzeit nicht verfügbar.",
+        );
+        expect(warning.textContent).toContain(
+          language === "en"
+            ? "Files are kept unchanged"
+            : "Die Dateien bleiben unverändert erhalten",
+        );
+        if (readable)
+          expect(
+            screen.getAllByText("Welche Freigabe fehlt?").length,
+          ).toBeGreaterThan(0);
+        Object.assign(f.status.view, { damagedRuns: 0 });
+        await act(async () => {
+          await vi.advanceTimersByTimeAsync(2000);
+        });
+        expect(screen.queryByRole("status", { name: label })).toBeNull();
+        expect(f.adapter.start).not.toHaveBeenCalled();
+        expect(f.adapter.stop).not.toHaveBeenCalled();
+        expect(f.adapter.context).not.toHaveBeenCalled();
+      } finally {
+        mounted.unmount();
+        vi.useRealTimers();
+      }
+    },
+  );
   it("clears a transient poll banner on the next successful status read", async () => {
     vi.useFakeTimers();
     const f = fixture();

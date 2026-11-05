@@ -53,6 +53,15 @@ const english = {
   "Cloud-Modell in den Einstellungen ausgewählt":
     "Cloud model selected in settings",
   "Gespeicherte Auswertung wird geladen …": "Loading saved analysis …",
+  "Gespeicherte Auswertungen": "Saved analyses",
+  "Gespeicherte Auswertungen konnten nicht geprüft werden.":
+    "Saved analyses could not be verified.",
+  "Ein früherer lesbarer Stand wird angezeigt.":
+    "An earlier readable revision is displayed.",
+  "Gespeicherte Ergebnisse sind derzeit nicht verfügbar.":
+    "Saved results are currently unavailable.",
+  "Die Dateien bleiben unverändert erhalten. Prüfe sie in der Standardansicht.":
+    "Files are kept unchanged. Review them in the standard view.",
   Intervall: "Interval",
   Auswertungsintervall: "Analysis interval",
   "Legt fest, wie oft die KI den Überblick aktualisiert.":

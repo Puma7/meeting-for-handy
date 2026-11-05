@@ -863,6 +863,23 @@ function WorkspaceContents({
                   {error || pollError || status?.error}
                 </div>
               )}
+              {status?.view?.damagedRuns > 0 && (
+                <div
+                  className="state-banner warning"
+                  role="status"
+                  aria-label={t("Gespeicherte Auswertungen")}
+                >
+                  {t("Gespeicherte Auswertungen konnten nicht geprüft werden.")}{" "}
+                  {status.view.workspace
+                    ? t("Ein früherer lesbarer Stand wird angezeigt.")
+                    : t(
+                        "Gespeicherte Ergebnisse sind derzeit nicht verfügbar.",
+                      )}{" "}
+                  {t(
+                    "Die Dateien bleiben unverändert erhalten. Prüfe sie in der Standardansicht.",
+                  )}
+                </div>
+              )}
               {storageBlocked && (
                 <div className="state-banner warning">
                   {t(

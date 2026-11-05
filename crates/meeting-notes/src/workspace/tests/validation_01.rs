@@ -383,6 +383,7 @@ fn task_exclusions_match_words_without_rejecting_unconditional_suffixes() {
         "Ich schreibe den Bericht, falls ich Zeit habe.",
         "Ich schreibe den Bericht falls\nich Zeit habe.",
         "Ich schreibe den Bericht, wenn ich Zeit habe.",
+        "Ich schreibe den Bericht, sofern ich Zeit habe.",
         "I will write the report if I have time.",
         "I will write the report unless approval is missing.",
         "Niemand übernimmt den Bericht.",

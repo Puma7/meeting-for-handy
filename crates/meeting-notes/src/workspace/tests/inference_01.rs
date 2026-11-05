@@ -8,6 +8,7 @@ fn contracted_promises_reach_the_tasks_phase_with_literal_reopen_state() {
         thread,
         time::{Duration, Instant},
     };
+    let mut phase_mismatches = Vec::new();
     for (quote, allowed) in [
         ("I'll email the report tomorrow.", true),
         ("We'll send the report tomorrow.", true),
@@ -17,6 +18,29 @@ fn contracted_promises_reach_the_tasks_phase_with_literal_reopen_state() {
         ("We'll not send the report tomorrow.", false),
         ("I’ll not email the report tomorrow.", false),
         ("We’ll not send the report tomorrow.", false),
+        ("I will check if the report is ready.", true),
+        ("I’ll ask if the budget is approved.", true),
+        ("I will check whether the report is ready.", true),
+        ("I’ll ask whether the budget is approved.", true),
+        (
+            "I will ask if the report is ready and check if the pilot can start.",
+            true,
+        ),
+        ("I will email the report if the budget is approved.", false),
+        (
+            "I will check if the report is ready if the budget is approved.",
+            false,
+        ),
+        (
+            "If the budget is approved, I'll ask if the report is ready.",
+            false,
+        ),
+        (
+            "I'll check if the report is ready unless the owner objects.",
+            false,
+        ),
+        ("I will not check if the report is ready.", false),
+        ("I’ll not ask if the budget is approved.", false),
     ] {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         listener.set_nonblocking(true).unwrap();
@@ -72,7 +96,7 @@ fn contracted_promises_reach_the_tasks_phase_with_literal_reopen_state() {
                 phases.push(phase.clone());
                 let changes = if phase == "tasks" {
                     json!([{"proposalId":"p_promise","kind":"task","targetId":null,
-                        "targetRevision":null,"text":if original.contains("send") { "Send the report" } else { "Email the report" },"status":"open",
+                        "targetRevision":null,"text":if original.contains("check") { "Check the report" } else if original.contains("ask") { "Ask about the budget" } else if original.contains("send") { "Send the report" } else { "Email the report" },"status":"open",
                         "attention":"current","owner":null,"due":null,
                         "evidence":[{"sourceId":req["transcriptSources"][0]["id"],
                             "quote":original}],"relatedEntityIds":[]}])
@@ -117,17 +141,19 @@ fn contracted_promises_reach_the_tasks_phase_with_literal_reopen_state() {
         let result = runner.update(&client, &pending, &AnalysisControl::default(), "en");
         let phases = server.join().unwrap();
         result.unwrap_or_else(|error| panic!("{quote}: {error}"));
-        assert_eq!(
-            phases,
-            if allowed {
-                vec!["tasks", "facts", "reconcile"]
-            } else {
-                vec!["facts", "reconcile"]
-            },
-            "{quote}"
-        );
-        assert_eq!(runner.state.entities.len(), usize::from(allowed), "{quote}");
-        if allowed {
+        let expected_phases = if allowed {
+            vec!["tasks", "facts", "reconcile"]
+        } else {
+            vec!["facts", "reconcile"]
+        };
+        if phases != expected_phases || runner.state.entities.len() != usize::from(allowed) {
+            phase_mismatches.push(format!(
+                "{quote}: phases={phases:?}, tasks={}, source_processed={}",
+                runner.state.entities.len(),
+                runner.pending(&texts).is_empty()
+            ));
+        }
+        if allowed && runner.state.entities.len() == 1 {
             assert_eq!(runner.state.entities[0].evidence[0].quote, quote);
         }
         assert_eq!(runner.state.originals[0].text, quote);
@@ -141,6 +167,10 @@ fn contracted_promises_reach_the_tasks_phase_with_literal_reopen_state() {
             "{quote}"
         );
     }
+    assert!(
+        phase_mismatches.is_empty(),
+        "Task admission lost an unconditional pledge or admitted a condition: {phase_mismatches:?}"
+    );
 }
 
 #[test]

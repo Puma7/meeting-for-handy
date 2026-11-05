@@ -588,11 +588,11 @@ pub(super) fn recorded_decision_quote_allowed(quote: &str) -> bool {
     // marker independently so a later separate condition still rejects.
     if quote.contains('?')
         || words.iter().enumerate().any(|(index, word)| {
-            let embedded_question = *word == "if"
-                && german.is_none()
-                && english.is_some()
-                && index > assertion_end
-                && ["check", "ask"].contains(&words[index - 1]);
+            let embedded_question = embedded_english_question(
+                &words,
+                index,
+                (german.is_none() && english.is_some()).then_some(assertion_end),
+            );
             ["if", "unless", "falls", "wenn", "sofern"].contains(word) && !embedded_question
         })
         || words[..assertion_end].iter().any(|word| {
@@ -787,20 +787,62 @@ pub(super) fn missing_pledge(quote: &str) -> bool {
     .iter()
     .any(|s| text.contains(s))
 }
+/// Recognize a bounded question complement only after an explicit English assertion.
+fn embedded_english_question(words: &[&str], index: usize, assertion_end: Option<usize>) -> bool {
+    assertion_end.is_some_and(|end| index > end)
+        && words[index] == "if"
+        && ["check", "ask"].contains(&words[index - 1])
+}
+
 /// Require a positive obligation in the literal quote; a wish or missing approval is insufficient.
 pub(super) fn task_quote_allowed(quote: &str) -> bool {
     // Normalize temporary admission text only; original quotes and IDs stay literal.
     let text = quote.to_lowercase().replace('’', "'");
+    let english_pledges = [
+        "i promise to ",
+        "we promise to ",
+        "i commit to ",
+        "we commit to ",
+        "i will ",
+        "we will ",
+        "i'll ",
+        "we'll ",
+        "i take ",
+        "we take ",
+        "takes on ",
+        "will handle",
+        "will prepare",
+        "will send",
+        "is assigned",
+        "are assigned",
+        "commits to",
+    ];
+    let words: Vec<_> = text
+        .split(|c: char| !c.is_alphabetic())
+        .filter(|word| !word.is_empty())
+        .collect();
+    let english_pledge_end = english_pledges
+        .iter()
+        .filter_map(|phrase| {
+            text.find(phrase).map(|start| {
+                text[..start + phrase.len()]
+                    .split(|c: char| !c.is_alphabetic())
+                    .filter(|word| !word.is_empty())
+                    .count()
+            })
+        })
+        .min();
     !missing_pledge(quote)
         && !crate::validation::commitment_refused(quote)
         && !text.contains('?')
-        && !text.split(|c: char| !c.is_alphabetic()).any(|word| {
+        && !words.iter().enumerate().any(|(index, word)| {
             [
-                "niemand", "keiner", "nobody", "falls", "wenn", "unless", "if",
+                "niemand", "keiner", "nobody", "falls", "wenn", "sofern", "unless", "if",
             ]
-            .contains(&word)
+            .contains(word)
+                && !embedded_english_question(&words, index, english_pledge_end)
         })
-        && [
+        && ([
             "übernehme",
             "übernimmt",
             "übernehmen",
@@ -836,24 +878,8 @@ pub(super) fn task_quote_allowed(quote: &str) -> bool {
             "ich verspreche",
             "wir versprechen",
             "beauftragt",
-            "i promise to ",
-            "we promise to ",
-            "i commit to ",
-            "we commit to ",
-            "i will ",
-            "we will ",
-            "i'll ",
-            "we'll ",
-            "i take ",
-            "we take ",
-            "takes on ",
-            "will handle",
-            "will prepare",
-            "will send",
-            "is assigned",
-            "are assigned",
-            "commits to",
         ]
         .iter()
         .any(|s| text.contains(s))
+            || english_pledges.iter().any(|s| text.contains(s)))
 }

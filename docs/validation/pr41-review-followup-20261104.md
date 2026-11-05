@@ -28,14 +28,14 @@ Der vollständige TEST_REPORT bleibt byteunverändert; er wurde für diese Nacha
 
 | Prüfung | Ergebnis und Bezug |
 | --- | --- |
-| Rust-Workspace / alle Targets | Nach der Unterscheidung eingebetteter englischer Fragen frisch 554 bestanden, darunter unverändert 155 Notizen- und 37 Providerprotokolltests; drei bestehende besondere Einstiege regulär ignoriert. Die zuvor zusammengeführten Kontextfälle bleiben mit identischen Funktionskörpern erhalten. |
+| Rust-Workspace / alle Targets | Nach der gemeinsamen Prüfung eingebetteter Fragen und zusätzlicher sofern-Gegenprobe frisch 554 bestanden, darunter unverändert 155 Notizen- und 37 Providerprotokolltests; drei bestehende besondere Einstiege regulär ignoriert. Der frühere Zwischenlauf vor der zusätzlichen sofern-Korrektur ist erhalten und wird nicht als abschließender Nachweis ausgegeben. |
 | Rustformat / Clippy | Auf diesem nativen Korrekturstand frisch bestanden; gesperrte Abhängigkeiten, Warnungen als Fehler. |
-| Oberfläche | 391 Tests, TypeScript, Produktionsbuild und vollständiger Formatcheck auf `1a52520` bestanden. Sämtliche Frontend-Produktions-, Typ- und Testbytes bleiben seitdem unverändert; lokal nicht erneut ausgeführt. Der zusätzlich veröffentlichte Python-Browsertest ist separat unten nachgewiesen. |
+| Oberfläche | Frisch 395 Tests, TypeScript, Produktionsbuild und vollständiger Formatcheck bestanden. Vier neue Fälle prüfen Deutsch/Englisch, älteren lesbaren Stand/alle Stände beschädigt, Warnung trotz error=null, Erhalt lesbarer Ergebnisse und Entfernen der Warnung nach erfolgreicher Wiederherstellung. Kein Start, Stopp oder Kontextschreiben wird ausgelöst. |
 | Projektfreigabe | `verify.ps1` vor jeder Bereitstellung: 47 PCM-, 35 Notizen-, 28 Vorlagen-, acht Agenten- und Monitorprüfungen bestanden. Der folgende Quellupload bleibt an einen abschließenden erfolgreichen Lauf gebunden. |
-| Echte lokale Referenzen Deutsch und Englisch | Nach der Korrektur eingebetteter englischer Fragen frisch: Deutsch 114.2343031 s (1 reguläre Validierungswiederholungen), Englisch 134.2473711 s (0 Wiederholungen). Beide bestanden positive Aufgabe, unverbindliche Aussage, Impulserhalt, menschlichen Status nach Protokolländerung und bytegleiche Wiederöffnung; Englisch behält wörtliches „I’ll“. Eine vollständig validierte Wiederholung je Anfrage bleibt zulässig; null Wiederholungen sind keine Freigabeschwelle. Die früheren Referenzen auf `35d53e8` und `5b20e40` bleiben historisch. |
+| Echte lokale Referenzen Deutsch und Englisch | Nach der Aufgabenzulassungskorrektur frisch: Deutsch 94.6847179 s (0 reguläre Validierungswiederholungen), Englisch 122.45862 s (0 Wiederholungen). Beide bestanden positive Aufgabe, unverbindliche Aussage, Impulserhalt, menschlichen Status nach Protokolländerung und bytegleiche Wiederöffnung; Englisch behält wörtliches „I’ll“. Eine vollständig validierte Wiederholung je Anfrage bleibt zulässig; null Wiederholungen sind keine Freigabeschwelle. Die früheren Referenzen auf `91f0985`, `35d53e8` und `5b20e40` bleiben historisch. |
 | Frühere lokale Referenzen | Deutsch 100,9989873 s und Englisch 125,0518623 s auf dem Elternstand `3d4d013`, jeweils ohne Validierungswiederholung. Die deutsche Zusage enthält tatsächlich „jedenfalls“. Diese Läufe werden nicht als erneut ausgeführt ausgegeben. |
 | Langsammodell / zwei Spuren | Auf dem Elternstand `35d53e8`, für diese Validator-/Pakettextkorrektur nicht erneut ausgeführt: 244.33 s Gesamtlauf, 210 s kontrollierte SSE-Antwortpause, nächster Refresh nach 210.0421383 s, maximal eine Modellanfrage, ein erhaltener Impuls. Samples je Spur 3737920/3737920, geteilt durch 16.000 Hz = 233.62/233.62 s. Beide dauerhaften PCM-Schreiber liefen nach dem Auswertungsstopp weiter. Nativer Worker mit kontrollierter Antwort und generiertem PCM, keine Geräte/echte ASR/Zweistundenprüfung. |
-| Browsergegenprüfung | 24 Abläufe auf dem Elternstand `35d53e8`, bei unveränderten Frontend- und Browserprüferbytes nicht erneut ausgeführt, mit tatsächlichem Sidebar und RecordingStatus, vorhandenem Edge 156.0.4314.58 / Playwright 1.57.0: 390/740/1280 × Deutsch/Englisch × hell/dunkel × ausgeklappt/eingeklappt. Geöffnete Rechnerdetails bleiben innerhalb des Fensters, kein horizontaler Überlauf, keine Konsolen-/Seitenfehler oder fremden Netzwerkanfragen; eigener lokaler Server beendet. CPU-/RAM-Werte sind synthetische Fixturewerte, keine Rechnermessung. Die acht Full-App-Hinweisabläufe auf `5b20e40` bleiben historische Belege. |
+| Browsergegenprüfung | 24 Abläufe auf dem Elternstand `35d53e8`, bei unveränderten Sidebar-/RecordingStatus- und Browserprüferbytes nicht erneut ausgeführt, mit tatsächlichem Sidebar und RecordingStatus, vorhandenem Edge 156.0.4314.58 / Playwright 1.57.0: 390/740/1280 × Deutsch/Englisch × hell/dunkel × ausgeklappt/eingeklappt. Geöffnete Rechnerdetails bleiben innerhalb des Fensters, kein horizontaler Überlauf, keine Konsolen-/Seitenfehler oder fremden Netzwerkanfragen; eigener lokaler Server beendet. CPU-/RAM-Werte sind synthetische Fixturewerte, keine Rechnermessung. Die acht Full-App-Hinweisabläufe auf `5b20e40` bleiben historische Belege. |
 
 Die echten Referenzen verwendeten ausschließlich synthetischen Text und das vorhandene
 **google/gemma-4-e4b Q4_K_M** mit 6.326.936.720 Modellbytes, LM Studio **0.4.26.0**,
@@ -557,6 +557,45 @@ eigenen veröffentlichten Reviewbelege ausdrücklich als unbelegt zurück. Keine
 Konfiguration oder Netzwerkregel wurde dafür geändert. Die frischen nativen Tests und echten
 synthetischen DE/EN-Modellreferenzen stehen oben; die kontrollierte Langsammodell- und
 Browserprüfung vom Elternstand wird nicht als erneut ausgeführt ausgegeben.
+
+## Aufgabenzulassung und beschädigte gespeicherte Auswertungen
+
+Die frische Codex-Codeprüfung auf `91f0985` war nicht sauber. Zwei neue konkrete Befunde
+sind vor der nächsten vollständigen CodeRabbit-Runde gegen den tatsächlichen Code geprüft.
+
+Die zuvor korrigierte Entscheidungserkennung löste den gleichen Fehler bei Aufgaben noch
+nicht. Drei feste englische Aufgaben mit check/ask if erreichten nachweislich nur facts/reconcile,
+enthielten danach keine Aufgabe und waren dennoch als bereits verarbeitet markiert.
+Der erhaltene Vorherlauf weist diese drei falschen Phasenfolgen zusammen aus. Derselbe
+echte Runner-/HTTP-Fall prüft jetzt die tasks-Phase, wörtliche Quelle und bytegleiche
+Wiederöffnung. Whether-Gegenfälle bleiben zugelassen; unabhängige nachgestellte, vorangestellte,
+zweite Bedingungen, unless und ausdrückliche Ablehnungen bleiben ohne Aufgabe.
+
+Aufgaben und Entscheidungen verwenden jetzt dieselbe begrenzte Unterscheidung für unmittelbar
+eingebettete englische check-if/ask-if-Fragen. Bei Aufgaben muss zuvor eine bereits unterstützte
+ausdrückliche englische Übernahme stehen. Der bestehende Zusagenkatalog bleibt erhalten;
+Originalzitate werden nur für die vorübergehende Zulassungsprüfung normalisiert.
+Eine zusätzliche tatsächliche Gegenprobe zeigte die noch fehlende deutsche sofern-Sperre
+bei Aufgaben. Auch dieser Vorherfehler ist erhalten und korrigiert; jedenfalls/ebenfalls bleiben
+zulässige unbedingte Wörter. Kein unbedingter Ablauf oder Freigabewert wurde abgeschwächt.
+Die Prüfung bleibt eine technische Heuristik und kein vollständiger Sprach- oder Bedeutungsbeweis.
+
+Bei nicht prüfbaren gespeicherten Auswertungen liefert die native Lesefunktion bereits eine
+Anzahl beschädigter Stände und gegebenenfalls einen älteren lesbaren Stand. Die erweiterte
+Oberfläche ignorierte diese Zahl, wenn kein separater Transportfehler vorlag. Vier tatsächliche
+UI-Vorherfälle scheiterten in Deutsch/Englisch für älteren lesbaren Stand und vollständig
+unverfügbare gespeicherte Ergebnisse. Jetzt erscheint ein unabhängiger, verständlicher
+Warnstatus: Entweder wird der frühere lesbare Stand ausgewiesen oder die Nichtverfügbarkeit
+gespeicherter Ergebnisse. Die Dateien bleiben unverändert; die Standardansicht ist als
+Prüfweg benannt. Erfolgreiche spätere Statusabfragen entfernen die Warnung wieder.
+Eine wirklich leere, unbeschädigte Auswertung erhält keine Schadensmeldung.
+
+Alle vier UI-Gegenfälle bestehen mit den tatsächlichen Komponenten; die gesamte Oberfläche
+besteht 395 Fälle, TypeScript, Produktionsbuild und Formatprüfung. Diese Komponentenprüfungen
+sind keine native Datei-, Bildschirmleserausgabe- oder Geräteprüfung. Speicherleser,
+Wiederherstellungsregeln, Audio/ASR, Transport, Modellreservierungen und Abhängigkeiten bleiben
+byteunverändert. Die abschließenden nativen Prüfungen und neuen echten lokalen DE/EN-Referenzen
+stehen oben. Alte saubere Reviews und Plattformläufe werden nicht auf diesen Stand übertragen.
 
 ## Reviewabdeckung und Veröffentlichung
 
