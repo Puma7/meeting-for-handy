@@ -2,13 +2,13 @@
 
 Stand: 5. November 2026. Version **1.1.0-beta.1**, unverändert.
 
-Diese Nacharbeit verhindert falsche Erledigt-Meldungen bei prozentual erst
-teilweise abgeschlossenen Aufgaben. Dazu korrigiert sie die deutsche
-Referenzsituation: Beide Sprachen enthalten jetzt eine ausdrückliche Budgetfrage,
-wenn der Test anschließend einen Gesprächsimpuls verlangt.
+Diese Nacharbeit unterscheidet Teilfortschritt von Prozentwerten im Namen
+einer vollständig erledigten Aufgabe. Explizite Teilmengen schließen eine
+Aufgabe nicht automatisch. Beide Referenzsprachen enthalten seit dem Vorgänger
+eine ausdrückliche Budgetfrage, wenn der Test einen Gesprächsimpuls verlangt.
 Die ursprünglichen Zusagen und unverbindlichen Aussagen bleiben erhalten.
 
-Die [bisherige ausführliche Fassung](https://github.com/Puma7/meeting-for-handy/blob/dfe5d65fd9c92589217e0f643c39ca4a8e08451b/docs/validation/pr41-review-followup-20261104.md)
+Die [bisherige ausführliche Fassung](https://github.com/Puma7/meeting-for-handy/blob/94b3ee6ad282dcb1208244f4dd53e9b57df67ba1/docs/validation/pr41-review-followup-20261104.md)
 und deren Detailhistorie bleiben unveränderlich in Git.
 Private Rohbelege, alte Checkpoints und fehlgeschlagene Läufe bleiben erhalten.
 Der vollständige TEST_REPORT bleibt gegenüber dem PR-Basisstand byteunverändert.
@@ -23,7 +23,7 @@ Die tatsächliche Validator-/Checkpoint-Regression reproduzierte insgesamt
 15 nach den konservativen Kriterien unzulässige oder unklare Prozentbelege.
 
 Die Abschlussprüfung erkennt Prozentzeichen, Prozent, percent und per cent.
-Sie akzeptiert für eine automatische Erledigung nur den eindeutigen numerischen
+Bei einer Fortschrittsangabe akzeptiert sie nur den eindeutigen numerischen
 Wert 100, auch mit Dezimalnullen. Ziffern werden exakt verglichen:
 99.9999999999999999999 wird nicht durch Fließkommarundung zu 100.
 Teilwerte, unplausible Werte über 100 sowie Bereiche und Bruchangaben mit
@@ -35,7 +35,20 @@ Deutsch/Englisch, Symbol oder Worteinheit sowie Dezimalnullen mit Punkt oder Kom
 Ein zusätzlicher vollständiger Satz über einen „percentage report“ besteht;
 percentage als Substantiv wird nicht als Prozenteinheit behandelt.
 
-Die vorhandene dauerhafte Regression wurde um **21 Fälle** erweitert.
+Der [nachfolgende Codex-Befund](https://github.com/Puma7/meeting-for-handy/pull/41#discussion_r4486763837)
+war ebenfalls gültig: Vollständige Abschlüsse eines 50-Prozent-Rabattberichts
+wurden zu Unrecht abgewiesen. Zwei tatsächliche Vorherfälle reproduzierten dies.
+Jetzt wird ein Prozentwert vor einem Gegenstandsnamen von ausdrücklich
+prozentualem Fortschritt unterschieden; zusammengesetzte Berichtstitel bleiben zulässig.
+
+Zehn zusätzliche Vorherfälle schlossen Aufgaben trotz half of, zur Hälfte,
+ein Drittel, 1 von 2 oder äquivalenten Unicode-Prozentzeichen.
+Diese ausdrücklichen Teilmengen bleiben jetzt offen. Vollständige 2-von-2-
+und Drei-Drittel-Angaben, Datumsangaben, ordinales third und half-year bleiben zulässig.
+Ziffernverhältnisse werden ohne Fließkommarundung verglichen.
+
+Die vorhandene dauerhafte Regression erhielt im Vorgänger 21 Fälle und
+in dieser Nacharbeit weitere **25 Fälle**; kein bestehender Fall wurde entfernt.
 Die Zahl der Testfunktionen bleibt unverändert.
 Abgelehnte Antworten verändern weder Aufgabe noch Zitate oder alten Checkpoint
 und schreiben keine zweite Revision.
@@ -50,13 +63,14 @@ oder Bedeutungsbeweis. Menschliche Überprüfung bleibt erforderlich.
 
 ## Echte Referenzen und korrigierte Prüfsituation
 
-Die deutsche Referenz verlangte bisher einen offenen Gesprächsimpuls,
+Vor dem Vorgänger verlangte die deutsche Referenz einen offenen Gesprächsimpuls,
 enthielt aber keine ausdrückliche Frage.
 Ein tatsächlicher Durchlauf speicherte Aufgabe und Fakten ohne Impuls
 und fiel daher durch diese zusätzliche Erwartung.
 Die englische Referenz enthielt bereits „Who can approve the budget?“.
 
-Die deutsche Fassung ergänzt jetzt „Wer kann das Budget freigeben?“.
+Der Vorgänger ergänzte „Wer kann das Budget freigeben?“.
+Dieser Korpus und der Referenzhelfer bleiben in dieser Nacharbeit byteunverändert.
 Alle bisherigen positiven Zusagen, der fehlende Budgetauftrag und der
 unverbindliche Webseitenvorschlag bleiben enthalten.
 Die englische Fassung einschließlich des wörtlichen „I’ll“ ist byteunverändert.
@@ -69,13 +83,13 @@ alte Fehlläufe werden dadurch nicht als bestanden umgedeutet.
 | --- | --- |
 | Rust-Workspace, alle Targets | Frisch **567 bestanden**, darunter **168 Notizenfälle** und **37 Providerprotokollfälle**; drei bestehende besondere Einstiege regulär ignoriert. |
 | Rustformat und Clippy | Frisch bestanden, gesperrte Abhängigkeiten und Warnungen als Fehler. |
-| Deutsch, tatsächliches lokales Modell | Frisch **123.0776487 s**; reguläre vollständig validierte Wiederholungen: **0**. |
-| Englisch, tatsächliches lokales Modell | Frisch **145.040581 s**; reguläre vollständig validierte Wiederholungen: **0**. |
+| Deutsch, tatsächliches lokales Modell | Frisch **164.4825003 s**; reguläre vollständig validierte Wiederholungen: **2**. |
+| Englisch, tatsächliches lokales Modell | Frisch **110.0172312 s**; reguläre vollständig validierte Wiederholungen: **0**. |
 | Frontend | **414 Tests in 21 Dateien**, TypeScript, Produktionsbuild und Format auf den hier bytegleichen Komponenten von 8d0ba21 bestanden; hier nicht erneut ausgeführt. |
 | Projektprüfung | Nach dem letzten Dokumentedit vor Upload erneut verify.ps1 erforderlich: 47 PCM-, 35 Notizen-, 28 Vorlagen-, acht Agenten- und Monitorprüfungen. |
 
-Beide neuen Modellreferenzen bestehen für positive Aufgaben, unverbindliche
-Aussagen, Impulserhalt, menschlichen Status nach Protokolländerung und bytegleiche
+Beide frischen Modellreferenzen auf dem unveränderten Korpus bestehen für positive
+Aufgaben, unverbindliche Aussagen, Impulserhalt, menschlichen Status nach Protokolländerung und bytegleiche
 Wiederöffnung. Die alte Grenze wurde nicht erhöht; null Wiederholungen sind
 keine Freigabeschwelle.
 
@@ -83,7 +97,8 @@ Verwendet wurden ausschließlich synthetischer Text und das vorhandene
 **google/gemma-4-e4b Q4_K_M**, 6.326.936.720 Modellbytes.
 LM Studio **0.4.26+4**, Windows 11 Pro **26200**, Intel **i7-13700**,
 rund **64 GiB** sichtbarer physischer Speicher.
-Die Umgebungsdaten wurden für diese Nacharbeit frisch lesend geprüft.
+Die Umgebungsdaten wurden im unmittelbar vorherigen Durchlauf lesend geprüft;
+die ausgewählte Modellinstanz wurde vor dieser Referenz erneut lesend geprüft.
 Die Zeitmessung des Referenzhelfers umfasst Modellverarbeitung, dauerhaften
 Abschluss und Wiederöffnung. Während der Inferenz liefen keine anderen eigenen
 Prüfungen. Keine Downloads, Cloud oder Nutzermeetings.
@@ -92,7 +107,14 @@ Modell-Dateigröße ist keine RAM-Messung.
 
 ## Erhaltene Fehlläufe und Nachweisgrenzen
 
-- Ein früher englischer Versuch dieses nativen Stands hielt im zweiten Fenster
+Der erste deutsche Versuch dieser Nacharbeit brach im ersten Fenster mit der
+Meldung zum Antwortlimit ab. Es entstand keine Ergebnisrevision; der ursprüngliche
+Agendakontext blieb erhalten. Die genaue Phase und abgelehnte Modellantwort wurden
+nicht separat gespeichert, die weitergehende Ursache ist unbekannt. Das oben
+genannte weitere Paar lief mit identischem Code, Modell, Korpus und Kriterien.
+Auch dieser Fehllauf bleibt erhalten und zählt nicht als bestandene Referenz.
+
+- Ein früher englischer Versuch des Vorgängers hielt im zweiten Fenster
   wegen einer nichtleeren unresolvedContextIds-Antwort korrekt an.
   Erster Checkpoint, besprochener menschlicher Impuls und Protokolländerung
   blieben erhalten. Die angeforderten Kennungen und die abgelehnte Antwort
@@ -164,7 +186,8 @@ Die ausführlichen Vorher-/Nachherfälle bleiben über die unveränderliche Hist
 Die zwei sauberen Codex-Codeprüfungen auf 5896b2b waren historische Einzelnachweise.
 Der folgende vollständige CodeRabbit-Lauf fand die inzwischen korrigierte
 doppelte Workspace-Projektion. Nachfolgende Codex-Läufe fanden Wortmarker
-auf 90becdd und quantitative Teilfortschritte auf dfe5d65.
+auf 90becdd, quantitative Teilfortschritte auf dfe5d65 und die zu breite
+Prozentprüfung auf 94b3ee6.
 Diese Runden waren keine sauberen Abschlüsse.
 
 Die Projektionskorrektur wurde von CodeRabbit
@@ -212,8 +235,8 @@ sowie bestehende Speicher- und Verwaltungsschranken bleiben erhalten.
 
 Statische Produktprompts, Vertragsdateien, Belegbudget, Fristen, UI, Transport,
 Aufnahme-/ASR-Logik, Modellreservierungen, Abhängigkeiten, Schutz-/Reviewerregeln,
-Version und vollständiger TEST_REPORT bleiben gegenüber dfe5d65 unverändert.
-Der deutsche synthetische Referenztext ändert sich ausdrücklich wie oben beschrieben.
+Version und vollständiger TEST_REPORT bleiben gegenüber 94b3ee6 unverändert.
+Auch der deutsche und englische synthetische Referenztext bleiben hier byteunverändert.
 
 Physische Aufnahme-, Berechtigungs-, Geräteverlust- und zweistündige Gerätetests
 wurden auf später verschoben. Keine neue echte Parakeet-Dauer-, GPU-,

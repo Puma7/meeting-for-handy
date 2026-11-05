@@ -753,9 +753,29 @@ pub(super) fn withdrawal_quote_allowed(quote: &str) -> bool {
     })
 }
 
-/// Reject percentage witnesses unless their explicit value is exactly 100,
-/// including decimal zeros. Ambiguous ranges, fractions and word values stay open.
-fn incomplete_percentage(text: &str) -> bool {
+/// Compare explicit decimal quantities without rounding a partial value up.
+fn completion_number(raw: &str) -> Option<(&str, &str)> {
+    let mut pieces = raw.split(['.', ',']);
+    let integer = pieces.next()?;
+    let decimal = pieces.next();
+    let fraction = decimal.unwrap_or("");
+    if integer.is_empty()
+        || !integer.bytes().all(|c| c.is_ascii_digit())
+        || !fraction.bytes().all(|c| c.is_ascii_digit())
+        || decimal.is_some_and(str::is_empty)
+        || pieces.next().is_some()
+    {
+        return None;
+    }
+    Some((
+        integer.trim_start_matches('0'),
+        fraction.trim_end_matches('0'),
+    ))
+}
+
+/// Reject explicit partial progress, rather than percentages in an object's name.
+/// This bounded evidence guard complements, rather than replaces, model judgement.
+fn incomplete_quantity(text: &str) -> bool {
     let mut words = Vec::new();
     let mut start = None;
     for (at, ch) in text
@@ -768,18 +788,117 @@ fn incomplete_percentage(text: &str) -> bool {
             words.push((from, at, &text[from..at]));
         }
     }
-    let mut units = text
-        .match_indices('%')
-        .map(|(at, _)| at)
+    if words.windows(2).any(|pair| {
+        (pair[0].2 == "half" && ["of", "the", "a"].contains(&pair[1].2))
+            || (pair[0].2 == "zur" && ["hälfte", "haelfte"].contains(&pair[1].2))
+            || (["ein", "zwei"].contains(&pair[0].2) && pair[1].2 == "drittel")
+            || (["ein", "zwei", "drei"].contains(&pair[0].2) && pair[1].2 == "viertel")
+    }) || words.windows(3).any(|part| {
+        ((["one", "two"].contains(&part[0].2) && ["third", "thirds"].contains(&part[1].2))
+            || (["one", "two", "three"].contains(&part[0].2)
+                && ["quarter", "quarters"].contains(&part[1].2)))
+            && part[2].2 == "of"
+    }) {
+        return true;
+    }
+    let left_number = |at: usize| {
+        let prefix = text[..at].trim_end();
+        let start = prefix
+            .char_indices()
+            .rev()
+            .take_while(|(_, c)| c.is_ascii_digit() || ['.', ','].contains(c))
+            .last()
+            .map_or(prefix.len(), |(at, _)| at);
+        (start, prefix.len())
+    };
+    let right_number = |at: usize| {
+        let suffix = &text[at..];
+        let start = at + suffix.len() - suffix.trim_start().len();
+        let end = text[start..]
+            .char_indices()
+            .take_while(|(_, c)| c.is_ascii_digit() || ['.', ','].contains(c))
+            .last()
+            .map_or(start, |(at, c)| start + at + c.len_utf8());
+        (start, end)
+    };
+    let mut ratios = text
+        .match_indices('/')
+        .map(|(at, _)| (at, at + 1))
         .collect::<Vec<_>>();
-    for (i, (at, _, word)) in words.iter().enumerate() {
-        if ["prozent", "prozente", "percent"].contains(word)
-            || (*word == "per" && words.get(i + 1).is_some_and(|w| w.2 == "cent"))
+    ratios.extend(
+        words
+            .iter()
+            .filter(|w| ["of", "von"].contains(&w.2))
+            .map(|w| (w.0, w.1)),
+    );
+    if ratios.into_iter().any(|(at, end)| {
+        let (left, left_end) = left_number(at);
+        let (right, right_end) = right_number(end);
+        if left == left_end || right == right_end {
+            return false;
+        }
+        // Date notation is not a progress ratio (including chained YYYY/MM/DD).
+        let before = text[..left].trim_end();
+        if before.ends_with('/')
+            || text[right_end..].trim_start().starts_with('/')
+            || words
+                .iter()
+                .rev()
+                .find(|w| w.1 == before.len())
+                .is_some_and(|w| ["on", "am", "at", "date", "datum", "dated", "vom"].contains(&w.2))
         {
-            units.push(*at);
+            return false;
+        }
+        let numerator = completion_number(&text[left..left_end]);
+        let denominator = completion_number(&text[right..right_end]);
+        numerator.is_none() || numerator != denominator || denominator == Some(("", ""))
+    }) {
+        return true;
+    }
+    let mut units = text
+        .match_indices(['%', '％', '٪'])
+        .map(|(at, unit)| (at, at + unit.len()))
+        .collect::<Vec<_>>();
+    for (i, (at, end, word)) in words.iter().enumerate() {
+        if ["prozent", "prozente", "percent"].contains(word) {
+            units.push((*at, *end));
+        } else if *word == "per" && words.get(i + 1).is_some_and(|w| w.2 == "cent") {
+            units.push((*at, words[i + 1].1));
         }
     }
-    units.into_iter().any(|at| {
+    units.into_iter().any(|(at, end)| {
+        let suffix = text[end..].trim_start_matches(|c: char| c.is_whitespace() || c == '-');
+        let next = suffix
+            .split(|c: char| !c.is_alphabetic())
+            .next()
+            .unwrap_or("");
+        // "50% discount report" names an object; "50% of the report" or
+        // "zu 50 Prozent abgeschlossen" describes its progress.
+        if !next.is_empty()
+            && ![
+                "of",
+                "von",
+                "der",
+                "des",
+                "die",
+                "den",
+                "complete",
+                "completed",
+                "done",
+                "finished",
+                "abgeschlossen",
+                "erledigt",
+                "fertig",
+                "already",
+                "bereits",
+                "so",
+                "in",
+                "by",
+            ]
+            .contains(&next)
+        {
+            return false;
+        }
         let prefix = text[..at].trim_end();
         let number_at = prefix
             .char_indices()
@@ -787,15 +906,9 @@ fn incomplete_percentage(text: &str) -> bool {
             .take_while(|(_, c)| c.is_ascii_digit() || ['.', ','].contains(c))
             .last()
             .map_or(prefix.len(), |(at, _)| at);
-        let mut decimal = prefix[number_at..].split(['.', ',']);
         // Compare decimal digits exactly; floating rounding must not turn
         // 99.9999999999999999999 percent into a completed task.
-        if decimal.next().unwrap().trim_start_matches('0') != "100"
-            || decimal
-                .next()
-                .is_some_and(|d| d.is_empty() || !d.chars().all(|c| c == '0'))
-            || decimal.next().is_some()
-        {
+        if completion_number(&prefix[number_at..]) != Some(("100", "")) {
             return true;
         }
         let before = prefix[..number_at].trim_end();
@@ -839,7 +952,7 @@ pub(super) fn completion_quote_allowed(quote: &str) -> bool {
             .any(|word| ["habe", "haben", "ist"].contains(word));
     if quote.contains('?')
         || german_partial
-        || incomplete_percentage(&lower)
+        || incomplete_quantity(&lower)
         || words.iter().any(|word| {
             UNCERTAIN_TERMINAL_WORDS.contains(word)
                 || ADDITIONAL_UNCERTAIN_TERMINAL_WORDS.contains(word)
