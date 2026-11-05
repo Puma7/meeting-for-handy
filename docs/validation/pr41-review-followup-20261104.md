@@ -1,13 +1,11 @@
 # PR 41: Validierungsstand
 
 Stand: 5. November 2026. Version: **1.1.0-beta.1**, unverändert.
-Diese Fassung korrigiert zusätzlich die Anzeige des tatsächlich laufenden Auswertungsintervalls,
-begrenzt drei synthetische Testserver und entfernt einen doppelten Speicherhinweis.
-Die vorherige Titelkorrektur bleibt erhalten. Frühere native Korrekturen betreffen die sichere
-Wiederaufnahme beim Modellwechsel und die gemeinsame Aufgabenprüfung.
-Native Produktionsbytes, Prompts, Transport, Audio/ASR, Modellreservierungen, Abhängigkeiten,
-Konfiguration und kompletter TEST_REPORT bleiben gegenüber `87eba39` byteunverändert.
-Native Testbytes ändern sich ausschließlich für die begrenzten synthetischen Server.
+Diese Fassung korrigiert zusätzlich kontrahierte englische Erledigt-Meldungen für bestehende
+Aufgaben. Die vorherigen Intervall-, Testserver-, Speicherhinweis- und Titelkorrekturen bleiben
+enthalten. Aktuell ändern sich ausschließlich die native Erledigt-Klassifikation, deren
+Validierungs-/Speichergegenfälle und dieser bereinigte Vermerk. Prompts, Transport, Audio/ASR,
+Modellreservierungen, Oberfläche, Abhängigkeiten und Schutz-/Reviewerregeln bleiben unverändert.
 Der vollständige TEST_REPORT wurde nicht für diese Nacharbeit neu veröffentlicht.
 
 Die [ausführliche bisherige Fassung](https://github.com/Puma7/meeting-for-handy/blob/96109374c3fa7d72ed0a3cea68706a90280fc484/docs/validation/pr41-review-followup-20261104.md)
@@ -45,29 +43,28 @@ nicht protokolliert oder als Klartext gespeichert. Keine Nutzermeetings wurden f
 
 ## Prüfungen und genauer Bezug
 
-Rusttests, Clippy, Rustformat sowie Oberfläche, TypeScript, Build und Frontendformat sind
-für die Intervall-/Hinweiskorrektur und die begrenzten Testserver frisch bestanden.
-Echte Modellreferenzen stammen vom bytegleichen nativen Produktionsstand `87eba39` und wurden
-hier nicht wiederholt. Die Browserprüfung stammt von der vorherigen Titelkorrektur `b387093`;
-ihre Sidebar-/RecordingStatus-Produktionsbytes und der Prüfer bleiben unverändert.
+Rusttests, Clippy, Rustformat und beide echten lokalen Modellreferenzen sind für die
+Erledigt-Korrektur frisch bestanden. Oberfläche, TypeScript, Build und Frontendformat stammen
+vom bytegleichen `fc8433f`-UI-Stand und wurden nicht wiederholt. Die Browserprüfung stammt von
+der Titelkorrektur `b387093`; ihre Komponenten und der Prüfer bleiben unverändert.
 Ältere Paket-/Langsammodellnachweise werden nicht als neu ausgeführt ausgegeben.
 `verify.ps1` ist nach dem letzten Dokumentedit vor Quellupload frisch erforderlich.
 
 | Prüfung | Tatsächliches Ergebnis |
 | --- | --- |
-| Rust-Workspace, alle Targets | Frisch 559 bestanden, darunter 160 Notizen- und 37 Providerprotokolltests; drei bestehende besondere Einstiege regulär ignoriert. Der zusätzliche Fall prüft fehlende Anfragen und bereits verbundene synthetische Clients. Frühere 558/557/555 Zahlen sind historische Stände. |
+| Rust-Workspace, alle Targets | Frisch 560 bestanden, darunter 161 Notizen- und 37 Providerprotokolltests; drei bestehende besondere Einstiege regulär ignoriert. Die neue Erledigt-Regression prüft vier Kontraktionsformen sowie ausgeschriebene und abgelehnte Gegenfälle über die tatsächliche Validierung und dauerhafte Wiederöffnung. Frühere 559/558/557/555 Zahlen sind historisch. |
 | Rustformat und Clippy | Frisch bestanden; gesperrte Abhängigkeiten und Warnungen als Fehler. |
-| Oberfläche | Frisch 406 Tests, TypeScript, Produktionsbuild und vollständige Frontendformatprüfung bestanden. Fünf tatsächliche Intervall-Vorherfehler und zwei doppelte Speicherhinweise sind reproduziert und danach korrigiert. Zwei Testworker, unveränderte Fristen und Schutzregeln. Frühere 399/395/391/385 Zahlen sind historisch. |
+| Oberfläche | 406 Tests in 21 Dateien, TypeScript, Produktionsbuild und vollständige Frontendformatprüfung auf dem hier bytegleichen `fc8433f`-UI-Stand bestanden, lokal nicht wiederholt. Fünf tatsächliche Intervall-Vorherfehler und zwei doppelte Speicherhinweise sind dort korrigiert. Zwei Testworker, unveränderte Fristen und Schutzregeln. Frühere 399/395/391/385 Zahlen sind historisch. |
 | Projektprüfung | Vorherige veröffentlichte Stände bestanden 47 PCM-, 35 Notizen-, 28 Vorlagen-, acht Agenten- und Monitorprüfungen. Für jede Quellveröffentlichung nach dem letzten Dokumentedit erneut vor Upload erforderlich. |
-| Echte lokale Referenzen | Auf dem bytegleichen nativen Produktionsstand `87eba39`, lokal nicht wiederholt: Deutsch 101.3137551 s (0 reguläre Validierungswiederholungen), Englisch 114.7423001 s (0 Wiederholungen). Positive Aufgabe, unverbindliche Aussage, Impulserhalt, menschlicher Status nach Protokolländerung und bytegleiche Wiederöffnung bestanden. Wörtliches englisches „I’ll“ bleibt erhalten. Eine vollständig validierte Wiederholung je Anfrage bleibt zulässig; null Wiederholungen sind keine Freigabeschwelle. Frühere DE-/EN-Referenzen vor der abschließenden Aufgaben- und Freigabechronologie sind nicht dieser finale Nachweis. |
+| Echte lokale Referenzen | Frisch bestanden: Deutsch 112.0512475 s und Englisch 122.7768458 s, jeweils 0 reguläre Validierungswiederholungen. Positive Aufgabe, unverbindliche Aussage, Impulserhalt, menschlicher Status nach Protokolländerung und bytegleiche Wiederöffnung bestanden. Wörtliches englisches „I’ll“ bleibt erhalten. Eine vollständig validierte Wiederholung je Anfrage bleibt zulässig; null Wiederholungen sind keine Freigabeschwelle. Frühere Modellreferenzen sind historische Belege. Die vier konkreten Erledigt-Kontraktionen wurden zusätzlich kontrolliert über die tatsächliche Validierungs-/Speicherschnittstelle geprüft; die realen Referenztexte bleiben unverändert. |
 | Paketregression | 21 Prüfungen auf `91f0985`; Paketdateien seitdem unverändert. Tatsächlich erzeugter synthetischer ZIP prüft Streaming- oder Batchhinweis, Launcher, Fingerprint und Nichtüberschreibung. Kein lokales Produktpaket oder Installer daraus bereitgestellt. |
 | Kontrolliertes Langsammodell | Auf `35d53e8`: 244.33 s Gesamtlauf, 210 s SSE-Antwortpause, nächster Refresh nach 210.0421383 s, maximal eine Modellanfrage, ein erhaltener Impuls. 3737920 Samples je Spur / 16000 Hz = 233.62 s je Spur. Beide PCM-Schreiber liefen nach Auswertungsstopp weiter. Hier nicht erneut ausgeführt. |
 | Sidebar im Browser | Auf `b387093`, hier nicht erneut ausgeführt: 24 tatsächliche Layoutabläufe plus 24 kombinierte Warn-Titel: 390/740/1280 Pixel, DE/EN, hell/dunkel, ein-/ausgeklappt; Titel zusätzlich stilles/stummes Mikrofon mit Aufnahmewarnung und Rückstand. Eigener Server/Browser beendet, keine Seiten-/Konsolenfehler, Fremdanfragen oder horizontalen Überläufe. Die Titelattribute stammen aus dem tatsächlichen Browser-DOM; kein nativer OS-Tooltip- oder Screenreader-Sprachnachweis. |
 
 Die echten Referenzen verwendeten ausschließlich synthetischen Text und das vorhandene
-**google/gemma-4-e4b Q4_K_M**, 6.326.936.720 Modellbytes, LM Studio **0.4.26.0**,
-Windows 11 Pro **26200**, Intel **i7-13700**, rund **64 GiB** physisches RAM.
-Keine Downloads oder Cloud. Während dieser nativen Referenzen auf `87eba39` liefen keine anderen eigenen Prüfungen.
+**google/gemma-4-e4b Q4_K_M**, 6.326.936.720 Modellbytes, laufendes LM Studio mit Dateiversion **0.4.26+4**,
+Windows 11 Pro **26200**, Intel **i7-13700**, rund **64 GiB** sichtbares physisches RAM.
+Keine Downloads oder Cloud. Während dieser neuen nativen Referenzen liefen keine anderen eigenen Prüfungen.
 Die Dauer umfasst Modellverarbeitung, Abschluss und Wiederöffnung. Beim aktuellen Referenzpaar
 wurden keine neuen Working-Set-, Private-Bytes- oder Grafikspeicherwerte erhoben.
 
@@ -271,6 +268,40 @@ Die zwei sauberen Codex-Codequittungen auf dem vorherigen `87eba39` sind
 Der vollständige CodeRabbit-Lauf war wegen des gültigen Titelbefunds kein sauberer Abschluss.
 Die folgende reine UI-/Prüferkorrektur benötigt eigene frische Reviews und CI auf ihrem Head.
 Die damaligen Rust-/Modellnachweise bleiben ihrem `87eba39`-Stand zugeordnet; die obige aktuelle Tabelle weist die erneut ausgeführten Rusttests getrennt aus.
+
+## Kontrahierte englische Erledigt-Meldungen
+
+Die frische [Codex-Prüfung auf `fc8433f`](https://github.com/Puma7/meeting-for-handy/pull/41#pullrequestreview-5786363771)
+fand einen gültigen P2-Befund: Bei einer bestehenden Aufgabe wurden „I've sent the report.“,
+„I’ve sent the report.“, „We've completed the report.“ und „We’ve completed the report.“
+abgelehnt, obwohl ihre ausgeschriebenen Entsprechungen zulässig waren. Die alte Wortzerlegung
+erzeugte i/we, ve und das Partizip; die Prüfung verlangte have. Dadurch konnte ein legitimer
+Erledigt-Status die gesamte Quelle einschließlich regulärer Wiederholung scheitern lassen.
+
+Nur vollständige affirmative Erstpersonen-Tokens I've und we've werden jetzt in temporärer
+Klassifikation zu i/we have erweitert. Gerade und typografische Apostrophe werden dafür
+gleichbehandelt. Alle übrigen Apostroph-Tokens werden wie bisher zerlegt; die bestehenden
+Verneinungs- und Unsicherheitswörter bleiben aktiv. Quellen, Originalzitate, Journale und
+bestehende gespeicherte Fassungen werden dabei nicht normalisiert oder neu geschrieben.
+
+Eine tatsächliche Validierungs-/Speicherregression reproduzierte vorher alle vier Ablehnungen
+in einem Durchlauf; die ausgeschriebenen Gegenfälle bestanden bereits. Danach werden diese
+vier und die ausgeschriebenen Formen als Status einer vorhandenen Aufgabe übernommen.
+Verneinungen, never, haven't/haven’t, nachgestellte Bedingung, Frage, fehlender Apostroph und
+ein angehängter Wortpräfix bleiben abgelehnt. Abgelehnte Änderungen lassen den Zustand und
+Checkpoint unverändert. Zulässige Änderungen bewahren den ursprünglichen Aufgabenbeleg,
+den neuen wörtlichen Originaltext einschließlich Apostroph, den alten Checkpoint bytegleich
+und wiederholt identische Wiederöffnung. Das ist kein vollständiger englischer Grammatik-
+oder Bedeutungsnachweis. Die Änderung erweitert weder neue Aufgaben noch künftige Zusagen
+zu einer Erledigung. Prompts, Schema, Transport und Prüfgrenzen bleiben unverändert.
+
+Frisch bestanden sind 560 Rusttests, 161 Notizenfälle, 37 Providerprotokollfälle, Clippy mit
+Warnungen als Fehler und Rustformat. Beide vorab geplanten echten lokalen Referenzen mit
+synthetischen positiven/unverbindlichen Aussagen sind ebenfalls neu bestanden, wie oben
+getrennt von den kontrollierten Kontraktionsgegenfällen dokumentiert. Frühere Prüfungen auf
+`fc8433f` ersetzen keine frische saubere Reviewrunde oder CI auf dem folgenden Head.
+Eine vollständige CodeRabbit-Runde auf `fc8433f` wurde wegen dieses offenen echten Codex-
+Befunds nicht erneut beauftragt; die nächste Vollprüfung gilt dem korrigierten Endstand.
 
 ## Intervallanzeige, synthetische Server und Speicherhinweis
 

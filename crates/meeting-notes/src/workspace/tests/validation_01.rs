@@ -1,6 +1,121 @@
 use super::*;
 
 #[test]
+fn contracted_perfect_completion_retains_literal_quotes_after_reopen() {
+    let cases = [
+        ("I've sent the report.", true),
+        ("I’ve sent the report.", true),
+        ("We've completed the report.", true),
+        ("We’ve completed the report.", true),
+        ("I have sent the report.", true),
+        ("We have completed the report.", true),
+        ("I've not sent the report.", false),
+        ("I’ve never sent the report.", false),
+        ("We've not completed the report.", false),
+        ("We’ve never completed the report.", false),
+        ("I haven't sent the report.", false),
+        ("We haven’t completed the report.", false),
+        ("I've sent the report if approval arrives.", false),
+        ("We’ve completed the report?", false),
+        ("I ve sent the report.", false),
+        ("Ive sent the report.", false),
+        ("archiveI've sent the report.", false),
+    ];
+    let mut mismatches = Vec::new();
+    for (quote, allowed) in cases {
+        let directory = tempfile::tempdir().unwrap();
+        let (_writer, empty) = store::load(directory.path()).unwrap();
+        let (mut seed, mut request, mut answer) = setup();
+        request.transcript_sources[0].text = "I will send the report.".into();
+        answer["changes"][0]["text"] = json!("Send the report");
+        answer["changes"][0]["due"] = json!(null);
+        answer["changes"][0]["evidence"][0]["quote"] = json!("I will send the report.");
+        let events = validate::apply(&mut seed, &request, &answer.to_string()).unwrap();
+        seed.revision = 1;
+        store::append(
+            directory.path(),
+            &store::Delta::between(&empty, &seed, request.transcript_sources.clone(), events),
+        )
+        .unwrap();
+        let seed = read_state(directory.path()).unwrap();
+        let old_checkpoint =
+            std::fs::read(directory.path().join("revision-00000001.json")).unwrap();
+        let source = Source {
+            id: "s_completion".into(),
+            source: "microphone".into(),
+            start_ms: 3000,
+            end_ms: 6000,
+            text: quote.into(),
+        };
+        let mut sources = seed.originals.clone();
+        sources.push(source.clone());
+        let mut completion = Request::new(
+            "r_completion".into(),
+            &seed.context,
+            &seed,
+            seed.entities.clone(),
+            std::slice::from_ref(&source),
+            sources,
+        );
+        completion.purpose = "tasks".into();
+        answer["requestId"] = json!("r_completion");
+        answer["changes"][0]["targetId"] = json!(seed.entities[0].id);
+        answer["changes"][0]["targetRevision"] = json!(seed.entities[0].revision);
+        answer["changes"][0]["text"] = json!(null);
+        answer["changes"][0]["status"] = json!("completed");
+        answer["changes"][0]["evidence"] = json!([{"sourceId":"s_completion","quote":quote}]);
+        let mut next = seed.clone();
+        let result = validate::apply(&mut next, &completion, &answer.to_string());
+        if result.is_ok() != allowed {
+            mismatches.push(format!("{quote}: allowed={allowed}, result={result:?}"));
+            continue;
+        }
+        if allowed {
+            next.revision += 1;
+            store::append(
+                directory.path(),
+                &store::Delta::between(&seed, &next, vec![source], result.unwrap()),
+            )
+            .unwrap();
+            let reopened = read_state(directory.path()).unwrap();
+            assert_eq!(reopened.entities[0].status, "completed");
+            assert_eq!(reopened.entities[0].text, seed.entities[0].text);
+            assert!(seed.entities[0]
+                .evidence
+                .iter()
+                .all(|e| reopened.entities[0].evidence.contains(e)));
+            assert!(reopened.entities[0]
+                .evidence
+                .iter()
+                .any(|e| e.source_id == "s_completion" && e.quote == quote));
+            assert!(reopened
+                .originals
+                .iter()
+                .any(|s| s.id == "s_completion" && s.text == quote));
+            assert_eq!(
+                serde_json::to_vec(&read_state(directory.path()).unwrap()).unwrap(),
+                serde_json::to_vec(&reopened).unwrap()
+            );
+        } else {
+            assert_eq!(
+                serde_json::to_vec(&next).unwrap(),
+                serde_json::to_vec(&seed).unwrap(),
+                "{quote}"
+            );
+            assert!(!directory.path().join("revision-00000002.json").exists());
+        }
+        assert_eq!(
+            std::fs::read(directory.path().join("revision-00000001.json")).unwrap(),
+            old_checkpoint
+        );
+    }
+    assert!(
+        mismatches.is_empty(),
+        "Completion admission mismatches: {mismatches:?}"
+    );
+}
+
+#[test]
 fn promised_task_is_open_and_repeated_result_is_deduplicated() {
     let (mut state, req, answer) = setup();
     validate::apply(&mut state, &req, &answer.to_string()).unwrap();

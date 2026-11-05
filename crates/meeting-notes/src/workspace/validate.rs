@@ -691,10 +691,17 @@ pub(super) fn withdrawal_quote_allowed(quote: &str) -> bool {
 
 /// Explicit past or completed-state wording, with negation and uncertainty rejected.
 pub(super) fn completion_quote_allowed(quote: &str) -> bool {
-    let lower = quote.to_lowercase();
+    // Expand only complete affirmative first-person contractions for screening.
+    // Other apostrophe tokens still split as before, preserving haven/not guards;
+    // original sources and evidence are never normalized or rewritten.
+    let lower = quote.to_lowercase().replace('’', "'");
     let words: Vec<_> = lower
-        .split(|c: char| !c.is_alphabetic())
-        .filter(|s| !s.is_empty())
+        .split(|c: char| !c.is_alphabetic() && c != '\'')
+        .flat_map(|token| match token {
+            "i've" => vec!["i", "have"],
+            "we've" => vec!["we", "have"],
+            _ => token.split('\'').filter(|word| !word.is_empty()).collect(),
+        })
         .collect();
     if quote.contains('?')
         || words.iter().any(|word| {
