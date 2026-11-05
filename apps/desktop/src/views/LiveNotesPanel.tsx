@@ -707,16 +707,6 @@ export default function LiveNotesPanel({
         <summary>
           {de ? "Optionen und Hinweise" : "Options and guidance"}
         </summary>
-        {meetingActive &&
-          connection.mode === "local" &&
-          modelReady &&
-          !running && (
-            <p className="muted live-memory-detail">
-              {de
-                ? "Lokales Textmodell benötigt zusätzlichen Arbeitsspeicher. Bei knappem Speicher erst nach der Aufnahme starten."
-                : "Local models need extra memory. If memory is low, start after recording."}
-            </p>
-          )}
         <div className="live-controls">
           <label className="live-interval">
             {de ? "Alle" : "Every"}

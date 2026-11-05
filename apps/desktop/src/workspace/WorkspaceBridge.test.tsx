@@ -14,6 +14,73 @@ import { LiveWorkspace } from "./shell/LiveWorkspace.jsx";
 import { fitColumn } from "./shell/fitOverview.mjs";
 import { workspaceText } from "./shell/workspaceLocale.jsx";
 
+it.each([
+  ["de", 120000],
+  ["en", 120000],
+  ["de", 300000],
+  ["en", 450000],
+] as const)(
+  "shows the authoritative running interval after reopening (%s, %s)",
+  async (language, intervalMs) => {
+    const f = fixture();
+    f.status.intervalMs = intervalMs;
+    const mounted = render(
+      <LiveWorkspace
+        language={language}
+        adapter={f.adapter}
+        meeting={f.meeting}
+        onBack={() => {}}
+      />,
+    );
+    try {
+      const selector = screen.getByRole("combobox", {
+        name: language === "de" ? "Auswertungsintervall" : "Analysis interval",
+      }) as HTMLSelectElement;
+      await waitFor(() =>
+        expect(selector.value).toBe(String(intervalMs / 60000)),
+      );
+      expect(selector.selectedOptions[0].textContent).toContain(
+        (intervalMs / 60000).toLocaleString(language),
+      );
+      expect(f.adapter.interval).not.toHaveBeenCalled();
+      expect(f.adapter.start).not.toHaveBeenCalled();
+      expect(f.adapter.stop).not.toHaveBeenCalled();
+    } finally {
+      mounted.unmount();
+    }
+  },
+);
+
+it("keeps a rejected interval change visibly authoritative and applies the next confirmed change", async () => {
+  const f = fixture();
+  f.adapter.interval.mockRejectedValueOnce(
+    new Error("Synthetic interval change rejected"),
+  );
+  f.adapter.interval.mockImplementationOnce(async () => {
+    f.status.intervalMs = 180000;
+  });
+  const mounted = render(
+    <LiveWorkspace adapter={f.adapter} meeting={f.meeting} onBack={() => {}} />,
+  );
+  try {
+    const selector = screen.getByRole("combobox", {
+      name: "Auswertungsintervall",
+    }) as HTMLSelectElement;
+    await waitFor(() => expect(selector.disabled).toBe(false));
+    fireEvent.change(selector, { target: { value: "3" } });
+    await screen.findByText("Synthetic interval change rejected");
+    expect(selector.value).toBe("2");
+    fireEvent.change(selector, { target: { value: "3" } });
+    await waitFor(() => expect(f.adapter.interval).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(selector.value).toBe("3"));
+    expect(f.adapter.interval.mock.calls).toEqual([[180000], [180000]]);
+    expect(f.adapter.start).not.toHaveBeenCalled();
+    expect(f.adapter.stop).not.toHaveBeenCalled();
+  } finally {
+    mounted.unmount();
+  }
+});
+
 it("forwards changing global notices without resetting the selected workspace tab", async () => {
   const f = fixture();
   const api = {

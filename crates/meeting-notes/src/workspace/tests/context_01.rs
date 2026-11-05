@@ -107,8 +107,9 @@ fn newly_shared_agenda_replays_original_text_without_duplication_or_a_new_transc
     let endpoint = format!("http://{}/v1/", listener.local_addr().unwrap());
     let server = thread::spawn(move || {
         let mut inputs = vec![];
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
         for _ in 0..4 {
-            let (mut stream, _) = listener.accept().unwrap();
+            let mut stream = accept_synthetic_before(&listener, deadline).unwrap();
             stream
                 .set_read_timeout(Some(std::time::Duration::from_secs(3)))
                 .unwrap();

@@ -220,6 +220,12 @@ function WorkspaceContents({
   const [status, setStatus] = useState(null),
     [error, setError] = useState(null),
     [busy, setBusy] = useState(false);
+  const shownMinutes =
+    status?.running &&
+    Number.isFinite(status.intervalMs) &&
+    status.intervalMs > 0
+      ? status.intervalMs / 60000
+      : minutes;
   const [pollError, setPollError] = useState(null);
   const [viewportHeight, setViewportHeight] = useState(window.innerHeight),
     [panelViews, setPanelViews] = useState({});
@@ -764,8 +770,8 @@ function WorkspaceContents({
             <select
               aria-label={t("Auswertungsintervall")}
               title={t("Legt fest, wie oft die KI den Überblick aktualisiert.")}
-              disabled={!storageReady || classicRunning}
-              value={minutes}
+              disabled={!storageReady || classicRunning || busy}
+              value={shownMinutes}
               onChange={(e) => {
                 const value = Number(e.target.value);
                 setMinutes(value);
@@ -775,6 +781,12 @@ function WorkspaceContents({
             >
               <option value={2}>{t("2 Min.")}</option>
               <option value={3}>{t("3 Min.")}</option>
+              {![2, 3].includes(shownMinutes) && (
+                <option value={shownMinutes}>
+                  {shownMinutes.toLocaleString(language)}{" "}
+                  {language === "de" ? "Min." : "min"}
+                </option>
+              )}
             </select>
           </label>
           {status?.running ? (

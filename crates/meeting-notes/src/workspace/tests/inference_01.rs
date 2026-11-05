@@ -463,8 +463,9 @@ fn provider_context_rejection_shrinks_the_existing_frontier_before_sources() {
     let endpoint = format!("http://{}/v1/", listener.local_addr().unwrap());
     let server = thread::spawn(move || {
         let mut sizes = Vec::new();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
         loop {
-            let (mut stream, _) = listener.accept().unwrap();
+            let mut stream = accept_synthetic_before(&listener, deadline).unwrap();
             stream
                 .set_read_timeout(Some(std::time::Duration::from_secs(3)))
                 .unwrap();

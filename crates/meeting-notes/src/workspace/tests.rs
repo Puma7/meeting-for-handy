@@ -1,6 +1,87 @@
 use super::*;
 use serde_json::json;
 
+/// Accept a request for an owned synthetic server before its finite deadline.
+fn accept_synthetic_before(
+    listener: &std::net::TcpListener,
+    deadline: std::time::Instant,
+) -> std::io::Result<std::net::TcpStream> {
+    use std::{
+        io::{Error, ErrorKind},
+        thread,
+        time::{Duration, Instant},
+    };
+    listener.set_nonblocking(true)?;
+    loop {
+        if Instant::now() >= deadline {
+            return Err(Error::new(
+                ErrorKind::TimedOut,
+                "synthetic request sequence did not finish",
+            ));
+        }
+        match listener.accept() {
+            Ok((stream, _)) => {
+                // Accepted Windows handles may inherit nonblocking mode.
+                stream.set_nonblocking(false)?;
+                stream.set_read_timeout(Some(Duration::from_secs(3)))?;
+                stream.set_write_timeout(Some(Duration::from_secs(3)))?;
+                return Ok(stream);
+            }
+            Err(error) if error.kind() == ErrorKind::WouldBlock => {
+                thread::sleep(Duration::from_millis(2))
+            }
+            Err(error) => return Err(error),
+        }
+    }
+}
+
+#[test]
+fn synthetic_accept_times_out_without_requests_and_accepts_queued_clients() {
+    use std::{
+        io::ErrorKind,
+        net::{TcpListener, TcpStream},
+        sync::mpsc,
+        thread,
+        time::{Duration, Instant},
+    };
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let address = listener.local_addr().unwrap();
+    let (send, receive) = mpsc::channel();
+    let server = thread::spawn(move || {
+        let result =
+            accept_synthetic_before(&listener, Instant::now() + Duration::from_millis(100));
+        send.send(result.map(|_| ())).unwrap();
+    });
+    let result = receive.recv_timeout(Duration::from_millis(750));
+    if matches!(result, Err(mpsc::RecvTimeoutError::Timeout)) {
+        // Wake only this owned listener so the before-regression cannot hang the suite.
+        TcpStream::connect_timeout(&address, Duration::from_millis(100)).unwrap();
+    }
+    server.join().unwrap();
+    assert_eq!(
+        result
+            .expect("synthetic accept did not honor its deadline")
+            .unwrap_err()
+            .kind(),
+        ErrorKind::TimedOut
+    );
+
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let client = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
+    let accepted =
+        accept_synthetic_before(&listener, Instant::now() + Duration::from_secs(1)).unwrap();
+    assert_eq!(accepted.peer_addr().unwrap(), client.local_addr().unwrap());
+    assert_eq!(accepted.local_addr().unwrap(), client.peer_addr().unwrap());
+    assert_eq!(
+        accepted.read_timeout().unwrap(),
+        Some(Duration::from_secs(3))
+    );
+    assert_eq!(
+        accepted.write_timeout().unwrap(),
+        Some(Duration::from_secs(3))
+    );
+}
+
 fn setup() -> (WorkspaceState, Request, serde_json::Value) {
     let source = Source {
         id: "s_one".into(),
