@@ -376,6 +376,18 @@ export default function MeetingView({
         role="group"
         aria-label={locale === "de" ? "Meetingaktionen" : "Meeting actions"}
       >
+        {meeting && (
+          <span
+            className="meeting-current-title"
+            role="group"
+            aria-label={
+              locale === "de" ? "Angezeigtes Meeting" : "Displayed meeting"
+            }
+            title={meeting.title}
+          >
+            {meeting.title}
+          </span>
+        )}
         {workspaceSwitcher}
         <button
           className="secondary"

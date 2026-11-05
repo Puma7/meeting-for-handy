@@ -2419,6 +2419,15 @@ p {
   flex-wrap: wrap;
   gap: 6px;
 }
+.meeting-current-title {
+  min-width: 0;
+  max-width: 100%;
+  flex: 0 1 20rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+}
 
 .recording-warning {
   color: var(--color-error);

@@ -1,11 +1,12 @@
 # PR 41: Validierungsstand
 
 Stand: 5. November 2026. Version: **1.1.0-beta.1**, unverändert.
-Diese Fassung korrigiert zusätzlich kontrahierte englische Erledigt-Meldungen für bestehende
-Aufgaben. Die vorherigen Intervall-, Testserver-, Speicherhinweis- und Titelkorrekturen bleiben
-enthalten. Aktuell ändern sich ausschließlich die native Erledigt-Klassifikation, deren
-Validierungs-/Speichergegenfälle und dieser bereinigte Vermerk. Prompts, Transport, Audio/ASR,
-Modellreservierungen, Oberfläche, Abhängigkeiten und Schutz-/Reviewerregeln bleiben unverändert.
+Diese Fassung blockiert zusätzlich ausdrückliche negative Erledigt-Meldungen und zeigt den
+aktuellen Meetingnamen kompakt in der vorhandenen Aktionszeile der klassischen Ansicht.
+Die vorherigen Kontraktions-, Intervall-, Testserver-, Speicherhinweis- und Titelkorrekturen
+bleiben enthalten. Aktuell ändern sich nur der Erledigt-Filter samt Gegenfällen, die kompakte
+Meetingkennung, deren Browserprüfer und dieser bereinigte Vermerk. Prompts, Schemas, Transport,
+Audio/ASR, Modellreservierungen, Abhängigkeiten und Schutz-/Reviewerregeln bleiben unverändert.
 Der vollständige TEST_REPORT wurde nicht für diese Nacharbeit neu veröffentlicht.
 
 Die [ausführliche bisherige Fassung](https://github.com/Puma7/meeting-for-handy/blob/96109374c3fa7d72ed0a3cea68706a90280fc484/docs/validation/pr41-review-followup-20261104.md)
@@ -43,23 +44,23 @@ nicht protokolliert oder als Klartext gespeichert. Keine Nutzermeetings wurden f
 
 ## Prüfungen und genauer Bezug
 
-Rusttests, Clippy, Rustformat und beide echten lokalen Modellreferenzen sind für die
-Erledigt-Korrektur frisch bestanden. Oberfläche, TypeScript, Build und Frontendformat stammen
-vom bytegleichen `fc8433f`-UI-Stand und wurden nicht wiederholt. Die Browserprüfung stammt von
-der Titelkorrektur `b387093`; ihre Komponenten und der Prüfer bleiben unverändert.
+Rusttests, Clippy, Rustformat, Oberfläche, TypeScript, Build, vollständiges Frontendformat,
+Browserprüfung und beide echten lokalen Modellreferenzen sind für diese Korrektur frisch
+bestanden. Alle folgenden historischen Nachweise bleiben ihren ausdrücklich genannten
+Vorständen zugeordnet.
 Ältere Paket-/Langsammodellnachweise werden nicht als neu ausgeführt ausgegeben.
 `verify.ps1` ist nach dem letzten Dokumentedit vor Quellupload frisch erforderlich.
 
 | Prüfung | Tatsächliches Ergebnis |
 | --- | --- |
-| Rust-Workspace, alle Targets | Frisch 560 bestanden, darunter 161 Notizen- und 37 Providerprotokolltests; drei bestehende besondere Einstiege regulär ignoriert. Die neue Erledigt-Regression prüft vier Kontraktionsformen sowie ausgeschriebene und abgelehnte Gegenfälle über die tatsächliche Validierung und dauerhafte Wiederöffnung. Frühere 559/558/557/555 Zahlen sind historisch. |
+| Rust-Workspace, alle Targets | Frisch 560 bestanden, darunter 161 Notizen- und 37 Providerprotokolltests; drei bestehende besondere Einstiege regulär ignoriert. Der erweiterte Erledigt-Fall reproduzierte sieben falsche negative Abschlüsse und erhält positive Kontraktionen, Originalbelege, alte Checkpoints und wiederholte Wiederöffnung. Frühere 559/558/557/555 Zahlen sind historisch. |
 | Rustformat und Clippy | Frisch bestanden; gesperrte Abhängigkeiten und Warnungen als Fehler. |
-| Oberfläche | 406 Tests in 21 Dateien, TypeScript, Produktionsbuild und vollständige Frontendformatprüfung auf dem hier bytegleichen `fc8433f`-UI-Stand bestanden, lokal nicht wiederholt. Fünf tatsächliche Intervall-Vorherfehler und zwei doppelte Speicherhinweise sind dort korrigiert. Zwei Testworker, unveränderte Fristen und Schutzregeln. Frühere 399/395/391/385 Zahlen sind historisch. |
+| Oberfläche | Frisch 408 Tests in 21 Dateien, TypeScript, Produktionsbuild und vollständige Frontendformatprüfung bestanden. Zwei DE/EN-Titelgegenfälle scheiterten vorher am fehlenden sichtbaren Bezeichner. Der Name folgt jetzt dem tatsächlich angezeigten Meeting, nicht einem unbestätigten Einrichtungsentwurf, und bleibt bei geschlossener Einrichtung sichtbar. Meter- und Agentensteuerungsschutz bleiben erhalten. Zwei Testworker, unveränderte Fristen. Frühere 406/399/395/391/385 Zahlen sind historisch. |
 | Projektprüfung | Vorherige veröffentlichte Stände bestanden 47 PCM-, 35 Notizen-, 28 Vorlagen-, acht Agenten- und Monitorprüfungen. Für jede Quellveröffentlichung nach dem letzten Dokumentedit erneut vor Upload erforderlich. |
-| Echte lokale Referenzen | Frisch bestanden: Deutsch 112.0512475 s und Englisch 122.7768458 s, jeweils 0 reguläre Validierungswiederholungen. Positive Aufgabe, unverbindliche Aussage, Impulserhalt, menschlicher Status nach Protokolländerung und bytegleiche Wiederöffnung bestanden. Wörtliches englisches „I’ll“ bleibt erhalten. Eine vollständig validierte Wiederholung je Anfrage bleibt zulässig; null Wiederholungen sind keine Freigabeschwelle. Frühere Modellreferenzen sind historische Belege. Die vier konkreten Erledigt-Kontraktionen wurden zusätzlich kontrolliert über die tatsächliche Validierungs-/Speicherschnittstelle geprüft; die realen Referenztexte bleiben unverändert. |
+| Echte lokale Referenzen | Frisch bestanden: Deutsch 93.1802408 s mit 0 regulären Validierungswiederholungen, Englisch 131.2533023 s mit 1. Die vorab unverändert erlaubte vollständig validierte Wiederholung je Anfrage wurde nicht erhöht; null Wiederholungen sind keine Freigabeschwelle. Die konkrete Ursache des englischen Zwischenversuchs wurde vom Referenzhelfer nicht separat gespeichert und wird nicht erfunden. Positive Aufgabe, unverbindliche Aussage, Impulserhalt, menschlicher Status nach Protokolländerung und bytegleiche Wiederöffnung bestanden. Wörtliches „I’ll“ bleibt erhalten. Die negativen Erledigt-Aussagen wurden zusätzlich kontrolliert über die tatsächliche Validierungs-/Speicherschnittstelle geprüft; reale Referenztexte bleiben unverändert. Frühere Referenzen bleiben historisch. |
 | Paketregression | 21 Prüfungen auf `91f0985`; Paketdateien seitdem unverändert. Tatsächlich erzeugter synthetischer ZIP prüft Streaming- oder Batchhinweis, Launcher, Fingerprint und Nichtüberschreibung. Kein lokales Produktpaket oder Installer daraus bereitgestellt. |
 | Kontrolliertes Langsammodell | Auf `35d53e8`: 244.33 s Gesamtlauf, 210 s SSE-Antwortpause, nächster Refresh nach 210.0421383 s, maximal eine Modellanfrage, ein erhaltener Impuls. 3737920 Samples je Spur / 16000 Hz = 233.62 s je Spur. Beide PCM-Schreiber liefen nach Auswertungsstopp weiter. Hier nicht erneut ausgeführt. |
-| Sidebar im Browser | Auf `b387093`, hier nicht erneut ausgeführt: 24 tatsächliche Layoutabläufe plus 24 kombinierte Warn-Titel: 390/740/1280 Pixel, DE/EN, hell/dunkel, ein-/ausgeklappt; Titel zusätzlich stilles/stummes Mikrofon mit Aufnahmewarnung und Rückstand. Eigener Server/Browser beendet, keine Seiten-/Konsolenfehler, Fremdanfragen oder horizontalen Überläufe. Die Titelattribute stammen aus dem tatsächlichen Browser-DOM; kein nativer OS-Tooltip- oder Screenreader-Sprachnachweis. |
+| Sidebar und klassische Ansicht im Browser | Frisch 24 tatsächliche Layoutabläufe, 24 kombinierte Warn-Titel und 24 Meetingtitel-Zustände: 390/740/1280 Pixel, DE/EN, hell/dunkel, ein-/ausgeklappt. Langer Meetingname bleibt einzeilig, im Fenster und mit vollständigem Titelattribut zugänglich; Einrichtung bleibt geschlossen. Eigener Server/Browser beendet, keine Seiten-/Konsolenfehler, Fremdanfragen oder horizontalen Überläufe. Zwei Screenshots visuell geprüft. Nur synthetische Komponenten-/DOM-Prüfung, kein nativer OS-Tooltip-, IPC-, Aufnahme- oder Screenreader-Sprachnachweis. |
 
 Die echten Referenzen verwendeten ausschließlich synthetischen Text und das vorhandene
 **google/gemma-4-e4b Q4_K_M**, 6.326.936.720 Modellbytes, laufendes LM Studio mit Dateiversion **0.4.26+4**,
@@ -70,7 +71,7 @@ wurden keine neuen Working-Set-, Private-Bytes- oder Grafikspeicherwerte erhoben
 
 Der Browserlauf verwendete vorhandenes Edge **156.0.4314.58** und Playwright **1.57.0** unter
 Windows 11. Wiederholbarer Aufruf: `python -X utf8 scripts/check-sidebar-browser.py --browser msedge`.
-Er verwendet tatsächliche Sidebar-/RecordingStatus-Komponenten, eigene synthetische Daten und
+Er verwendet tatsächliche Sidebar-/RecordingStatus-/MeetingView-Komponenten, eigene synthetische Daten und
 einen eigenen lokalen Server. Er installiert nichts und hat keinen Zugriff auf native Aufnahme,
 Modellsteuerung oder Nutzermeetings. CPU 25 Prozent und RAM 2/8 GiB sind Fixturewerte,
 keine Messung des Rechners. Die bestehende CI wurde dafür nicht umkonfiguriert.
@@ -268,6 +269,48 @@ Die zwei sauberen Codex-Codequittungen auf dem vorherigen `87eba39` sind
 Der vollständige CodeRabbit-Lauf war wegen des gültigen Titelbefunds kein sauberer Abschluss.
 Die folgende reine UI-/Prüferkorrektur benötigt eigene frische Reviews und CI auf ihrem Head.
 Die damaligen Rust-/Modellnachweise bleiben ihrem `87eba39`-Stand zugeordnet; die obige aktuelle Tabelle weist die erneut ausgeführten Rusttests getrennt aus.
+
+## Negative Abschlüsse und kompakte Meetingkennung
+
+Die zweite [Codex-Runde auf `1d96f95`](https://github.com/Puma7/meeting-for-handy/pull/41#pullrequestreview-5787097066)
+fand einen gültigen P2-Befund: „Ich habe nichts verschickt.“, „I've sent nothing.“ und
+„We have completed none of the reports.“ konnten eine bestehende Aufgabe schließen.
+Sieben deutsche/englische Varianten mit geraden oder typografischen Apostrophen reproduzierten
+die falsche Annahme über die tatsächliche Validierung und Speicherung vor der Korrektur.
+Der terminale Erledigt-Filter lehnt jetzt die vollständigen Wörter nichts, nothing und none ab.
+Dies ändert ausschließlich den Abschlussfilter; gemeinsame Entscheidungs-/Rücknahmeregeln und
+die allgemeine Aufgabenklassifikation werden nicht pauschal erweitert. Nonetheless bleibt ein
+anderes Wort und ein positiver Gegenfall. Negative Antworten lassen den Zustand und jeden
+bereits gespeicherten Checkpoint unverändert; positive Kontraktionen und ausgeschriebene
+Abschlüsse erhalten wörtliche Belege und wiederholt identische Wiederöffnung. Dies bleibt
+eine begrenzte konservative Wortprüfung, kein vollständiger semantischer Nachweis.
+
+Der vollständige [CodeRabbit-Lauf auf demselben Head](https://github.com/Puma7/meeting-for-handy/pull/41#pullrequestreview-5787093564)
+prüfte alle 100 zulässigen Dateinamen gegen 102 vollständig paginierte Patches. Er fand noch
+einen tatsächlichen Bedienungsfehler: Die klassische Ansicht zeigte den Namen des angezeigten
+Meetings nur über die geschlossene Einrichtung. Der Name steht jetzt kompakt in der bereits
+vorhandenen Aktionszeile. Die vom Nutzer gewünschte Entfernung des großen zusätzlichen
+Titelblocks bleibt erhalten. Lange Namen werden einzeilig gekürzt und behalten den vollen
+Titel im DOM/Titelattribut; es entsteht keine neue große Überschrift. Zwei tatsächliche
+DE/EN-Vorherfälle sind danach bestanden, einschließlich Namenswechsel ohne Öffnen der
+Einrichtung und ohne Verwechslung mit einem unbestätigten Entwurf. Die neue tatsächliche
+Browserprüfung ist oben ausgewiesen. Der zweite Browserlauf bewahrt zusätzlich die bisherigen
+LF-Zeilenenden des Prüfers; der erste erfolgreiche Lauf bleibt als Zwischenbeleg erhalten.
+
+Die zwei neuen Titelgegenfälle sind in einer bereits vollständig geprüften UI-Testdatei
+gebündelt. Die ursprüngliche Pegel-Testsuite bleibt bytegleich erhalten; kein fachlicher Test
+und keine Frist wurde entfernt oder gelockert. Der Uploadwächter stoppte den ersten Versuch
+vor Commit und Push, weil eine zusätzlich geänderte Datei das unveränderte Anbieterkontingent
+überschritten hätte. Der frühere 407-Testlauf und die Vorbereitung bleiben Zwischenbelege;
+abschließend bestehen 408 UI-Fälle in 21 Dateien. Beide eingeordneten Titelgegenfälle wurden
+nochmals gegen dieselben historischen Komponentenbytes reproduziert und danach bestanden.
+
+Die erste Codex-Runde auf `1d96f95` war sauber, die zweite nicht. Der vollständige CodeRabbit-
+Lauf hatte Risiko Low mit genau dieser verbliebenen Titelanmerkung und war ebenfalls kein
+sauberer Abschluss. Dokumentationsquote 85,27 Prozent bei unveränderter 80-Prozent-Grenze;
+eine separate Architekturwertung wurde nicht geliefert. Die zusätzliche LanguageTool-Prüfung
+blieb unvollständig, Ursache unbekannt. Die folgende Veröffentlichung benötigt erneut eigene
+frische saubere Reviews und CI auf ihrem endgültigen Head.
 
 ## Kontrahierte englische Erledigt-Meldungen
 

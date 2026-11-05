@@ -13,6 +13,96 @@ import type { DesktopApi, Meeting } from "../types";
 import { LiveWorkspace } from "./shell/LiveWorkspace.jsx";
 import { fitColumn } from "./shell/fitOverview.mjs";
 import { workspaceText } from "./shell/workspaceLocale.jsx";
+import MeetingView from "../views/MeetingView";
+import { de, en, extraDe, extraEn } from "../i18n";
+
+it.each(["de", "en"] as const)(
+  "keeps the classic displayed meeting identity outside closed setup (%s)",
+  (locale) => {
+    const meeting: Meeting = {
+      id: "synthetic-identity",
+      title: "Actual displayed meeting",
+      startedAt: "2026-11-05T10:00:00Z",
+      durationMs: 65000,
+      status: "recording",
+      modelId: "synthetic",
+      parts: [],
+      warnings: [],
+    };
+    const noop = vi.fn();
+    const props = {
+      t: locale === "de" ? de : en,
+      x: locale === "de" ? extraDe : extraEn,
+      locale,
+      app: null,
+      meeting,
+      recording: true,
+      isStopping: false,
+      busy: false,
+      connected: false,
+      title: "Uncommitted setup draft",
+      defaultTitle: "Synthetic",
+      devices: [],
+      models: [],
+      modelId: "synthetic",
+      systemId: "synthetic",
+      micId: "",
+      micEnabled: false,
+      controlsAvailable: false,
+      savedFile: null,
+      copied: false,
+      backlog: null,
+      recentParts: [],
+      onAnalyse: noop,
+      onOpenFolder: noop,
+      onExport: noop,
+      onPause: noop,
+      onMute: noop,
+      setTitle: noop,
+      setModelId: noop,
+      setSystemId: noop,
+      setMicId: noop,
+      setMicEnabled: noop,
+      refreshHandy: noop,
+      refreshDevices: noop,
+      start: noop,
+      stop: noop,
+      resume: noop,
+      copyFullTranscript: noop,
+      savedByTrack: () => 0,
+    };
+    const mounted = render(<MeetingView {...props} />);
+    try {
+      const label =
+        locale === "de" ? "Angezeigtes Meeting" : "Displayed meeting";
+      const identity = screen.getByLabelText(label);
+      expect(identity.textContent).toBe(meeting.title);
+      expect(identity.getAttribute("title")).toBe(meeting.title);
+      expect(identity.closest("details")).toBeNull();
+      expect(identity.closest(".meeting-quick-actions")).toBeTruthy();
+      const setup = mounted.container.querySelector(
+        "details.setup-details",
+      ) as HTMLDetailsElement;
+      expect(setup.open).toBe(false);
+      mounted.rerender(
+        <MeetingView
+          {...props}
+          meeting={{ ...meeting, title: "Renamed actual meeting" }}
+        />,
+      );
+      expect(screen.getByLabelText(label).textContent).toBe(
+        "Renamed actual meeting",
+      );
+      expect(screen.getByLabelText(label).textContent).not.toContain(
+        props.title,
+      );
+      expect(setup.open).toBe(false);
+      expect(noop).not.toHaveBeenCalled();
+    } finally {
+      mounted.unmount();
+    }
+  },
+);
 
 it.each([
   ["de", 120000],

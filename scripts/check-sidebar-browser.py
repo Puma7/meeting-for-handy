@@ -1,4 +1,4 @@
-"""Check actual Sidebar/RecordingStatus layout with installed Playwright 1.57.0.
+"""Check actual Sidebar/RecordingStatus/MeetingView layout with installed Playwright 1.57.0.
 
 Run from the repository: python scripts/check-sidebar-browser.py --browser msedge
 Requires existing desktop npm dependencies, Node and an installed browser. This
@@ -55,7 +55,8 @@ def main():
         'import {createRoot} from "react-dom/client";',
         f'import Sidebar from {json.dumps(source + "/src/views/Sidebar.tsx")};',
         f'import RecordingStatus from {json.dumps(source + "/src/views/RecordingStatus.tsx")};',
-        f'import {{de,en}} from {json.dumps(source + "/src/i18n.ts")};',
+        f'import MeetingView from {json.dumps(source + "/src/views/MeetingView.tsx")};',
+        f'import {{de,en,extraDe,extraEn}} from {json.dumps(source + "/src/i18n.ts")};',
         f'import {json.dumps(source + "/src/styles.css")};',
     ])
     body = r'''
@@ -79,7 +80,16 @@ createRoot(document.getElementById("root")).render(<div className="app-shell">
   <Sidebar app={{version:"synthetic",recording:true}} page="meeting" locale={locale}
     theme={theme} t={locale === "de" ? de : en} navigate={async () => {}}
     setTheme={() => {}} setLocale={() => {}} recordingStatus={status} />
-  <main><h1>Synthetic meeting</h1><p>No native IPC, audio or model service.</p></main>
+  <main><MeetingView t={locale === "de" ? de : en} x={locale === "de" ? extraDe : extraEn}
+    locale={locale} app={{version:"synthetic",recording:true}} meeting={{id:"synthetic-browser-meeting", title:"Synthetic current meeting — a deliberately long displayed recording identifier for compact layout and full-title access", durationMs:65000, status:"recording",parts:[],warnings:[]}}
+    recording={true} isStopping={false} busy={false} connected={true} title="Uncommitted setup draft" defaultTitle="Synthetic"
+    devices={[{id:"synthetic-system",source:"system",name:"Synthetic output"},{id:"synthetic-mic",source:"microphone",name:"Synthetic microphone"}]}
+    models={[{id:"synthetic-model",name:"Synthetic model"}]} modelId="synthetic-model" systemId="synthetic-system" micId="synthetic-mic" micEnabled={true}
+    controlsAvailable={false} copied={false} backlog={35000} recentParts={[]} savedFile={null}
+    onAnalyse={()=>{}} onOpenFolder={()=>{}} onExport={()=>{}} onPause={()=>{}} onMute={()=>{}}
+    setTitle={()=>{}} setModelId={()=>{}} setSystemId={()=>{}} setMicId={()=>{}} setMicEnabled={()=>{}}
+    refreshHandy={()=>{}} refreshDevices={()=>{}} start={()=>{}} stop={()=>{}} resume={()=>{}} copyFullTranscript={()=>{}} savedByTrack={()=>0}
+  /></main>
 </div>);
 '''
     (fixture / "main.jsx").write_text(imports + "\n" + body, encoding="utf8")
@@ -96,13 +106,16 @@ export default {{root:{json.dumps(fixture.as_posix())},plugins:[react()],
     config_path = output / "vite.config.mjs"
     config_path.write_text(config, encoding="utf8")
     files = ["apps/desktop/src/views/Sidebar.tsx", "apps/desktop/src/views/RecordingStatus.tsx",
+             "apps/desktop/src/views/MeetingView.tsx", "apps/desktop/src/views/MeetingFiles.tsx",
+             "apps/desktop/src/views/AudioSources.tsx", "apps/desktop/src/views/RecordingControls.tsx",
+             "apps/desktop/src/views/TranscriptBody.tsx", "apps/desktop/src/views/SessionWarnings.tsx",
              "apps/desktop/src/styles.css", "apps/desktop/src/handy-theme.css", "apps/desktop/src/i18n.ts",
              "scripts/check-sidebar-browser.py"]
     report = {"at": datetime.now(timezone.utc).isoformat(), "synthetic": True,
-              "actualSidebarAndRecordingStatus": True, "nativeIPCOrDeviceTest": False,
+              "actualSidebarAndRecordingStatus": True, "actualClassicMeetingView": True, "nativeIPCOrDeviceTest": False,
               "playwright": installed, "appVersion": json.loads((desktop / "package.json").read_text())["version"],
               "sourceHashes": {name: hashlib.sha256((root / name).read_bytes()).hexdigest() for name in files},
-              "rows": [], "warningTooltips": [], "pageErrors": [], "consoleErrors": [], "foreignRequests": [], "success": False}
+              "rows": [], "warningTooltips": [], "meetingTitles": [], "pageErrors": [], "consoleErrors": [], "foreignRequests": [], "success": False}
     server = worker = None
     try:
         with (output / "build.log").open("w", encoding="utf8") as log:
@@ -166,6 +179,17 @@ export default {{root:{json.dumps(fixture.as_posix())},plugins:[react()],
                                     assert box["y"] + box["height"] <= 901, box
                                     assert page.evaluate("document.documentElement.scrollWidth <= innerWidth"), "Horizontal overflow"
                                     assert page.evaluate("window.__sidebarBrowserFixture.loadCalls > 0")
+                                    meeting_title = page.locator(".meeting-current-title")
+                                    expect(meeting_title).to_be_visible()
+                                    actual_title = meeting_title.text_content()
+                                    assert actual_title.startswith("Synthetic current meeting")
+                                    assert meeting_title.get_attribute("title") == actual_title
+                                    assert "Uncommitted" not in actual_title
+                                    assert page.locator("details.setup-details").get_attribute("open") is None
+                                    title_box = meeting_title.bounding_box()
+                                    assert title_box and 0 < title_box["height"] <= 32, title_box
+                                    assert title_box["x"] >= -1 and title_box["x"] + title_box["width"] <= width + 1, title_box
+                                    report["meetingTitles"].append({"width":width,"locale":locale,"theme":theme,"collapsed":collapsed,"title":actual_title,"box":title_box,"setupClosed":True})
                                     report["rows"].append({"width": width, "height": 900, "locale": locale,
                                                            "theme": theme, "collapsed": collapsed, "flyout": box,
                                                            "noHorizontalOverflow": True})
@@ -189,6 +213,7 @@ export default {{root:{json.dumps(fixture.as_posix())},plugins:[react()],
                                 context.close()
                 assert len(report["rows"]) == 24
                 assert len(report["warningTooltips"]) == 24
+                assert len(report["meetingTitles"]) == 24
                 assert not report["pageErrors"] and not report["consoleErrors"] and not report["foreignRequests"], report
                 report["success"] = True
             finally:
@@ -206,7 +231,7 @@ export default {{root:{json.dumps(fixture.as_posix())},plugins:[react()],
         with (output / "result.json").open("x", encoding="utf8") as proof:
             json.dump(report, proof, indent=2)
         print(json.dumps({"success": report["success"], "flows": len(report["rows"]), "warningTooltips": len(report["warningTooltips"]),
-                          "proof": str(output / "result.json"), "ownedServerStopped": report["ownedServerStopped"]}))
+                          "meetingTitles": len(report["meetingTitles"]), "proof": str(output / "result.json"), "ownedServerStopped": report["ownedServerStopped"]}))
 
 
 if __name__ == "__main__":
