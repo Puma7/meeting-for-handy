@@ -334,6 +334,8 @@ fn explicit_task_refusals_cannot_publish_new_work_but_affirmations_remain_valid(
         ),
         ("Not a problem, I will not email the report.", false),
         ("Ich übernehme keine Sorgepflicht für den Bericht.", false),
+        ("I won’t email the report.", false),
+        ("Not a problem, I won’t email the report.", false),
     ] {
         let (mut state, mut request, mut answer) = setup();
         let before = serde_json::to_vec(&state).unwrap();

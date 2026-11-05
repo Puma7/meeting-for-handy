@@ -299,9 +299,10 @@ const AFFIRMING_NEGATIONS: &[&str] = &[
 ];
 
 /// Remove whole affirming phrases while keeping every independent refusal word.
+/// Apostrophe normalization is only for screening; original evidence stays literal.
 /// A longer word such as "Sorgepflicht" must not turn a refusal into a promise.
 fn without_affirming_negations(text: &str) -> String {
-    let mut text = text.to_owned();
+    let mut text = text.replace('’', "'");
     let part_of_word = |c: char| c.is_alphanumeric() || c == '_';
     for phrase in AFFIRMING_NEGATIONS {
         let ranges: Vec<_> = text
@@ -494,6 +495,8 @@ mod generation_tests {
             "Keine Sorge, ich verspreche nicht, den Bericht zu schreiben.",
             "Not a problem, I will not email the report.",
             "Ich übernehme keine Sorgepflicht für den Bericht.",
+            "I won’t email the report.",
+            "Not a problem, I won’t email the report.",
         ] {
             let checked = check(quote, "Bericht übernehmen", Kind::Tasks);
             assert!(checked.items.is_empty(), "{quote}");
@@ -536,6 +539,7 @@ mod generation_tests {
             "Keine Sorge, ich schreibe den Bericht.",
             "Not a problem, I will email the report.",
             "Kein Problem: Ich werde den Bericht nicht vergessen.",
+            "I won’t forget to email the report.",
         ] {
             assert_eq!(
                 check(quote, "Bericht übernehmen", Kind::Tasks).items.len(),

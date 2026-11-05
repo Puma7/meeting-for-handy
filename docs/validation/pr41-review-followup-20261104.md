@@ -32,7 +32,7 @@ Der vollständige TEST_REPORT bleibt byteunverändert; er wurde für diese Nacha
 | Rustformat / Clippy | Auf diesem Korrekturstand frisch bestanden; gesperrte Abhängigkeiten und Warnungen als Fehler. |
 | Oberfläche | 375 Tests, TypeScript, Produktionsbuild und vollständiger Formatcheck unter src auf `aa63003` bestanden. Alle Frontend-/Typ-/Abhängigkeitsbytes sind gegenüber diesem Stand unverändert, nicht lokal erneut geprüft. Die dortige letzte gemischte Zeile einer Typdeklaration wurde nur von CRLF zu LF vereinheitlicht; Deklarationstoken unverändert. |
 | Projektfreigabe | `verify.ps1` vor jeder Bereitstellung: 47 PCM-, 35 Notizen-, 28 Vorlagen-, acht Agenten- und Monitorprüfungen bestanden. Der folgende Quellupload bleibt an einen abschließenden erfolgreichen Lauf gebunden. |
-| Echte lokale Referenzen Deutsch und Englisch | Auf dem aktuellen Zusagen-Korrekturstand: Deutsch 97,4512424 s und Englisch 109,821368 s, beide ohne Validierungswiederholung. Beide Läufe bestanden positive Aufgabe, unverbindliche Aussage, Impulserhalt, menschlichen Status nach Protokolländerung und bytegleiche Wiederöffnung. Der vorherige `5c7d6ab` bestand DE 126,1410333 s mit einer regulär zulässigen, vollständig validierten Wiederholung und EN 106,4012813 s ohne Wiederholung. Diese und die früheren `aa63003`-Läufe bleiben historische Nachweise. Die vorhandene Wiederholungsregel wurde nicht verändert; null Wiederholungen sind keine Freigabeschwelle. |
+| Echte lokale Referenzen Deutsch und Englisch | Auf dem aktuellen Apostroph-Korrekturstand: Deutsch 110,635574 s und Englisch 124,6478209 s, beide ohne Validierungswiederholung. Beide Läufe bestanden positive Aufgabe, unverbindliche Aussage, Impulserhalt, menschlichen Status nach Protokolländerung und bytegleiche Wiederöffnung. Der vorherige `b197aaa` bestand DE 97,4512424 s und EN 109,821368 s ohne Wiederholung; `5c7d6ab` bestand DE 126,1410333 s mit einer regulär zulässigen vollständig validierten Wiederholung und EN 106,4012813 s ohne Wiederholung. Alle früheren Läufe bleiben historische Nachweise. Die vorhandene Wiederholungsregel wurde nicht verändert; null Wiederholungen sind keine Freigabeschwelle. |
 | Frühere lokale Referenzen | Deutsch 100,9989873 s und Englisch 125,0518623 s auf dem Elternstand `3d4d013`, jeweils ohne Validierungswiederholung. Die deutsche Zusage enthält tatsächlich „jedenfalls“. Diese Läufe werden nicht als erneut ausgeführt ausgegeben. |
 | Langsammodell / zwei Spuren | Auf dem früheren `aa63003` ausdrücklich ausgeführter besonderer Test, hier nicht erneut ausgeführt: 244,32 s Laufzeit, 210 s kontrollierte SSE-Antwortpause, nächster Refresh nach 210,0415725 s, maximal eine Modellanfrage, ein erhaltener Impuls. Samples je Spur 3758720/3758720, jeweils geteilt durch 16.000 Hz = 234,92/234,92 s. Beide dauerhaften PCM-Schreiber liefen nach dem Auswertungsstopp weiter. Worker-, Transport-, Audio-Schreiber- und Slow-Fixture-Dateien bleiben byteunverändert. Der danach korrigierte Import wird durch vier Persistenzfälle geprüft; die gemeinsame Zusagenprüfung ist ebenfalls nach diesem Langsamtest geändert worden. Dieser historische Lauf wird ausdrücklich nicht als erneute Prüfung dieser Änderungen ausgegeben. Frühere Läufe auf `1768125` und `3d4d013` bleiben erhalten. |
 | Browsergegenprüfung | Auf `aa63003` mit tatsächlichen Sidebar-/RecordingStatus-Komponenten und synthetischen Werten bei 390/740/1280 px: vorher aufgeklappt nur 50 px Sprachauswahl in schmalen Fenstern, nachher 161 px und vollständig lesbarer Text. Aufnahmestatus sichtbar, kein horizontaler Überlauf, Ein-/Ausklappen und Rechnerdetails erreichbar, keine Seitenfehler. Frontendbytes bleiben unverändert, nicht wiederholt. Kein nativer IPC- oder Gerätezugriff. |
@@ -235,7 +235,7 @@ Auswertungsweg. Die gemeinsame Prüfung erkennt nun die festen Redewendungen „
 „keine Sorge“ und „not a problem“ als ganze Wörter. Unabhängige Ablehnungen bleiben erhalten;
 ein längeres Wort wie „Sorgepflicht“ wird nicht versehentlich herausgeschnitten.
 
-Die bestehenden öffentlichen Regressionen prüfen jetzt 20 Workspace- und 19 klassische Fälle,
+Auf diesem Zwischenstand prüften die öffentlichen Regressionen 20 Workspace- und 19 klassische Fälle,
 darunter 18 neue Varianten mit Großschreibung, Satzzeichen, positiver Zusage, nachfolgender Ablehnung
 und Wortgrenzen. Abgewiesene Workspace-Antworten lassen den ganzen Zustand byteunverändert.
 Zehn synthetische ältere klassische Checkpoints bleiben beim strikten Lesen bytegleich;
@@ -248,6 +248,26 @@ ausdrücklich zurückgenommen. Er war kein weiterer belegter Fehler. Die damalig
 Codex-Runden bleiben historische Nachweise; die vollständige CodeRabbit-Runde war nicht sauber.
 LanguageTool konnte dort nicht jeden Textchunk prüfen; diese Hilfsanalyse wird nicht als vollständig
 ausgegeben. Es fehlte jedoch kein Dateipatch in der eigentlichen vollständigen Quellprüfung.
+
+## Typografischer Apostroph in englischer Ablehnung
+
+Eine eigene weitere Gegenprüfung reproduzierte im klassischen Weg einen echten Fehler:
+„I won’t email the report“ wurde mit typografischem Apostroph als Aufgabe zugelassen,
+während die bereits unterstützte Schreibweise „won't“ abgewiesen wurde. Der Workspace wies
+beide neuen Ablehnungsfälle bereits vor dieser Korrektur ab; ihm wird kein Vorherfehler zugerechnet.
+
+Nur der temporäre Prüftext vereinheitlicht jetzt den typografischen Apostroph.
+Originalzitate, Quellen und gespeicherte Ergebnisse werden dadurch nicht umgeschrieben.
+Die Regression prüft jetzt 22 Workspace- und 22 klassische Fälle, darunter fünf zusätzliche
+Ablehnungs-/Kontrollvarianten. „I won’t forget to email the report“ bleibt als positiver Gegenfall
+zulässig. Zwölf synthetische ältere klassische Checkpoints behalten ihre exakten JSON-Bytes.
+Nach dem echten Vorherfehler bestehen alle 149 Notizen- und 545 Workspace-/All-Target-Rusttests.
+Die Standardreferenzen mit echtem lokalen Modell und die gezielten Apostroph-Regressionsfälle
+sind getrennte Nachweise; keine neue sprachliche Vollständigkeitsgarantie wird daraus abgeleitet.
+
+Die zwei sauberen Codex-Runden auf `b197aaa` bleiben historische Nachweise. Eine neue vollständige
+CodeRabbit-Runde war dort noch nicht angefordert; Reviews müssen auf dem letzten Korrekturstand
+erneut tatsächlich abschließen.
 
 ## Reviewabdeckung und Veröffentlichung
 
