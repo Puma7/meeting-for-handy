@@ -1,4 +1,5 @@
 use super::model::*;
+use crate::validation::embedded_english_question;
 use anyhow::{ensure, Context, Result};
 use std::collections::{HashMap, HashSet};
 
@@ -115,7 +116,7 @@ pub(crate) fn apply(
         }
         if c.kind == "task" && old.is_none() {
             ensure!(c.evidence.iter().any(|e|request.required_source_ids().contains(&e.source_id)),"Eine neue Aufgabe benötigt einen Beleg aus dem aktuellen Quellenfenster; ältere Aufgaben nicht duplizieren.");
-            ensure!(c.evidence.iter().any(|e|task_quote_allowed(&e.quote)) && !c.evidence.iter().any(|e|missing_pledge(&e.quote)),"Eine neue Aufgabe benötigt eine ausdrückliche Übernahme oder Zuweisung. Eine fehlende Zusage ist keine Aufgabe.");
+            ensure!(c.evidence.iter().any(|e|task_quote_allowed(&e.quote)) && !c.evidence.iter().any(|e|task_missing_pledge(&e.quote)),"Eine neue Aufgabe benötigt eine ausdrückliche Übernahme oder Zuweisung. Eine fehlende Zusage ist keine Aufgabe.");
         }
         if c.kind == "agenda" {
             ensure!(c.text.is_none(), "Agendatext gehört dem Menschen.");
@@ -787,99 +788,20 @@ pub(super) fn missing_pledge(quote: &str) -> bool {
     .iter()
     .any(|s| text.contains(s))
 }
-/// Recognize a bounded question complement only after an explicit English assertion.
-fn embedded_english_question(words: &[&str], index: usize, assertion_end: Option<usize>) -> bool {
-    assertion_end.is_some_and(|end| index > end)
-        && words[index] == "if"
-        && ["check", "ask"].contains(&words[index - 1])
+/// Missing promises outside the checked subject still block new work; agenda screening is separate.
+fn task_missing_pledge(quote: &str) -> bool {
+    missing_pledge(&crate::validation::commitment_assertion_text(quote))
 }
 
 /// Require a positive obligation in the literal quote; a wish or missing approval is insufficient.
 pub(super) fn task_quote_allowed(quote: &str) -> bool {
-    // Normalize temporary admission text only; original quotes and IDs stay literal.
+    // Temporary classification text only: literal evidence and saved IDs are unchanged.
     let text = quote.to_lowercase().replace('’', "'");
-    let english_pledges = [
-        "i promise to ",
-        "we promise to ",
-        "i commit to ",
-        "we commit to ",
-        "i will ",
-        "we will ",
-        "i'll ",
-        "we'll ",
-        "i take ",
-        "we take ",
-        "takes on ",
-        "will handle",
-        "will prepare",
-        "will send",
-        "is assigned",
-        "are assigned",
-        "commits to",
-    ];
-    let words: Vec<_> = text
-        .split(|c: char| !c.is_alphabetic())
-        .filter(|word| !word.is_empty())
-        .collect();
-    let english_pledge_end = english_pledges
-        .iter()
-        .filter_map(|phrase| {
-            text.find(phrase).map(|start| {
-                text[..start + phrase.len()]
-                    .split(|c: char| !c.is_alphabetic())
-                    .filter(|word| !word.is_empty())
-                    .count()
-            })
-        })
-        .min();
-    !missing_pledge(quote)
-        && !crate::validation::commitment_refused(quote)
+    !task_missing_pledge(quote)
+        && crate::validation::has_new_task_commitment(quote)
         && !text.contains('?')
-        && !words.iter().enumerate().any(|(index, word)| {
-            [
-                "niemand", "keiner", "nobody", "falls", "wenn", "sofern", "unless", "if",
-            ]
-            .contains(word)
-                && !embedded_english_question(&words, index, english_pledge_end)
-        })
-        && ([
-            "übernehme",
-            "übernimmt",
-            "übernehmen",
-            "ich werde",
-            "wir werden",
-            "ich schreibe",
-            "wir schreiben",
-            "schreibt ",
-            "ich erstelle",
-            "wir erstellen",
-            "erstellt ",
-            "ich prüfe",
-            "wir prüfen",
-            "prüft ",
-            "ich gebe",
-            "wir geben",
-            "ich kümmere",
-            "wir kümmern",
-            "ich erledige",
-            "wir erledigen",
-            "ich mache",
-            "wir machen",
-            "ich liefere",
-            "wir liefern",
-            "ich schicke",
-            "wir schicken",
-            "ich sende",
-            "wir senden",
-            "ich aktualisiere",
-            "wir aktualisieren",
-            "ich bestätige",
-            "wir bestätigen",
-            "ich verspreche",
-            "wir versprechen",
-            "beauftragt",
-        ]
-        .iter()
-        .any(|s| text.contains(s))
-            || english_pledges.iter().any(|s| text.contains(s)))
+        && (crate::validation::task_pledge_end(&text, crate::validation::GERMAN_TASK_PLEDGES)
+            .is_some()
+            || crate::validation::task_pledge_end(&text, crate::validation::ENGLISH_TASK_PLEDGES)
+                .is_some())
 }

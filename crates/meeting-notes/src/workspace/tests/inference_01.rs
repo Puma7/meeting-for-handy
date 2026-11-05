@@ -41,6 +41,63 @@ fn contracted_promises_reach_the_tasks_phase_with_literal_reopen_state() {
         ),
         ("I will not check if the report is ready.", false),
         ("I’ll not ask if the budget is approved.", false),
+        ("I will check that the report is not public.", true),
+        (
+            "Ich übernehme die Prüfung, ob der Bericht nicht öffentlich ist.",
+            true,
+        ),
+        ("I will check if the report is not public.", true),
+        ("I’ll ask whether there is no commitment yet.", true),
+        ("Ich prüfe, ob der Bericht nicht öffentlich ist.", true),
+        ("I will ensure that the report is not public.", true),
+        ("Robin prüft, ob der Bericht nicht öffentlich ist.", true),
+        ("Robin prüft, ob der Bericht öffentlich ist.", true),
+        ("I will check that nobody has published the report.", true),
+        (
+            "Ich prüfe, ob niemand den Bericht veröffentlicht hat.",
+            true,
+        ),
+        ("I will not check that the report is public.", false),
+        (
+            "Ich übernehme die Prüfung nicht, ob der Bericht öffentlich ist.",
+            false,
+        ),
+        ("Ich prüfe nicht, ob der Bericht öffentlich ist.", false),
+        (
+            "I will check that the report is not public, but I will not do the check.",
+            false,
+        ),
+        (
+            "Ich prüfe, ob der Bericht nicht öffentlich ist, aber ich prüfe nicht.",
+            false,
+        ),
+        (
+            "I will check that the report is not public; no commitment.",
+            false,
+        ),
+        (
+            "I will check that the report is not public and I will not do the check.",
+            false,
+        ),
+        (
+            "I will check if the report is not public if approval arrives.",
+            false,
+        ),
+        (
+            "I won’t forget to check that the report is not public.",
+            true,
+        ),
+        ("I won’t forget to check if the report is ready.", true),
+        ("I won’t forget to not check the report.", false),
+        (
+            "I won’t forget to check that the report is not public, but I won’t do the check.",
+            false,
+        ),
+        ("Robin will check if the report is ready.", true),
+        ("Robin will check that the report is not public.", true),
+        ("Robin will ask if the report is ready.", true),
+        ("Robin will not check if the report is ready.", false),
+        ("Robin will check the report if approval arrives.", false),
     ] {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         listener.set_nonblocking(true).unwrap();
@@ -96,7 +153,7 @@ fn contracted_promises_reach_the_tasks_phase_with_literal_reopen_state() {
                 phases.push(phase.clone());
                 let changes = if phase == "tasks" {
                     json!([{"proposalId":"p_promise","kind":"task","targetId":null,
-                        "targetRevision":null,"text":if original.contains("check") { "Check the report" } else if original.contains("ask") { "Ask about the budget" } else if original.contains("send") { "Send the report" } else { "Email the report" },"status":"open",
+                        "targetRevision":null,"text":if original.to_lowercase().contains("prüf") { "Bericht prüfen" } else if original.contains("check") || original.contains("ensure") { "Check the report" } else if original.contains("ask") { "Ask about the budget" } else if original.contains("send") { "Send the report" } else { "Email the report" },"status":"open",
                         "attention":"current","owner":null,"due":null,
                         "evidence":[{"sourceId":req["transcriptSources"][0]["id"],
                             "quote":original}],"relatedEntityIds":[]}])
@@ -138,7 +195,12 @@ fn contracted_promises_reach_the_tasks_phase_with_literal_reopen_state() {
             text: quote.into(),
         }];
         let pending = runner.pending(&texts);
-        let result = runner.update(&client, &pending, &AnalysisControl::default(), "en");
+        let language = if quote.to_lowercase().contains("prüf") {
+            "de"
+        } else {
+            "en"
+        };
+        let result = runner.update(&client, &pending, &AnalysisControl::default(), language);
         let phases = server.join().unwrap();
         result.unwrap_or_else(|error| panic!("{quote}: {error}"));
         let expected_phases = if allowed {

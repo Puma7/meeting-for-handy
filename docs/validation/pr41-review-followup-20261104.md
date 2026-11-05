@@ -1,8 +1,10 @@
 # PR 41: Validierungsstand
 
 Stand: 5. November 2026. Version: **1.1.0-beta.1**, unverändert.
-Diese Fassung verdichtet den Prüfvermerk. Sämtliche Produkt-, Test-, Prompt-, Abhängigkeits-,
-Konfigurations- und TEST_REPORT-Bytes bleiben gegenüber `aa72dbd` unverändert.
+Diese Fassung ergänzt die gemeinsame Aufgabenprüfung für negierte Prüfgegenstände.
+Native Validierung und die zugehörigen Rustregressionen sind aktualisiert. Frontend, Prompts,
+Transport, Audio/ASR, Modellreservierungen, Abhängigkeiten, Konfiguration und kompletter
+TEST_REPORT bleiben gegenüber dem jeweils benannten geprüften Elternstand byteunverändert.
 Der vollständige TEST_REPORT wurde nicht für diese Nacharbeit neu veröffentlicht.
 
 Die [ausführliche bisherige Fassung](https://github.com/Puma7/meeting-for-handy/blob/96109374c3fa7d72ed0a3cea68706a90280fc484/docs/validation/pr41-review-followup-20261104.md)
@@ -40,17 +42,17 @@ nicht protokolliert oder als Klartext gespeichert. Keine Nutzermeetings wurden f
 
 ## Prüfungen und genauer Bezug
 
-Die folgenden großen lokalen Prüfungen stammen vom Produktstand `aa72dbd`. Sie wurden für die
-späteren reinen Dokumentationskorrekturen nicht erneut ausgeführt. Produkt und Tests sind bytegleich.
-`verify.ps1` ist vor jedem weiteren Quellupload frisch erforderlich.
+Rust- und Modellprüfungen wurden nach der abschließenden nativen Korrektur frisch ausgeführt.
+Die nachfolgend ausdrücklich älteren Frontend-, Paket-, Browser- und Langsammodellnachweise
+werden nicht als erneut ausgeführt ausgegeben. `verify.ps1` ist vor Quellupload frisch erforderlich.
 
 | Prüfung | Tatsächliches Ergebnis |
 | --- | --- |
-| Rust-Workspace, alle Targets | 554 bestanden, darunter 155 Notizen- und 37 Providerprotokolltests. Drei bestehende besondere Einstiege regulär ignoriert. Der Zwischenlauf vor der zusätzlichen sofern-Korrektur ist kein endgültiger Nachweis. |
-| Rustformat und Clippy | Bestanden; gesperrte Abhängigkeiten, Warnungen als Fehler. |
-| Oberfläche | 395 Tests bestanden; TypeScript, Produktionsbuild und vollständige Frontendformatprüfung bestanden. 391 und 385 sind frühere Zwischenstände. |
-| Projektprüfung | Zuletzt vor der vorigen Dokumentationsveröffentlichung: 47 PCM-, 35 Notizen-, 28 Vorlagen-, acht Agenten- und Monitorprüfungen bestanden. Für diese Verdichtung erneut vor Upload erforderlich. |
-| Echte lokale Referenzen | Deutsch 94.6847179 s, Englisch 122.45862 s; beide ohne reguläre Validierungswiederholung. Positive Aufgabe, unverbindliche Aussage, Impulserhalt, menschlicher Status nach Protokolländerung und bytegleiche Wiederöffnung bestanden. Wörtliches englisches „I’ll“ bleibt erhalten. Eine vollständig validierte Wiederholung je Anfrage bleibt zulässig; null Wiederholungen sind keine Freigabeschwelle. |
+| Rust-Workspace, alle Targets | Nach der abschließenden Zusagenprüfung frisch 555 bestanden, darunter 156 Notizen- und 37 Providerprotokolltests. Drei bestehende besondere Einstiege regulär ignoriert. Frühere Zwischenläufe vor den zusätzlichen Affirmations- und Sprechergegenproben sind kein endgültiger Nachweis. |
+| Rustformat und Clippy | Auf diesem nativen Korrekturstand frisch bestanden; gesperrte Abhängigkeiten, Warnungen als Fehler. |
+| Oberfläche | 395 Tests, TypeScript, Produktionsbuild und vollständige Frontendformatprüfung auf `aa72dbd` bestanden. Sämtliche Frontend-Produktions-, Typ- und Testbytes sind seitdem unverändert; lokal nicht wiederholt. 391 und 385 sind frühere Zwischenstände. |
+| Projektprüfung | Vorherige veröffentlichte Stände bestanden 47 PCM-, 35 Notizen-, 28 Vorlagen-, acht Agenten- und Monitorprüfungen. Für diese native Korrektur nach dem letzten Dokumentedit erneut vor Upload erforderlich. |
+| Echte lokale Referenzen | Nach der abschließenden nativen Korrektur frisch: Deutsch 100.422829 s (0 reguläre Validierungswiederholungen), Englisch 122.1156325 s (0 Wiederholungen). Positive Aufgabe, unverbindliche Aussage, Impulserhalt, menschlicher Status nach Protokolländerung und bytegleiche Wiederöffnung bestanden. Wörtliches englisches „I’ll“ bleibt erhalten. Eine vollständig validierte Wiederholung je Anfrage bleibt zulässig; null Wiederholungen sind keine Freigabeschwelle. Frühere DE-/EN-Referenzen vor den abschließenden Affirmations- und Sprechergegenproben sind nicht dieser finale Nachweis. |
 | Paketregression | 21 Prüfungen auf `91f0985`; Paketdateien seitdem unverändert. Tatsächlich erzeugter synthetischer ZIP prüft Streaming- oder Batchhinweis, Launcher, Fingerprint und Nichtüberschreibung. Kein lokales Produktpaket oder Installer daraus bereitgestellt. |
 | Kontrolliertes Langsammodell | Auf `35d53e8`: 244.33 s Gesamtlauf, 210 s SSE-Antwortpause, nächster Refresh nach 210.0421383 s, maximal eine Modellanfrage, ein erhaltener Impuls. 3737920 Samples je Spur / 16000 Hz = 233.62 s je Spur. Beide PCM-Schreiber liefen nach Auswertungsstopp weiter. Hier nicht erneut ausgeführt. |
 | Sidebar im Browser | 24 Abläufe auf `35d53e8`: 390/740/1280 Pixel × Deutsch/Englisch × hell/dunkel × ausgeklappt/eingeklappt. Geöffnete Rechnerdetails innerhalb des Fensters, kein horizontaler Überlauf, keine Seiten-/Konsolenfehler oder fremden Anfragen; eigener Server beendet. Betroffene Komponenten und Prüferbytes unverändert, hier nicht wiederholt. |
@@ -71,7 +73,7 @@ keine Messung des Rechners. Die bestehende CI wurde dafür nicht umkonfiguriert.
 
 ## Tatsächlich abgeschlossene Plattformläufe
 
-Auf dem bytegleichen Produktstand `aa72dbd` bestanden alle **22** aktuellen Checks:
+Auf dem früheren Produktstand `aa72dbd`, vor der jetzigen Negationskorrektur, bestanden alle **22** damaligen Checks:
 **16 erfolgreich, sechs reguläre Skips**. Es wurde kein manueller CI-Neustart angefordert.
 Diese Ergebnisse bleiben diesem Head zugeordnet und werden nicht auf spätere Heads umgehängt.
 
@@ -82,6 +84,45 @@ Diese Ergebnisse bleiben diesem Head zugeordnet und werden nicht auf spätere He
 Für den endgültigen veröffentlichten Head bleiben dessen eigene CI und frische Reviewquittungen
 erforderlich. Spätere Ergebnisse und Links gehören in die PR-Beschreibung und den Abschlusskommentar,
 damit nachträgliche Verifikation keinen weiteren Produktcommit vortäuscht.
+
+## Negierte Prüfgegenstände und gemeinsame Aufgabenprüfung
+
+Der [Codex-Befund auf e80f576](https://github.com/Puma7/meeting-for-handy/pull/41#discussion_r4478440846)
+war gültig: „I will check that the report is not public.“ und „Ich übernehme die Prüfung,
+ob der Bericht nicht öffentlich ist.“ sind feste Zusagen. Die Verneinung gehört zum Gegenstand,
+nicht zur Übernahme. Sechs tatsächliche Runner-Vorherfälle übersprangen die Aufgabenphase,
+speicherten keine Aufgabe und markierten die Quellen dennoch als verarbeitet.
+Die klassische Antwortvalidierung reproduzierte acht Auslassungen einschließlich einer
+Aufgabe mit unverbindlichem Termin. Eine weitere echte Gegenprobe zeigte zwei falsche
+klassische Annahmen unabhängiger if-/sofern-Bedingungen.
+
+Schema-Zulassung und klassische Generierung verwenden jetzt dieselbe Zusagenprüfung.
+Sie betrachtet einen belegten untergeordneten Prüfgegenstand getrennt vom Übernahmeausdruck.
+Unabhängige Bedingungen behalten die konservative Gesamtprüfung. Nachfolgende Satzteile,
+Satzzeichen und Koordinationen bleiben im Negationsfilter, damit echte nachgestellte Absagen
+nicht versteckt werden. Das ist eine begrenzte Wort-/Satzteilheuristik, keine vollständige
+Sprach- oder Bedeutungsprüfung. Die Agendaprüfung fehlender Zusagen bleibt davon getrennt.
+
+Alle bisherigen Zusagenmarker bleiben erhalten und werden an Wortgrenzen erkannt, auch vor
+Satzzeichen wie bei „Robin prüft, ob …“. Die bereits klassisch anerkannte affirmative Form
+„I won’t forget to …“ bleibt auch zusammen mit that-/if-Prüfgegenständen erhalten.
+Die zusätzliche Vorhergegenprobe reproduzierte zwei Auslassungen in jedem der beiden Wege;
+auch diese Fälle sind korrigiert. Ein ausdrückliches „not check“ oder eine unabhängige
+won’t-/cannot-Absage bleibt gesperrt. Ein unverbindlicher Termin bleibt unbestätigt,
+selbst wenn die Aufgabe zulässig ist. Zuständige werden nicht erfunden.
+
+Zusätzliche Gegenproben reproduzierten in beiden Wegen drei Auslassungen bei
+„Robin will check if …“, „Robin will check that … not …“ und „Robin will ask if …“.
+Die beiden konkreten Zukunftsprädikate will-check/will-ask und ihre unmittelbare
+Satzteilgrenze sind jetzt berücksichtigt. Ein vorgeschaltetes „will not check“
+und eine unabhängige if-Bedingung bleiben abgelehnt; alle bisherigen Marker bleiben erhalten.
+
+Die tatsächlichen klassischen API- und Runner-/HTTP-Gegenfälle bestehen. Der Runner prüft
+die Aufgabenphase, wörtliche Originalbelege und bytegleiche Wiederöffnung; die klassische
+API prüft außerdem unbekannte Metadaten und abgelehnte unverbindliche Termine.
+Originalzitate werden nur vorübergehend zur Klassifikation normalisiert. Gespeicherte ältere
+Checkpoints werden weiterhin ausschließlich nach ihrem ursprünglichen Quellenvertrag gelesen,
+nicht mit neuen Generierungsregeln umgedeutet oder gefiltert.
 
 ## Reviewkorrekturen
 
@@ -116,7 +157,7 @@ Für den endgültigen Head sind eigene frische saubere Reviews erforderlich.
 
 Bei diesem früheren Lauf konnte LanguageTool nicht alle Textabschnitte prüfen.
 Die konkrete Ursache ist nicht bekannt; eine Größen- oder Zeitgrenze ist nicht nachgewiesen.
-Dieser kürzere Vermerk ist eine mögliche Entlastung, kein bereits bewiesener Tool-Fix.
+Auch der verdichtete Vermerk hatte noch unvollständige zusätzliche Sprachprüfung. Ein Tool-Fix oder eine Ursache ist damit nicht nachgewiesen.
 Eine vollständige Hauptreview-Auswahl beweist keine vollständige zusätzliche Sprachprüfung.
 Die nächste tatsächliche Runde muss ihren eigenen Status ausweisen; Tool und Regeln bleiben aktiv.
 
