@@ -98,6 +98,35 @@ fn contracted_promises_reach_the_tasks_phase_with_literal_reopen_state() {
         ("Robin will ask if the report is ready.", true),
         ("Robin will not check if the report is ready.", false),
         ("Robin will check the report if approval arrives.", false),
+        ("No one will check the report.", false),
+        ("No employee will send the report.", false),
+        ("Today no participant will prepare the report.", false),
+        ("Not a problem, no employee will send the report.", false),
+        ("I will check that no one has published the report.", true),
+        (
+            "I will ask whether no employee has published the report.",
+            true,
+        ),
+        (
+            "No problem, I will check that no one has published the report.",
+            true,
+        ),
+        ("No later than Friday, I will send the report.", true),
+        ("I will send the report no later than Friday.", true),
+        ("Das Protokoll wurde erstellt.", false),
+        ("Der Bericht ist erstellt.", false),
+        ("Der Bericht wurde erstellt .", false),
+        ("Das Protokoll ist erstellt, wie besprochen.", false),
+        ("Robin erstellt, wie vereinbart, den Bericht.", true),
+        ("Robin erstellt den Bericht.", true),
+        (
+            "Ich übernehme die Prüfung, ob das Protokoll erstellt ist.",
+            true,
+        ),
+        (
+            "Das Protokoll wurde erstellt, ich übernehme die Prüfung.",
+            true,
+        ),
     ] {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         listener.set_nonblocking(true).unwrap();

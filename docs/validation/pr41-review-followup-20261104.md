@@ -1,7 +1,8 @@
 # PR 41: Validierungsstand
 
 Stand: 5. November 2026. Version: **1.1.0-beta.1**, unverändert.
-Diese Fassung ergänzt die gemeinsame Aufgabenprüfung für negierte Prüfgegenstände.
+Diese Fassung ergänzt die gemeinsame Aufgabenprüfung für negierte Prüfgegenstände,
+negative Aufgabenträger und bereits erledigte Erstellung.
 Native Validierung und die zugehörigen Rustregressionen sind aktualisiert. Frontend, Prompts,
 Transport, Audio/ASR, Modellreservierungen, Abhängigkeiten, Konfiguration und kompletter
 TEST_REPORT bleiben gegenüber dem jeweils benannten geprüften Elternstand byteunverändert.
@@ -48,11 +49,11 @@ werden nicht als erneut ausgeführt ausgegeben. `verify.ps1` ist vor Quellupload
 
 | Prüfung | Tatsächliches Ergebnis |
 | --- | --- |
-| Rust-Workspace, alle Targets | Nach der abschließenden Zusagenprüfung frisch 555 bestanden, darunter 156 Notizen- und 37 Providerprotokolltests. Drei bestehende besondere Einstiege regulär ignoriert. Frühere Zwischenläufe vor den zusätzlichen Affirmations- und Sprechergegenproben sind kein endgültiger Nachweis. |
+| Rust-Workspace, alle Targets | Nach der abschließenden Zusagenprüfung frisch 555 bestanden, darunter 156 Notizen- und 37 Providerprotokolltests. Drei bestehende besondere Einstiege regulär ignoriert. Frühere Zwischenläufe vor den zusätzlichen Affirmations-, Sprecher- und Erledigt-Gegenproben sind kein endgültiger Nachweis. |
 | Rustformat und Clippy | Auf diesem nativen Korrekturstand frisch bestanden; gesperrte Abhängigkeiten, Warnungen als Fehler. |
 | Oberfläche | 395 Tests, TypeScript, Produktionsbuild und vollständige Frontendformatprüfung auf `aa72dbd` bestanden. Sämtliche Frontend-Produktions-, Typ- und Testbytes sind seitdem unverändert; lokal nicht wiederholt. 391 und 385 sind frühere Zwischenstände. |
 | Projektprüfung | Vorherige veröffentlichte Stände bestanden 47 PCM-, 35 Notizen-, 28 Vorlagen-, acht Agenten- und Monitorprüfungen. Für diese native Korrektur nach dem letzten Dokumentedit erneut vor Upload erforderlich. |
-| Echte lokale Referenzen | Nach der abschließenden nativen Korrektur frisch: Deutsch 100.422829 s (0 reguläre Validierungswiederholungen), Englisch 122.1156325 s (0 Wiederholungen). Positive Aufgabe, unverbindliche Aussage, Impulserhalt, menschlicher Status nach Protokolländerung und bytegleiche Wiederöffnung bestanden. Wörtliches englisches „I’ll“ bleibt erhalten. Eine vollständig validierte Wiederholung je Anfrage bleibt zulässig; null Wiederholungen sind keine Freigabeschwelle. Frühere DE-/EN-Referenzen vor den abschließenden Affirmations- und Sprechergegenproben sind nicht dieser finale Nachweis. |
+| Echte lokale Referenzen | Nach der abschließenden nativen Korrektur frisch: Deutsch 99.8768426 s (0 reguläre Validierungswiederholungen), Englisch 120.4560198 s (0 Wiederholungen). Positive Aufgabe, unverbindliche Aussage, Impulserhalt, menschlicher Status nach Protokolländerung und bytegleiche Wiederöffnung bestanden. Wörtliches englisches „I’ll“ bleibt erhalten. Eine vollständig validierte Wiederholung je Anfrage bleibt zulässig; null Wiederholungen sind keine Freigabeschwelle. Frühere DE-/EN-Referenzen vor den abschließenden Aufgabenträger- und Erledigt-Korrekturen sind nicht dieser finale Nachweis. |
 | Paketregression | 21 Prüfungen auf `91f0985`; Paketdateien seitdem unverändert. Tatsächlich erzeugter synthetischer ZIP prüft Streaming- oder Batchhinweis, Launcher, Fingerprint und Nichtüberschreibung. Kein lokales Produktpaket oder Installer daraus bereitgestellt. |
 | Kontrolliertes Langsammodell | Auf `35d53e8`: 244.33 s Gesamtlauf, 210 s SSE-Antwortpause, nächster Refresh nach 210.0421383 s, maximal eine Modellanfrage, ein erhaltener Impuls. 3737920 Samples je Spur / 16000 Hz = 233.62 s je Spur. Beide PCM-Schreiber liefen nach Auswertungsstopp weiter. Hier nicht erneut ausgeführt. |
 | Sidebar im Browser | 24 Abläufe auf `35d53e8`: 390/740/1280 Pixel × Deutsch/Englisch × hell/dunkel × ausgeklappt/eingeklappt. Geöffnete Rechnerdetails innerhalb des Fensters, kein horizontaler Überlauf, keine Seiten-/Konsolenfehler oder fremden Anfragen; eigener Server beendet. Betroffene Komponenten und Prüferbytes unverändert, hier nicht wiederholt. |
@@ -123,6 +124,38 @@ API prüft außerdem unbekannte Metadaten und abgelehnte unverbindliche Termine.
 Originalzitate werden nur vorübergehend zur Klassifikation normalisiert. Gespeicherte ältere
 Checkpoints werden weiterhin ausschließlich nach ihrem ursprünglichen Quellenvertrag gelesen,
 nicht mit neuen Generierungsregeln umgedeutet oder gefiltert.
+
+## Negative Aufgabenträger und erledigte Erstellung
+
+Die nächste vollständige Runde auf `2c93a72` fand zwei gültige Fehler:
+Der [Codex-Befund](https://github.com/Puma7/meeting-for-handy/pull/41#discussion_r4479537375)
+zeigte, dass „No one will check the report.“ oder „No employee will send the report.“
+fälschlich eine offene Aufgabe zuließen. Vier tatsächliche klassische Vorherfälle behielten
+eine Aufgabe; dieselben vier Runnerfälle starteten die tasks-Phase und speicherten Arbeit.
+Negative Aufgabenträger vor dem Übernahmeprädikat werden jetzt abgefangen. Der Prüfgegenstand
+einer festen Zusage wie „I will check that no one …“ bleibt davon getrennt.
+Die bestehenden affirmativen Wendungen bleiben erhalten; „No problem“ und die zeitlichen
+Grenzen „no later than“/„no earlier than“ sind ausdrücklich keine Absage.
+Das ist weiterhin eine begrenzte Satzteilheuristik, kein vollständiger Sprachbeweis.
+
+Der [CodeRabbit-Befund](https://github.com/Puma7/meeting-for-handy/pull/41#discussion_r4479577671)
+war ebenfalls gültig: Nach Trimmen des Markers konnte „erstellt“ auch vor Satzende passen.
+„Das Protokoll wurde erstellt.“ und „Der Bericht ist erstellt.“ sind keine neue Zusage.
+Vier tatsächliche klassische API- und vier Runner-Vorherfälle reproduzierten die Fehlannahme,
+einschließlich Abstand vor Satzende und kommafortgesetztem abgeschlossenen Zustand.
+Leerzeichenbeendete Marker benötigen jetzt eine Leerraum- oder Kommafortsetzung.
+Unmittelbare Erledigt-Hilfsverben vor „erstellt“ werden nicht als aktives Prädikat zugelassen.
+Die gemeinsame neue Aufgabenprüfung weist eine solche Erledigt-Aussage ohne zusätzliche
+explizite Zusage auch in der klassischen API ab. Eine tatsächlich zusätzliche Übernahme
+und aktive „Robin erstellt …“-/„Robin erstellt, …“-Zusagen bleiben zulässig.
+
+Alle neuen Gegenfälle bestehen einschließlich Aufgabenphase, wörtlicher Originalbelege und
+bytegleicher Wiederöffnung. Die bereits erfassten Negations-, Bedingungs-, Termin- und
+Affirmationsfälle bleiben erhalten. Bereits gespeicherte Ergebnisse und Statuswechsel einer
+bestehenden Aufgabe laufen weiterhin über ihre bisherigen Verträge; sie werden nicht als neue
+Aufgabe neu klassifiziert. Der erste große Zwischenlauf vor der zusätzlichen Erledigt-Korrektur
+ist nicht der endgültige Rustnachweis. Nach beiden Korrekturen wurden Rust, Clippy, Format und
+beide echten lokalen synthetischen Referenzen frisch ausgeführt.
 
 ## Reviewkorrekturen
 

@@ -294,6 +294,9 @@ const AFFIRMING_NEGATIONS: &[&str] = &[
     "kein problem",
     "keine sorge",
     "not a problem",
+    "no problem",
+    "no later than",
+    "no earlier than",
     "don't worry",
     "do not worry",
     "don't forget",
@@ -394,16 +397,39 @@ pub(crate) const GERMAN_TASK_PLEDGES: &[&str] = &[
     "beauftragt",
 ];
 
-/// Locate a supported assertion at whole-word boundaries; quotes remain untouched.
+/// Adjacent auxiliaries make "erstellt" a completed-state participle, not an active pledge.
+const COMPLETED_CREATION_AUXILIARIES: &[&str] = &[
+    "wurde", "wurden", "ist", "sind", "war", "waren", "hat", "haben", "hatte", "hatten",
+];
+
+/// Locate a supported assertion at whole-word boundaries, retaining required continuations.
 pub(crate) fn task_pledge_end(text: &str, markers: &[&str]) -> Option<usize> {
     let mut earliest: Option<usize> = None;
     let word_char = |c: char| c.is_alphanumeric() || c == '_';
     for marker in markers {
+        let continues = marker.ends_with(' ');
         let marker = marker.trim_end();
         for (start, found) in text.match_indices(marker) {
             let end = start + found.len();
             if text[..start].chars().next_back().is_some_and(word_char)
                 || text[end..].chars().next().is_some_and(word_char)
+            {
+                continue;
+            }
+            if continues
+                && !text[end..]
+                    .chars()
+                    .next()
+                    .is_some_and(|c| c.is_whitespace() || c == ',')
+            {
+                continue;
+            }
+            let previous = text[..start]
+                .split(|c: char| !c.is_alphabetic())
+                .filter(|word| !word.is_empty())
+                .next_back();
+            if marker == "erstellt"
+                && previous.is_some_and(|word| COMPLETED_CREATION_AUXILIARIES.contains(&word))
             {
                 continue;
             }
@@ -519,7 +545,20 @@ pub(crate) fn has_new_task_commitment(quote: &str) -> bool {
 /// New work must reject independent conditions in both classic and workspace paths.
 fn new_task_commitment(quote: &str) -> Commitment {
     let text = quote.to_lowercase().replace('’', "'");
-    if task_condition_present(&text) || commitment_refused(quote) {
+    let assertion = commitment_assertion_text(quote);
+    let words: Vec<_> = assertion
+        .split(|c: char| !c.is_alphabetic())
+        .filter(|word| !word.is_empty())
+        .collect();
+    let completed_creation = words
+        .windows(2)
+        .any(|pair| COMPLETED_CREATION_AUXILIARIES.contains(&pair[0]) && pair[1] == "erstellt");
+    let explicit_pledge = task_pledge_end(&assertion, GERMAN_TASK_PLEDGES).is_some()
+        || task_pledge_end(&assertion, ENGLISH_TASK_PLEDGES).is_some();
+    if task_condition_present(&text)
+        || commitment_refused(quote)
+        || (completed_creation && !explicit_pledge)
+    {
         Commitment::Nonbinding
     } else {
         commitment(quote)
@@ -531,7 +570,19 @@ fn new_task_commitment(quote: &str) -> Commitment {
 pub(crate) fn commitment_refused(quote: &str) -> bool {
     let text = commitment_assertion_text(quote);
     let without_affirmation = without_affirming_negations(&text);
-    without_affirmation.contains("n't")
+    let words: Vec<_> = without_affirmation
+        .split(|c: char| !c.is_alphabetic())
+        .filter(|word| !word.is_empty())
+        .collect();
+    // A negative actor before the pledge cannot accept work. Scope is already
+    // limited to the assertion; "check that no one ..." keeps its positive promise.
+    let predicate = words
+        .iter()
+        .position(|word| ["will", "shall", "ll"].contains(word))
+        .or_else(|| task_pledge_end(&without_affirmation, ENGLISH_TASK_PLEDGES));
+    let negative_actor = predicate.is_some_and(|end| words[..end].contains(&"no"));
+    negative_actor
+        || without_affirmation.contains("n't")
         || without_affirmation
             .split(|c: char| !c.is_alphabetic())
             .any(|word| {
@@ -752,6 +803,35 @@ mod generation_tests {
             ("Robin will ask if the report is ready.", true),
             ("Robin will not check if the report is ready.", false),
             ("Robin will check the report if approval arrives.", false),
+            ("No one will check the report.", false),
+            ("No employee will send the report.", false),
+            ("Today no participant will prepare the report.", false),
+            ("Not a problem, no employee will send the report.", false),
+            ("I will check that no one has published the report.", true),
+            (
+                "I will ask whether no employee has published the report.",
+                true,
+            ),
+            (
+                "No problem, I will check that no one has published the report.",
+                true,
+            ),
+            ("No later than Friday, I will send the report.", true),
+            ("I will send the report no later than Friday.", true),
+            ("Das Protokoll wurde erstellt.", false),
+            ("Der Bericht ist erstellt.", false),
+            ("Der Bericht wurde erstellt .", false),
+            ("Das Protokoll ist erstellt, wie besprochen.", false),
+            ("Robin erstellt, wie vereinbart, den Bericht.", true),
+            ("Robin erstellt den Bericht.", true),
+            (
+                "Ich übernehme die Prüfung, ob das Protokoll erstellt ist.",
+                true,
+            ),
+            (
+                "Das Protokoll wurde erstellt, ich übernehme die Prüfung.",
+                true,
+            ),
             ("Maybe I will check that the report is not public.", false),
         ] {
             let checked = check(quote, "Check the report", Kind::Tasks);
