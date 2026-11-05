@@ -228,11 +228,12 @@ impl LiveRunner {
     ) -> Result<UpdateOutcome> {
         if let Some(w) = &mut self.workspace {
             let count = w.update(&self.client, pending, control, &self.state.run.language)?;
-            let revision = w.view().revision as u32;
+            let view = w.view();
+            let revision = view.revision as u32;
             return Ok(UpdateOutcome {
                 window: (count > 0).then_some(revision),
                 overview: Some(revision),
-                accepted: w.view().entities.len(),
+                accepted: view.entities.len(),
                 ..Default::default()
             });
         }

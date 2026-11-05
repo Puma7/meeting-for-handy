@@ -2,16 +2,16 @@
 
 Stand: 5. November 2026. Version **1.1.0-beta.1**, unverändert.
 
-Die aktuelle Nacharbeit erhält beim Wechsel des Textmodells unveränderte
-geerbte Quellenkennungen. Eine manuell erledigte Aufgabe wird dadurch bei der
-erneuten Verarbeitung desselben Transkripts nicht als neuer offener Auftrag
-angelegt. Tatsächlich zurückgezogene Quellen behalten ihre Zurücknahme;
-neue unabhängige Zusagen bleiben neue Aufgaben.
+Die aktuelle kleine Nacharbeit liest nach einem Workspace-Update den
+projizierten Stand nur einmal. Revisionsnummer und Anzahl angenommener Einträge
+verwenden denselben Snapshot. Dadurch entfällt eine doppelte Zustandskopie samt
+erneutem Lesen des Kontextjournals. Eine Laufzeitverbesserung wurde nicht gemessen.
+Modellanfragen, deren Validierung und dauerhafte Veröffentlichung bleiben unverändert.
 
-Die vorherigen Kartenmenü-, Kontrast- und Ollama-Diagnostikkorrekturen sowie
-alle früheren Reviewkorrekturen einschließlich des englischen Referenzpatches
-`93335102ed` bleiben enthalten.
-Die [ausführliche bisherige Fassung](https://github.com/Puma7/meeting-for-handy/blob/8d0ba2139028af03a44e6e6f507df3efe46f8a9a/docs/validation/pr41-review-followup-20261104.md)
+Die vorherige Quellenkorrektur beim Modellwechsel sowie Kartenmenü-, Kontrast-,
+Ollama-Diagnostik- und alle früheren Reviewkorrekturen bleiben enthalten.
+Das gilt auch für den englischen Referenzpatch `93335102ed`.
+Die [ausführliche bisherige Fassung](https://github.com/Puma7/meeting-for-handy/blob/5896b2b163c5fdf17c80398ad24e7e7d6e464221/docs/validation/pr41-review-followup-20261104.md)
 und deren verlinkte Detailhistorie bleiben unveränderlich in Git.
 Private Rohbelege, fehlgeschlagene Läufe und alte Reviewfassungen bleiben erhalten.
 Historische Nachweise werden nicht als erneut ausgeführt ausgegeben.
@@ -45,6 +45,21 @@ Modellfassungen und menschliche Bestätigungen bleiben versioniert erhalten.
 Schlüssel werden nicht protokolliert oder als Klartext gespeichert.
 
 ## Aktuelle Korrekturen und echte Vorherfälle
+
+### Einmalige Projektion nach dem Update
+
+Der [CodeRabbit-Befund](https://github.com/Puma7/meeting-for-handy/pull/41#discussion_r4485814725)
+war am Vorgänger `5896b2b` bestätigt: Der Workspace-Zweig von
+`LiveRunner::update` rief `w.view()` zweimal auf.
+Jeder Aufruf kopiert den Workspace und projiziert das Kontextjournal.
+Jetzt wird eine Ansicht ermittelt und für `revision` sowie `accepted` wiederverwendet.
+
+Das ist ein statischer Nachweis am tatsächlichen Aufrufpfad: zwei Projektionen
+vorher, eine danach. Daraus wird keine gemessene Beschleunigung abgeleitet.
+Es wurde kein Test hinzugefügt, der nur die neue lokale Variable nachbildet.
+Stattdessen werden alle bestehenden 567 Rust-Regressionen frisch ausgeführt.
+Der Modellaufruf, Request-Inhalt, Prompts, Quellenvalidierung, Commitpunkt,
+Fristen, Audioaufnahme und Erkennung ändern sich nicht.
 
 ### Modellwechsel und Quellenidentität
 
@@ -141,11 +156,11 @@ bleiben unverändert. Echte Ollama-Inferenz wird daraus nicht behauptet.
 | Rust-Workspace, alle Targets | **567 bestanden**, darunter **168 Notizenfälle** und **37 Providerprotokollfälle**; drei bestehende besondere Einstiege regulär ignoriert. |
 | Rustformat und Clippy | Bestanden, gesperrte Abhängigkeiten und Warnungen als Fehler. |
 | Frontend | Auf den hier bytegleichen Komponenten von `8d0ba21`: **414 Tests in 21 Dateien**, TypeScript, Produktionsbuild und Format bestanden; hier nicht erneut ausgeführt. Zwei Testworker und bisherige Fristen unverändert. |
-| Lokale Modellreferenz Deutsch | **134.2789829 s**; reguläre vollständig validierte Wiederholungen: **1**. |
-| Lokale Modellreferenz Englisch | **164.4314505 s**; reguläre vollständig validierte Wiederholungen: **0**. |
+| Lokale Modellreferenz Deutsch | Auf `5896b2b`, hier nicht erneut ausgeführt: **134.2789829 s**; reguläre vollständig validierte Wiederholungen: **1**. |
+| Lokale Modellreferenz Englisch | Auf `5896b2b`, hier nicht erneut ausgeführt: **164.4314505 s**; reguläre vollständig validierte Wiederholungen: **0**. |
 | Projektprüfung | Nach diesem letzten Dokumentedit vor Upload erneut `verify.ps1` erforderlich. Sie prüft 47 PCM-, 35 Notizen-, 28 Vorlagen-, acht Agenten- und Monitorfälle. |
 
-Beide neuen Referenzen prüfen positive Aufgaben, unverbindliche Aussagen,
+Die beiden echten Referenzen auf `5896b2b` prüfen positive Aufgaben, unverbindliche Aussagen,
 Impulserhalt, menschlichen Status nach einer Protokolländerung und bytegleiche
 Wiederöffnung. Alle fünf Kriterien bestehen. Wörtliche Zitate einschließlich
 „I’ll“ bleiben erhalten. Eine vollständig validierte Wiederholung je Anfrage
@@ -178,7 +193,7 @@ Das ist kein echter Parakeet- oder physischer Zweistundenlauf.
 Die 21 Paketregressionen auf `91f0985` verwendeten synthetische ZIPs;
 hier wurde kein neues Produktpaket oder Installer bereitgestellt.
 
-Ein zusätzlicher echter deutscher Referenzversuch dieses nativen Stands
+Ein zusätzlicher echter deutscher Referenzversuch auf `5896b2b`
 speicherte die ausdrückliche Zusage nur als unklaren Fakt und keine Aufgabe.
 Die Referenzprüfung scheiterte deshalb ausdrücklich. Die Aufgabenphasen-Antwort
 und deren Retryzahl wurden nicht separat gespeichert; eine weitergehende Ursache
@@ -198,20 +213,21 @@ an der unveränderten Obergrenze von **10000 ms**. Eine weitergehende Ursache
 wurde nicht nachgewiesen. Der Fehllauf bleibt erhalten; später erfolgreiche
 Heads ändern weder dieses Ergebnis noch die Grenzwerte.
 
-Auf dem Vorgänger `0d8c03c` bestanden tatsächlich alle 22 Checks:
+Auf dem Vorgänger `5896b2b` bestanden tatsächlich alle 22 Checks:
 16 erfolgreich, sechs reguläre Skips.
-Die [Plattformläufe](https://github.com/Puma7/meeting-for-handy/actions/runs/42082444293)
+Die [Plattformläufe](https://github.com/Puma7/meeting-for-handy/actions/runs/42101116336)
 enthielten reale generierte Sprachprüfungen mit Version 1.1.0-beta.1,
 Handy 0.9.8 und Nemotron 3.5 Q8 auf CPU:
-Linux **9.035697134 s**, ARM **18.562827875 s**, Intel **30.730105316 s**.
+Linux **10.509165387 s**, ARM **13.535942541 s**, Intel **26.465786573 s**.
 Eigener Worker-Neustart und Audiohash-/Journalerhalt bestanden.
-Der Windows-Gegenlauf war modellfrei und ist kein ASR-Referenzlauf.
+Der [Windows-Gegenlauf](https://github.com/Puma7/meeting-for-handy/actions/runs/42101116390)
+war modellfrei und ist kein ASR-Referenzlauf.
 Unit-Fixtures mit `version=test` werden nicht als diese Messungen ausgegeben.
 
 Die virtuelle Linux-Audioaufnahme auf diesem Vorgänger bestand ausdrücklich
 mit **passed-with-startup-gaps**, **completeCapture=false**:
-9802/9802 ms, 151399/144999 qualifizierte Tonsamples,
-native Startauffüllung 5444/11843 Samples und je ein eingehender Phasennullwert.
+9642/9646 ms, 146399/144399 qualifizierte Tonsamples,
+native Startauffüllung 7881/9947 Samples und je ein eingehender Phasennullwert.
 Alle überlappenden 250-ms-Fenster bis zum letzten Sample, mindestens acht Sekunden
 qualifizierter Ton, RMS über 1000, Frequenz-, Dauer- und Differenzgrenzen blieben
 unverändert. Die Quellen waren ausschließlich virtuelle Geräte.
@@ -222,11 +238,23 @@ Dessen eigene aktuelle CI und saubere Reviews bleiben erforderlich.
 
 ## Reviewstand und bewahrte Schutzmechanismen
 
-Die erste Codex-Runde auf dem direkten Vorgänger `8d0ba21` fand den oben
-korrigierten Quellenfehler. Sie war kein sauberer Abschluss. Auf diesem
-Zwischenstand wurde kein weiterer vollständiger CodeRabbit-Auftrag verbraucht.
+Zwei frische Codex-Codeprüfungen auf dem unveränderten Vorgänger `5896b2b`
+waren sauber:
+[Runde 1](https://github.com/Puma7/meeting-for-handy/pull/41#issuecomment-6668270364) und
+[Runde 2](https://github.com/Puma7/meeting-for-handy/pull/41#issuecomment-6668426667).
+Der anschließende [vollständige CodeRabbit-Lauf](https://github.com/Puma7/meeting-for-handy/pull/41#pullrequestreview-5791791993)
+fand den oben korrigierten doppelten Lesevorgang; er war deshalb kein sauberer Abschluss.
+Alle 100 zulässigen Dateien des vollständig paginierten 102-Dateien-Diffs
+waren ausgewählt. Eine reine Whitespace-Datei hatte keine prüfbaren Änderungen.
+Die pauschalen zusätzlichen Hinweise zu Testisolation und Browserabdeckung wurden
+[mit konkreten Nachweisen zur Klärung gestellt](https://github.com/Puma7/meeting-for-handy/pull/41#issuecomment-6669025661).
+Die bekannten Grenzen nativer WebView-Prüfung bleiben ausdrücklich erhalten.
+
 Für den endgültigen Head bleiben zwei frische saubere Codex-Codeprüfungen, eine
 vollständige saubere CodeRabbit-Runde und dessen eigene grüne CI erforderlich.
+Die zusätzliche LanguageTool-Prüfung blieb unvollständig; eine weitergehende
+Ursache ist nicht nachgewiesen. Tool und Regeln bleiben aktiv.
+Eine vollständige Hauptreview-Auswahl beweist keine vollständige Sprachprüfung.
 
 Alle 16 ursprünglichen [Sourcery-Anmerkungen](https://github.com/Puma7/meeting-for-handy/pull/41#pullrequestreview-5748992615)
 wurden einzeln gegen den Code geprüft, beantwortet und geschlossen.
@@ -287,9 +315,10 @@ werden nicht still ersetzt. Archiviertes Audio muss zuerst wiederhergestellt
 werden. Legacy-Originalsitzungen bleiben lesbar; nachträgliche Erkennung dieser
 älteren Sitzungen benötigt weiterhin die bisherige Programmversion.
 
-Statische Prompts, Vertragsdateien, UI, Transport, Aufnahme-/ASR-Logik, Modellreservierungen,
+Statische Prompts, Vertragsdateien, Workspace-Anfragen, Quellenprüfung, UI, Transport,
+Aufnahme-/ASR-Logik, Modellreservierungen,
 Abhängigkeiten, Datenschutz-/Reviewer-Konfiguration, Version und vollständiger
-TEST_REPORT bleiben gegenüber `8d0ba21` unverändert.
+TEST_REPORT bleiben gegenüber `5896b2b` unverändert.
 
 Physische Aufnahme-, Berechtigungs-, Geräteverlust- und zweistündige Gerätetests
 wurden vom Nutzer auf später verschoben. Keine neue echte Parakeet-Dauer-,
