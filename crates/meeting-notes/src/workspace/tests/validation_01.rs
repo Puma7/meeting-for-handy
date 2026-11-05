@@ -1,6 +1,100 @@
 use super::*;
 
 #[test]
+fn perfect_decisions_validate_literal_sources_and_durable_reopen() {
+    let mut mismatches = Vec::new();
+    for (quote, allowed) in [
+        ("We have decided to release on Friday.", true),
+        ("We've decided to release on Friday.", true),
+        ("We’ve decided to release on Friday.", true),
+        ("WE'VE DECIDED to release on Friday.", true),
+        ("We have already decided to release on Friday.", true),
+        ("We've just unanimously decided to release on Friday.", true),
+        ("We had decided to release on Friday.", true),
+        ("We have decided not to release on Friday.", true),
+        ("We decided to release on Friday.", true),
+        ("We have agreed to release on Friday.", true),
+        ("We have not decided to release on Friday.", false),
+        ("We haven't decided to release on Friday.", false),
+        ("We haven’t decided to release on Friday.", false),
+        ("We've never decided to release on Friday.", false),
+        ("We have perhaps decided to release on Friday.", false),
+        ("We will decide to release on Friday.", false),
+        ("We've decided to release on Friday?", false),
+        (
+            "We have decided to release on Friday if approval arrives.",
+            false,
+        ),
+        (
+            "If approval arrives, we've decided to release on Friday.",
+            false,
+        ),
+        (
+            "We've decided to release on Friday unless the owner objects.",
+            false,
+        ),
+        ("Weve decided to release on Friday.", false),
+        ("archiveWe've decided to release on Friday.", false),
+    ] {
+        let directory = tempfile::tempdir().unwrap();
+        let (_writer, empty) = store::load(directory.path()).unwrap();
+        let (mut next, mut req, mut answer) = setup();
+        req.purpose = "facts".into();
+        req.transcript_sources[0].text = quote.into();
+        answer["changes"][0]["kind"] = json!("decision");
+        answer["changes"][0]["status"] = json!("recorded");
+        answer["changes"][0]["text"] = json!("Release decision");
+        answer["changes"][0]["due"] = json!(null);
+        answer["changes"][0]["evidence"][0]["quote"] = json!(quote);
+        let offered = quote_options(quote)
+            .iter()
+            .any(|q| validate::recorded_decision_quote_allowed(q));
+        let result = validate::apply(&mut next, &req, &answer.to_string());
+        if result.is_ok() != allowed || offered != allowed {
+            mismatches.push(format!(
+                "{quote}: allowed={allowed}, offered={offered}, result={result:?}"
+            ));
+            continue;
+        }
+        if allowed {
+            next.revision = 1;
+            store::append(
+                directory.path(),
+                &store::Delta::between(
+                    &empty,
+                    &next,
+                    req.transcript_sources.clone(),
+                    result.unwrap(),
+                ),
+            )
+            .unwrap();
+            let checkpoint =
+                std::fs::read(directory.path().join("revision-00000001.json")).unwrap();
+            let reopened = read_state(directory.path()).unwrap();
+            assert_eq!(reopened.entities.len(), 1);
+            assert_eq!(reopened.entities[0].status, "recorded");
+            assert_eq!(reopened.entities[0].evidence[0].quote, quote);
+            assert_eq!(reopened.originals[0].text, quote);
+            assert_eq!(
+                serde_json::to_vec(&reopened).unwrap(),
+                serde_json::to_vec(&read_state(directory.path()).unwrap()).unwrap()
+            );
+            assert_eq!(
+                std::fs::read(directory.path().join("revision-00000001.json")).unwrap(),
+                checkpoint
+            );
+        } else {
+            assert_eq!(
+                serde_json::to_vec(&next).unwrap(),
+                serde_json::to_vec(&empty).unwrap()
+            );
+            assert!(!directory.path().join("revision-00000001.json").exists());
+        }
+    }
+    assert!(mismatches.is_empty(), "Decision mismatches: {mismatches:?}");
+}
+
+#[test]
 fn contracted_perfect_completion_retains_literal_quotes_after_reopen() {
     let cases = [
         ("I've sent the report.", true),

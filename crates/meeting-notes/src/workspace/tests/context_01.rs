@@ -1,6 +1,339 @@
 use super::*;
 
 #[test]
+fn terminal_tasks_survive_context_replay_without_duplicate_open_obligations() {
+    use std::{
+        io::{Read, Write},
+        net::TcpListener,
+        sync::{
+            atomic::{AtomicBool, Ordering},
+            Arc,
+        },
+        thread,
+        time::{Duration, Instant},
+    };
+    let mut failures = Vec::new();
+    for terminal in ["completed", "withdrawn"] {
+        for human in [false, true]
+            .into_iter()
+            .filter(|human| !(*human && terminal == "withdrawn"))
+        {
+            let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+            let endpoint = format!("http://{}/v1/", listener.local_addr().unwrap());
+            let stop = Arc::new(AtomicBool::new(false));
+            let server_stop = stop.clone();
+            let server = thread::spawn(move || {
+                let mut requests = Vec::new();
+                let deadline = Instant::now() + Duration::from_secs(10);
+                while !server_stop.load(Ordering::SeqCst) {
+                    assert!(Instant::now() < deadline);
+                    let mut stream = match accept_synthetic_before(
+                        &listener,
+                        Instant::now() + Duration::from_millis(100),
+                    ) {
+                        Ok(s) => s,
+                        Err(e) if e.kind() == std::io::ErrorKind::TimedOut => continue,
+                        Err(e) => panic!("{e}"),
+                    };
+                    let mut bytes = Vec::new();
+                    let mut buffer = [0; 8192];
+                    let header = loop {
+                        let n = stream.read(&mut buffer).unwrap();
+                        assert!(n > 0 && bytes.len() < 500000);
+                        bytes.extend_from_slice(&buffer[..n]);
+                        if let Some(at) = bytes.windows(4).position(|b| b == b"\r\n\r\n") {
+                            break at + 4;
+                        }
+                    };
+                    let size = String::from_utf8_lossy(&bytes[..header])
+                        .lines()
+                        .filter_map(|l| l.split_once(':'))
+                        .find(|(k, _)| k.eq_ignore_ascii_case("content-length"))
+                        .unwrap()
+                        .1
+                        .trim()
+                        .parse::<usize>()
+                        .unwrap();
+                    assert!(size < 500000);
+                    while bytes.len() < header + size {
+                        let n = stream.read(&mut buffer).unwrap();
+                        assert!(n > 0);
+                        bytes.extend_from_slice(&buffer[..n]);
+                    }
+                    let body: serde_json::Value =
+                        serde_json::from_slice(&bytes[header..header + size]).unwrap();
+                    let req: serde_json::Value =
+                        serde_json::from_str(body["messages"][1]["content"].as_str().unwrap())
+                            .unwrap();
+                    let mut changes = vec![];
+                    if req["purpose"] == "tasks" {
+                        let required = req["window"]["requiredSourceIds"].as_array().unwrap();
+                        let sources = req["transcriptSources"].as_array().unwrap();
+                        if let Some(promise) = sources.iter().find(|s| {
+                            required.contains(&s["id"])
+                                && s["text"]
+                                    .as_str()
+                                    .unwrap()
+                                    .starts_with("I will send the report tomorrow.")
+                        }) {
+                            // Deliberately repeat the old proposal even when terminal context is supplied.
+                            changes.push(json!({"proposalId":"p_promise","kind":"task","targetId":null,"targetRevision":null,"text":"Send the report","status":"open","attention":"current","owner":null,"due":if req["humanContext"].as_array().unwrap().is_empty() { json!("tomorrow") } else { json!(null) },"evidence":[{"sourceId":promise["id"],"quote":"I will send the report tomorrow."}],"relatedEntityIds":[]}));
+                        }
+                        if let Some(done) = sources.iter().find(|s| {
+                            required.contains(&s["id"])
+                                && s["text"].as_str().unwrap().starts_with(
+                                    if terminal == "completed" {
+                                        "I have sent the report."
+                                    } else {
+                                        "I withdraw the report task."
+                                    },
+                                )
+                        }) {
+                            for entity in req["state"].as_array().unwrap().iter().filter(|e| {
+                                e["kind"] == "task"
+                                    && e["status"] == "open"
+                                    && e["humanLocked"] == false
+                            }) {
+                                changes.push(json!({"proposalId":format!("p_done_{}",changes.len()),"kind":"task","targetId":entity["id"],"targetRevision":entity["revision"],"text":null,"status":terminal,"attention":"normal","owner":null,"due":null,"evidence":[{"sourceId":done["id"],"quote":if terminal=="completed" {"I have sent the report."} else {"I withdraw the report task."}}],"relatedEntityIds":[]}));
+                            }
+                        }
+                    }
+                    let answer=json!({"contractVersion":CONTRACT_VERSION,"requestId":req["requestId"],"changes":changes,"overviewRefs":[],"unresolvedContextIds":[],"moreChangesPossible":false}).to_string();
+                    requests.push((
+                        req,
+                        body["response_format"]["json_schema"]["schema"].clone(),
+                    ));
+                    let payload = format!(
+                        "data: {}\n\ndata: {}\n\n",
+                        json!({"choices":[{"delta":{"content":answer},"finish_reason":null}]}),
+                        json!({"choices":[{"delta":{},"finish_reason":"stop"}]})
+                    );
+                    write!(stream,"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{payload}",payload.len()).unwrap();
+                }
+                requests
+            });
+            let dir = tempfile::tempdir().unwrap();
+            let client = TextClient::new(&crate::Connection {
+                endpoint,
+                model: "synthetic-terminal-replay".into(),
+                mode: "local".into(),
+                cloud_consent: false,
+                api_key: String::new(),
+            })
+            .unwrap();
+            let mut runner = WorkspaceRunner::open(dir.path()).unwrap();
+            runner.set_context(Default::default()).unwrap();
+            let padded = |start: &str| format!("{start} {}", "z".repeat(1599 - start.len()));
+            let mut texts = (0..8)
+                .map(|i| LiveText {
+                    key: format!("part-{i}"),
+                    track: "system".into(),
+                    start_ms: i * 30000,
+                    end_ms: (i + 1) * 30000,
+                    text: padded(if i == 0 {
+                        "I will send the report tomorrow."
+                    } else if i == 7 {
+                        if terminal == "completed" {
+                            "I have sent the report."
+                        } else {
+                            "I withdraw the report task."
+                        }
+                    } else {
+                        "Synthetic neutral context."
+                    }),
+                })
+                .collect::<Vec<_>>();
+            for _ in 0..2 {
+                let pending = runner.pending(&texts);
+                assert_eq!(
+                    runner
+                        .update(&client, &pending, &AnalysisControl::default(), "en")
+                        .unwrap(),
+                    4
+                );
+            }
+            assert_eq!(runner.state.entities.len(), 1);
+            assert_eq!(runner.state.entities[0].status, terminal);
+            assert_eq!(runner.state.entities[0].evidence.len(), 2);
+            let original_id = runner.state.entities[0].id.clone();
+            let promise_id = source_id(&live::pending(&[], &texts)[0]);
+            let old_files = std::fs::read_dir(dir.path())
+                .unwrap()
+                .map(Result::unwrap)
+                .filter(|e| e.file_name().to_string_lossy().starts_with("revision-"))
+                .map(|e| (e.path(), std::fs::read(e.path()).unwrap()))
+                .collect::<Vec<_>>();
+            let mut context = runner.context.lock().unwrap().clone();
+            if human {
+                context.overrides.push(Override {
+                    id: original_id.clone(),
+                    expected_revision: runner.state.entities[0].revision,
+                    status: terminal.into(),
+                    saved: true,
+                });
+            }
+            context.shared_notes.push(SharedNote {
+                id: "h_terminal".into(),
+                revision: 1,
+                text: "Review the retained conversation.".into(),
+            });
+            let (context, _) = update_context(dir.path(), &context).unwrap();
+            *runner.context.lock().unwrap() = context;
+            drop(runner);
+            runner = WorkspaceRunner::open(dir.path()).unwrap();
+            let confirmed_terminal = read_state(dir.path())
+                .unwrap()
+                .entities
+                .iter()
+                .find(|e| e.id == original_id)
+                .unwrap()
+                .clone();
+            for _ in 0..2 {
+                assert!(runner.pending(&texts).is_empty());
+                runner
+                    .update(&client, &[], &AnalysisControl::default(), "en")
+                    .unwrap();
+                if runner
+                    .state
+                    .entities
+                    .iter()
+                    .any(|e| e.kind == "task" && e.status == "open")
+                {
+                    failures.push(format!(
+                        "{terminal} human={human}: replay published an open duplicate"
+                    ));
+                }
+                drop(runner);
+                runner = WorkspaceRunner::open(dir.path()).unwrap();
+            }
+            assert!(!runner.context_dirty());
+            if runner
+                .state
+                .entities
+                .iter()
+                .filter(|e| e.kind == "task")
+                .count()
+                != 1
+            {
+                failures.push(format!(
+                    "{terminal} human={human}: replay retained duplicate identities"
+                ));
+            }
+            assert_eq!(
+                runner
+                    .state
+                    .entities
+                    .iter()
+                    .find(|e| e.id == original_id)
+                    .unwrap()
+                    .status,
+                terminal
+            );
+            assert_eq!(
+                runner
+                    .state
+                    .entities
+                    .iter()
+                    .find(|e| e.id == original_id)
+                    .unwrap(),
+                &confirmed_terminal
+            );
+            assert_eq!(confirmed_terminal.due.as_deref(), Some("tomorrow"));
+            let source = runner
+                .state
+                .originals
+                .iter()
+                .find(|s| s.id == promise_id)
+                .unwrap()
+                .clone();
+            let mut req = Request::new(
+                "r_terminal".into(),
+                &runner.state.context,
+                &runner.state,
+                vec![confirmed_terminal.clone()],
+                std::slice::from_ref(&source),
+                runner.state.originals.clone(),
+            );
+            req.purpose = "tasks".into();
+            let bad = json!({"contractVersion":CONTRACT_VERSION,"requestId":"r_terminal","changes":[{"proposalId":"p_reopen","kind":"task","targetId":original_id,"targetRevision":confirmed_terminal.revision,"text":null,"status":"open","attention":"current","owner":null,"due":null,"evidence":[{"sourceId":promise_id,"quote":"I will send the report tomorrow."}],"relatedEntityIds":[]}],"overviewRefs":[],"unresolvedContextIds":[],"moreChangesPossible":false});
+            let mut unchanged = runner.state.clone();
+            assert!(validate::apply(&mut unchanged, &req, &bad.to_string()).is_err());
+            assert_eq!(
+                serde_json::to_vec(&unchanged).unwrap(),
+                serde_json::to_vec(&runner.state).unwrap()
+            );
+            // An independently recorded later promise remains a legitimate new task.
+            texts.push(LiveText {
+                key: "new-promise".into(),
+                track: "microphone".into(),
+                start_ms: 240000,
+                end_ms: 270000,
+                text: "I will send the report tomorrow.".into(),
+            });
+            let pending = runner.pending(&texts);
+            runner
+                .update(&client, &pending, &AnalysisControl::default(), "en")
+                .unwrap();
+            assert_eq!(
+                runner
+                    .state
+                    .entities
+                    .iter()
+                    .filter(|e| e.kind == "task" && e.status == "open")
+                    .count(),
+                1
+            );
+            let view = serde_json::to_vec(&runner.view()).unwrap();
+            drop(runner);
+            assert_eq!(
+                serde_json::to_vec(&read_state(dir.path()).unwrap()).unwrap(),
+                view
+            );
+            for (path, bytes) in old_files {
+                assert_eq!(std::fs::read(path).unwrap(), bytes);
+            }
+            stop.store(true, Ordering::SeqCst);
+            let requests = server.join().unwrap();
+            let relevant = requests
+                .iter()
+                .find(|(r, _)| {
+                    r["purpose"] == "tasks"
+                        && r["humanContext"]
+                            .as_array()
+                            .unwrap()
+                            .iter()
+                            .any(|h| h["id"] == "h_terminal")
+                        && r["window"]["requiredSourceIds"]
+                            .as_array()
+                            .unwrap()
+                            .iter()
+                            .any(|id| id == &promise_id)
+                })
+                .unwrap();
+            if !relevant.0["state"].as_array().unwrap().iter().any(|e| {
+                e["id"] == original_id
+                    && e["status"] == terminal
+                    && e["evidence"].as_array().unwrap().len() == 2
+            }) {
+                failures.push(format!("{terminal} human={human}: terminal identity/evidence absent from actual tasks request"));
+            }
+            {
+                let branches = relevant.1["properties"]["changes"]["items"]["anyOf"]
+                    .as_array()
+                    .unwrap();
+                assert!(!branches.iter().any(|b| b["properties"]["targetId"]["enum"]
+                    .as_array()
+                    .is_some_and(|ids| ids.contains(&json!(original_id)))));
+            }
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "Terminal replay failures: {failures:?}"
+    );
+}
+
+#[test]
 fn replay_rechecks_every_retained_source_after_removal_or_shortening_and_restart() {
     use std::{
         io::{Read, Write},

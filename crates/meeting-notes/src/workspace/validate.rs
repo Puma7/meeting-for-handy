@@ -94,6 +94,10 @@ pub(crate) fn apply(
                 "Eine Modellantwort darf menschlich bestätigte Einträge nicht verändern."
             );
             ensure!(
+                old.kind != "task" || !["completed", "withdrawn"].contains(&old.status.as_str()),
+                "Abgeschlossene oder zurückgenommene Aufgaben sind nur Lesekontext."
+            );
+            ensure!(
                 Some(old.revision) == c.target_revision,
                 "Die Modellantwort verwendet eine veraltete Eintragsfassung."
             );
@@ -233,12 +237,19 @@ pub(crate) fn apply(
                 next.entities
                     .iter()
                     .find(|e| {
+                        // A terminal task retains its original promise plus later
+                        // status evidence. Replaying the promise is the same identity,
+                        // even if optional old metadata is omitted in the new proposal.
+                        let terminal_promise = c.kind == "task"
+                            && ["completed", "withdrawn"].contains(&e.status.as_str())
+                            && !c.evidence.is_empty()
+                            && c.evidence.iter().all(|v| e.evidence.contains(v));
                         !next.context_excluded_ids.contains(&e.id)
                             && e.kind == c.kind
                             && e.text == text
-                            && e.owner == c.owner
-                            && e.due == c.due
-                            && e.evidence == c.evidence
+                            && (e.owner == c.owner || (terminal_promise && c.owner.is_none()))
+                            && (e.due == c.due || (terminal_promise && c.due.is_none()))
+                            && (e.evidence == c.evidence || terminal_promise)
                     })
                     .map(|e| e.id.clone())
             })
@@ -531,22 +542,51 @@ const ADDITIONAL_UNCERTAIN_TERMINAL_WORDS: &[&str] = &[
 /// Require an affirmative decision assertion. Its infinitive/that-clause may
 /// itself be negative ("decided not to ..."); that does not negate the decision.
 pub(super) fn recorded_decision_quote_allowed(quote: &str) -> bool {
-    let lower = quote.to_lowercase();
+    // Expand only the complete affirmative contraction, never haven/not forms.
+    // These temporary tokens do not rewrite the literal source or its quote.
+    let lower = quote.to_lowercase().replace('’', "'");
     let words: Vec<_> = lower
-        .split(|c: char| !c.is_alphabetic())
-        .filter(|w| !w.is_empty())
+        .split(|c: char| !c.is_alphabetic() && c != '\'')
+        .flat_map(|token| match token {
+            "we've" => vec!["we", "have"],
+            _ => token.split('\'').filter(|w| !w.is_empty()).collect(),
+        })
         .collect();
     let german = words.iter().position(|word| {
         ["entscheiden", "beschließen", "beschlossen", "entschieden"].contains(word)
     });
-    let english = words.windows(2).position(|part| {
-        [
-            ["we", "decide"],
-            ["we", "decided"],
-            ["agreed", "to"],
-            ["agreed", "not"],
-        ]
-        .contains(&[part[0], part[1]])
+    let english = words.iter().enumerate().find_map(|(index, word)| {
+        let next = words.get(index + 1).copied();
+        if *word == "agreed" && matches!(next, Some("to" | "not")) {
+            return Some(index + 1);
+        }
+        if *word != "we" {
+            return None;
+        }
+        if matches!(next, Some("decide" | "decided")) {
+            return Some(index + 2);
+        }
+        if !matches!(next, Some("have" | "had")) {
+            return None;
+        }
+        let mut predicate = index + 2;
+        while predicate < index + 5
+            && words.get(predicate).is_some_and(|w| {
+                [
+                    "already",
+                    "just",
+                    "now",
+                    "today",
+                    "finally",
+                    "unanimously",
+                    "explicitly",
+                ]
+                .contains(w)
+            })
+        {
+            predicate += 1;
+        }
+        (words.get(predicate) == Some(&"decided")).then_some(predicate + 1)
     });
     let assertion_end = if let Some(index) = german {
         let first_clause_words = lower
@@ -569,8 +609,7 @@ pub(super) fn recorded_decision_quote_allowed(quote: &str) -> bool {
         } else {
             words.len()
         }
-    } else if let Some(index) = english {
-        let predicate_end = index + 2 - usize::from(words[index] == "agreed");
+    } else if let Some(predicate_end) = english {
         let complement = &words[predicate_end..];
         if complement.starts_with(&["to"])
             || complement.starts_with(&["that"])

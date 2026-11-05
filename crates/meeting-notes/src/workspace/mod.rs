@@ -455,7 +455,15 @@ impl WorkspaceRunner {
                 .iter()
                 .filter(|e| !next.context_excluded_ids.contains(&e.id))
                 .filter(|e| match phase {
-                    "tasks" => e.kind == "task" && e.status == "open",
+                    // Terminal identities relevant to this window are read-only
+                    // deduplication context, including their completion evidence.
+                    "tasks" => {
+                        e.kind == "task"
+                            && (e.status == "open"
+                                || e.evidence.iter().any(|evidence| {
+                                    required.iter().any(|s| s.id == evidence.source_id)
+                                }))
+                    }
                     "facts" => {
                         (e.kind == "fact" && incoming_overview.contains(&e.id))
                             || (e.kind == "decision" && e.status != "withdrawn")
@@ -571,7 +579,7 @@ impl WorkspaceRunner {
                     for e in req
                         .state
                         .iter()
-                        .filter(|e| e.kind == "task" && !e.human_locked)
+                        .filter(|e| e.kind == "task" && e.status == "open" && !e.human_locked)
                     {
                         let mut branch = base.clone();
                         branch["properties"]["kind"]["enum"] = serde_json::json!(["task"]);
