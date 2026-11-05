@@ -767,11 +767,30 @@ pub(super) fn completion_quote_allowed(quote: &str) -> bool {
             _ => token.split('\'').filter(|word| !word.is_empty()).collect(),
         })
         .collect();
+    // German "fast" means almost; English "fast" can describe a fully
+    // completed action. Require a German predicate before treating it as partial.
+    let german_partial = words.contains(&"fast")
+        && words
+            .iter()
+            .any(|word| ["habe", "haben", "ist"].contains(word));
     if quote.contains('?')
+        || german_partial
         || words.iter().any(|word| {
             UNCERTAIN_TERMINAL_WORDS.contains(word)
                 || ADDITIONAL_UNCERTAIN_TERMINAL_WORDS.contains(word)
                 || ["nichts", "nothing", "none", "neither"].contains(word)
+                || [
+                    "beinahe",
+                    "nahezu",
+                    "teilweise",
+                    "weitgehend",
+                    "almost",
+                    "nearly",
+                    "partly",
+                    "partially",
+                    "mostly",
+                ]
+                .contains(word)
         })
     {
         return false;

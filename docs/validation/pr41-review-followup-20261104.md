@@ -2,16 +2,17 @@
 
 Stand: 5. November 2026. Version **1.1.0-beta.1**, unverändert.
 
-Die aktuelle kleine Nacharbeit liest nach einem Workspace-Update den
-projizierten Stand nur einmal. Revisionsnummer und Anzahl angenommener Einträge
-verwenden denselben Snapshot. Dadurch entfällt eine doppelte Zustandskopie samt
-erneutem Lesen des Kontextjournals. Eine Laufzeitverbesserung wurde nicht gemessen.
-Modellanfragen, deren Validierung und dauerhafte Veröffentlichung bleiben unverändert.
+Die aktuelle Nacharbeit verhindert, dass ausdrücklich noch unvollständige
+Arbeit als erledigte Aufgabe veröffentlicht wird. „Fast abgeschlossen“,
+„beinahe abgeschlossen“ und vergleichbare begrenzte Fortschrittsmarker
+reichen für einen terminalen Status nicht aus. Tatsächlich vollständige
+Abschlüsse bleiben zulässig; englisches „fast“ im Sinn von „schnell“ bleibt
+von der deutschen Bedeutung unterscheidbar.
 
-Die vorherige Quellenkorrektur beim Modellwechsel sowie Kartenmenü-, Kontrast-,
-Ollama-Diagnostik- und alle früheren Reviewkorrekturen bleiben enthalten.
-Das gilt auch für den englischen Referenzpatch `93335102ed`.
-Die [ausführliche bisherige Fassung](https://github.com/Puma7/meeting-for-handy/blob/5896b2b163c5fdf17c80398ad24e7e7d6e464221/docs/validation/pr41-review-followup-20261104.md)
+Alle vorherigen Korrekturen einschließlich einmaliger Workspace-Projektion,
+Quellenidentität beim Modellwechsel, Kartenmenüs, Kontrast, Ollama-Diagnostik
+und des englischen Referenzpatches `93335102ed` bleiben enthalten.
+Die [ausführliche bisherige Fassung](https://github.com/Puma7/meeting-for-handy/blob/90becddbaabcebe4273732dd4709043a43133168/docs/validation/pr41-review-followup-20261104.md)
 und deren verlinkte Detailhistorie bleiben unveränderlich in Git.
 Private Rohbelege, fehlgeschlagene Läufe und alte Reviewfassungen bleiben erhalten.
 Historische Nachweise werden nicht als erneut ausgeführt ausgegeben.
@@ -46,6 +47,34 @@ Schlüssel werden nicht protokolliert oder als Klartext gespeichert.
 
 ## Aktuelle Korrekturen und echte Vorherfälle
 
+### Unvollständiger Fortschritt ist kein Abschluss
+
+Der [Codex-Befund](https://github.com/Puma7/meeting-for-handy/pull/41#discussion_r4486035608)
+auf `90becdd` war gültig. Die echte Validatorregression reproduzierte zehn
+falsche terminale Annahmen: fast, beinahe, nahezu, teilweise, weitgehend sowie
+almost, nearly, partly, partially und mostly.
+Die betreffenden wörtlichen Quellen konnten vorher eine vorhandene offene
+Aufgabe auf completed setzen.
+
+Die Abschlussprüfung weist diese begrenzten Fortschrittsmarker jetzt zurück.
+Deutsches „fast“ verlangt dabei ein deutsches Prädikat; ein englischer Satz
+wie „I have completed the report fast.“ bleibt ein zulässiger vollständiger
+Abschluss. Vier zusätzliche vollständige Gegenfälle bestanden schon vorher
+und bestehen weiterhin. Die bestehenden Negations-, Frage-, Bedingungs-,
+Zahlen- und Belegprüfungen bleiben erhalten.
+
+Die vorhandene Regression wurde um diese 14 Varianten erweitert.
+Die Zahl der Testfunktionen steigt deshalb nicht.
+Sie benutzt die tatsächliche Validierung und dauerhafte Checkpoints.
+Abgelehnte Statusantworten lassen Aufgabe, Zitate und alten Checkpoint
+byteunverändert und erzeugen keine zweite Revision.
+Zulässige Abschlüsse bewahren wörtliche Quellen und stimmen nach wiederholter
+Wiederöffnung bytegleich überein. Das ist kein vollständiger Grammatik-
+oder Bedeutungsnachweis; menschliche Überprüfung bleibt erforderlich.
+Statische Prompts, Vertragsdateien, Fristen und das Belegbudget ändern sich nicht.
+
+### Vorherige Korrekturen
+
 ### Einmalige Projektion nach dem Update
 
 Der [CodeRabbit-Befund](https://github.com/Puma7/meeting-for-handy/pull/41#discussion_r4485814725)
@@ -57,7 +86,8 @@ Jetzt wird eine Ansicht ermittelt und für `revision` sowie `accepted` wiederver
 Das ist ein statischer Nachweis am tatsächlichen Aufrufpfad: zwei Projektionen
 vorher, eine danach. Daraus wird keine gemessene Beschleunigung abgeleitet.
 Es wurde kein Test hinzugefügt, der nur die neue lokale Variable nachbildet.
-Stattdessen werden alle bestehenden 567 Rust-Regressionen frisch ausgeführt.
+Stattdessen bestanden alle bestehenden 567 Rust-Regressionen auf `90becdd`.
+Die aktuelle Gesamtsuite wird nach der zusätzlichen Validatoränderung erneut ausgeführt.
 Der Modellaufruf, Request-Inhalt, Prompts, Quellenvalidierung, Commitpunkt,
 Fristen, Audioaufnahme und Erkennung ändern sich nicht.
 
@@ -156,11 +186,11 @@ bleiben unverändert. Echte Ollama-Inferenz wird daraus nicht behauptet.
 | Rust-Workspace, alle Targets | **567 bestanden**, darunter **168 Notizenfälle** und **37 Providerprotokollfälle**; drei bestehende besondere Einstiege regulär ignoriert. |
 | Rustformat und Clippy | Bestanden, gesperrte Abhängigkeiten und Warnungen als Fehler. |
 | Frontend | Auf den hier bytegleichen Komponenten von `8d0ba21`: **414 Tests in 21 Dateien**, TypeScript, Produktionsbuild und Format bestanden; hier nicht erneut ausgeführt. Zwei Testworker und bisherige Fristen unverändert. |
-| Lokale Modellreferenz Deutsch | Auf `5896b2b`, hier nicht erneut ausgeführt: **134.2789829 s**; reguläre vollständig validierte Wiederholungen: **1**. |
-| Lokale Modellreferenz Englisch | Auf `5896b2b`, hier nicht erneut ausgeführt: **164.4314505 s**; reguläre vollständig validierte Wiederholungen: **0**. |
+| Lokale Modellreferenz Deutsch | Frisch **102.594161 s**; reguläre vollständig validierte Wiederholungen: **0**. |
+| Lokale Modellreferenz Englisch | Frisch **115.6522393 s**; reguläre vollständig validierte Wiederholungen: **0**. |
 | Projektprüfung | Nach diesem letzten Dokumentedit vor Upload erneut `verify.ps1` erforderlich. Sie prüft 47 PCM-, 35 Notizen-, 28 Vorlagen-, acht Agenten- und Monitorfälle. |
 
-Die beiden echten Referenzen auf `5896b2b` prüfen positive Aufgaben, unverbindliche Aussagen,
+Die beiden neuen echten lokalen Referenzen prüfen positive Aufgaben, unverbindliche Aussagen,
 Impulserhalt, menschlichen Status nach einer Protokolländerung und bytegleiche
 Wiederöffnung. Alle fünf Kriterien bestehen. Wörtliche Zitate einschließlich
 „I’ll“ bleiben erhalten. Eine vollständig validierte Wiederholung je Anfrage
@@ -237,6 +267,15 @@ Diese früheren CI-Ergebnisse werden nicht auf den neuen Head übertragen.
 Dessen eigene aktuelle CI und saubere Reviews bleiben erforderlich.
 
 ## Reviewstand und bewahrte Schutzmechanismen
+
+Die erste frische Codex-Runde auf dem direkten Vorgänger `90becdd`
+fand die oben korrigierten unvollständigen Abschlussmeldungen.
+Sie war kein sauberer Abschluss. Auf diesem Zwischenstand wurde kein weiterer
+vollständiger CodeRabbit-Auftrag gestellt. Die vorherige Projektionskorrektur
+wurde von CodeRabbit [bestätigt](https://github.com/Puma7/meeting-for-handy/pull/41#discussion_r4485972047).
+Die pauschale zusätzliche Testisolations-/Browser-Sorge wurde mangels konkretem
+Fehler [ausdrücklich zurückgenommen](https://github.com/Puma7/meeting-for-handy/pull/41#issuecomment-6669253684).
+Native WebView-Prüfung bleibt eine Nachweisgrenze.
 
 Zwei frische Codex-Codeprüfungen auf dem unveränderten Vorgänger `5896b2b`
 waren sauber:
@@ -315,10 +354,10 @@ werden nicht still ersetzt. Archiviertes Audio muss zuerst wiederhergestellt
 werden. Legacy-Originalsitzungen bleiben lesbar; nachträgliche Erkennung dieser
 älteren Sitzungen benötigt weiterhin die bisherige Programmversion.
 
-Statische Prompts, Vertragsdateien, Workspace-Anfragen, Quellenprüfung, UI, Transport,
+Statische Prompts, Vertragsdateien, Workspace-Anfragen, UI, Transport,
 Aufnahme-/ASR-Logik, Modellreservierungen,
 Abhängigkeiten, Datenschutz-/Reviewer-Konfiguration, Version und vollständiger
-TEST_REPORT bleiben gegenüber `5896b2b` unverändert.
+TEST_REPORT bleiben gegenüber `90becdd` unverändert.
 
 Physische Aufnahme-, Berechtigungs-, Geräteverlust- und zweistündige Gerätetests
 wurden vom Nutzer auf später verschoben. Keine neue echte Parakeet-Dauer-,
