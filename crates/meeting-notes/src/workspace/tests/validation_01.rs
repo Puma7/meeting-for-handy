@@ -322,6 +322,18 @@ fn explicit_task_refusals_cannot_publish_new_work_but_affirmations_remain_valid(
         ("Ich schreibe den Bericht.", true),
         ("Ich werde den Bericht nicht vergessen.", true),
         ("I will not forget to email the report.", true),
+        ("Kein Problem, ich übernehme den Bericht.", true),
+        ("KEIN PROBLEM – ich übernehme den Bericht.", true),
+        ("Keine Sorge, ich schreibe den Bericht.", true),
+        ("Not a problem, I will email the report.", true),
+        ("Kein Problem: Ich werde den Bericht nicht vergessen.", true),
+        ("Kein Problem, ich übernehme den Bericht nicht.", false),
+        (
+            "Keine Sorge, ich verspreche nicht, den Bericht zu schreiben.",
+            false,
+        ),
+        ("Not a problem, I will not email the report.", false),
+        ("Ich übernehme keine Sorgepflicht für den Bericht.", false),
     ] {
         let (mut state, mut request, mut answer) = setup();
         let before = serde_json::to_vec(&state).unwrap();

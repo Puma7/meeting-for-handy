@@ -291,17 +291,42 @@ const AFFIRMING_NEGATIONS: &[&str] = &[
     "nicht vergessen",
     "nicht vergisst",
     "nicht liegen lassen",
+    "kein problem",
+    "keine sorge",
+    "not a problem",
     "not forget",
     "won't forget",
 ];
+
+/// Remove whole affirming phrases while keeping every independent refusal word.
+/// A longer word such as "Sorgepflicht" must not turn a refusal into a promise.
+fn without_affirming_negations(text: &str) -> String {
+    let mut text = text.to_owned();
+    let part_of_word = |c: char| c.is_alphanumeric() || c == '_';
+    for phrase in AFFIRMING_NEGATIONS {
+        let ranges: Vec<_> = text
+            .match_indices(*phrase)
+            .filter(|(start, phrase)| {
+                !text[..*start].chars().next_back().is_some_and(part_of_word)
+                    && !text[*start + phrase.len()..]
+                        .chars()
+                        .next()
+                        .is_some_and(part_of_word)
+            })
+            .map(|(start, phrase)| (start, start + phrase.len()))
+            .collect();
+        for (start, end) in ranges.into_iter().rev() {
+            text.replace_range(start..end, " ");
+        }
+    }
+    text
+}
 
 /// Refusal screen for newly generated obligations, shared with workspace schema
 /// admission. Existing literal checkpoints are not reinterpreted by this rule.
 pub(crate) fn commitment_refused(quote: &str) -> bool {
     let text = quote.to_lowercase();
-    let without_affirmation = AFFIRMING_NEGATIONS
-        .iter()
-        .fold(text, |text, phrase| text.replace(phrase, " "));
+    let without_affirmation = without_affirming_negations(&text);
     without_affirmation
         .split(|c: char| !c.is_alphabetic())
         .any(|word| {
@@ -330,9 +355,7 @@ pub(crate) fn commitment_refused(quote: &str) -> bool {
 /// a hedge directly before a date only makes the date unverified.
 fn commitment(quote: &str) -> Commitment {
     let text = quote.to_lowercase();
-    let negation = AFFIRMING_NEGATIONS
-        .iter()
-        .fold(text.clone(), |text, phrase| text.replace(phrase, " "));
+    let negation = without_affirming_negations(&text);
     if [
         "könnten ",
         "könnte ",
@@ -467,6 +490,10 @@ mod generation_tests {
             "Ich verspreche nicht, den Bericht zu schreiben.",
             "I do not promise to email the report.",
             "We never take the report.",
+            "Kein Problem, ich übernehme den Bericht nicht.",
+            "Keine Sorge, ich verspreche nicht, den Bericht zu schreiben.",
+            "Not a problem, I will not email the report.",
+            "Ich übernehme keine Sorgepflicht für den Bericht.",
         ] {
             let checked = check(quote, "Bericht übernehmen", Kind::Tasks);
             assert!(checked.items.is_empty(), "{quote}");
@@ -504,6 +531,11 @@ mod generation_tests {
             "Wir übernehmen den Bericht.",
             "Ich werde den Bericht nicht vergessen.",
             "I will not forget to email the report.",
+            "Kein Problem, ich übernehme den Bericht.",
+            "KEIN PROBLEM – ich übernehme den Bericht.",
+            "Keine Sorge, ich schreibe den Bericht.",
+            "Not a problem, I will email the report.",
+            "Kein Problem: Ich werde den Bericht nicht vergessen.",
         ] {
             assert_eq!(
                 check(quote, "Bericht übernehmen", Kind::Tasks).items.len(),

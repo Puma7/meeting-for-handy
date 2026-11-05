@@ -32,9 +32,9 @@ Der vollständige TEST_REPORT bleibt byteunverändert; er wurde für diese Nacha
 | Rustformat / Clippy | Auf diesem Korrekturstand frisch bestanden; gesperrte Abhängigkeiten und Warnungen als Fehler. |
 | Oberfläche | 375 Tests, TypeScript, Produktionsbuild und vollständiger Formatcheck unter src auf `aa63003` bestanden. Alle Frontend-/Typ-/Abhängigkeitsbytes sind gegenüber diesem Stand unverändert, nicht lokal erneut geprüft. Die dortige letzte gemischte Zeile einer Typdeklaration wurde nur von CRLF zu LF vereinheitlicht; Deklarationstoken unverändert. |
 | Projektfreigabe | `verify.ps1` vor jeder Bereitstellung: 47 PCM-, 35 Notizen-, 28 Vorlagen-, acht Agenten- und Monitorprüfungen bestanden. Der folgende Quellupload bleibt an einen abschließenden erfolgreichen Lauf gebunden. |
-| Echte lokale Referenzen Deutsch und Englisch | Auf diesem Importpositions-Korrekturstand: Deutsch 126,1410333 s mit 1 regulär zulässigen, vollständig validierten Wiederholung(en); Englisch 106,4012813 s mit 0. Beide Läufe bestanden positive Aufgabe, unverbindliche Aussage, Impulserhalt, menschlichen Status nach Protokolländerung und bytegleiche Wiederöffnung. Die vorherigen Läufe auf `aa63003` mit DE 109,7145876 s / EN 129,9766782 s und jeweils null Wiederholungen bleiben historische Nachweise. Die vorhandene Wiederholungsregel wurde nicht verändert und der Lauf nicht für eine Nullzählung wiederholt. |
+| Echte lokale Referenzen Deutsch und Englisch | Auf dem aktuellen Zusagen-Korrekturstand: Deutsch 97,4512424 s und Englisch 109,821368 s, beide ohne Validierungswiederholung. Beide Läufe bestanden positive Aufgabe, unverbindliche Aussage, Impulserhalt, menschlichen Status nach Protokolländerung und bytegleiche Wiederöffnung. Der vorherige `5c7d6ab` bestand DE 126,1410333 s mit einer regulär zulässigen, vollständig validierten Wiederholung und EN 106,4012813 s ohne Wiederholung. Diese und die früheren `aa63003`-Läufe bleiben historische Nachweise. Die vorhandene Wiederholungsregel wurde nicht verändert; null Wiederholungen sind keine Freigabeschwelle. |
 | Frühere lokale Referenzen | Deutsch 100,9989873 s und Englisch 125,0518623 s auf dem Elternstand `3d4d013`, jeweils ohne Validierungswiederholung. Die deutsche Zusage enthält tatsächlich „jedenfalls“. Diese Läufe werden nicht als erneut ausgeführt ausgegeben. |
-| Langsammodell / zwei Spuren | Auf dem vorherigen `aa63003` ausdrücklich ausgeführter besonderer Test, hier nicht erneut ausgeführt: 244,32 s Laufzeit, 210 s kontrollierte SSE-Antwortpause, nächster Refresh nach 210,0415725 s, maximal eine Modellanfrage, ein erhaltener Impuls. Samples je Spur 3758720/3758720, jeweils geteilt durch 16.000 Hz = 234,92/234,92 s. Beide dauerhaften PCM-Schreiber liefen nach dem Auswertungsstopp weiter. Worker-, Transport-, Audio-Schreiber- und Slow-Fixture-Dateien sowie sämtlicher Workspace-Code nach dem Importabschnitt bleiben byteunverändert. Die Slow-Fixture importiert keine Bestätigungen und führt den geänderten Ersatzpfad nicht aus; dafür gelten die neuen vier Persistenzfälle. Frühere Läufe auf `1768125` und `3d4d013` bleiben historische Belege. |
+| Langsammodell / zwei Spuren | Auf dem früheren `aa63003` ausdrücklich ausgeführter besonderer Test, hier nicht erneut ausgeführt: 244,32 s Laufzeit, 210 s kontrollierte SSE-Antwortpause, nächster Refresh nach 210,0415725 s, maximal eine Modellanfrage, ein erhaltener Impuls. Samples je Spur 3758720/3758720, jeweils geteilt durch 16.000 Hz = 234,92/234,92 s. Beide dauerhaften PCM-Schreiber liefen nach dem Auswertungsstopp weiter. Worker-, Transport-, Audio-Schreiber- und Slow-Fixture-Dateien bleiben byteunverändert. Der danach korrigierte Import wird durch vier Persistenzfälle geprüft; die gemeinsame Zusagenprüfung ist ebenfalls nach diesem Langsamtest geändert worden. Dieser historische Lauf wird ausdrücklich nicht als erneute Prüfung dieser Änderungen ausgegeben. Frühere Läufe auf `1768125` und `3d4d013` bleiben erhalten. |
 | Browsergegenprüfung | Auf `aa63003` mit tatsächlichen Sidebar-/RecordingStatus-Komponenten und synthetischen Werten bei 390/740/1280 px: vorher aufgeklappt nur 50 px Sprachauswahl in schmalen Fenstern, nachher 161 px und vollständig lesbarer Text. Aufnahmestatus sichtbar, kein horizontaler Überlauf, Ein-/Ausklappen und Rechnerdetails erreichbar, keine Seitenfehler. Frontendbytes bleiben unverändert, nicht wiederholt. Kein nativer IPC- oder Gerätezugriff. |
 
 Die echten Referenzen verwendeten ausschließlich synthetischen Text und das vorhandene
@@ -225,6 +225,29 @@ Der erneut zusätzlich genannte angeblich regressionsverdeckende Modellserver-Po
 Fehler. CodeRabbit verfolgte den konkreten Anzeigetest und seine Initialisierung bis zum Transport:
 Die URL ist gespeicherte Metadaten; kein Request wird versendet. Der Anbieter nahm auch diese Aussage
 ausdrücklich zurück. Es wurde keine Festport-Ausnahme, Netzwerkausnahme oder Prüfschwelle eingeführt.
+
+## Zusagen trotz verneinter Redewendung
+
+Die vollständige CodeRabbit-Runde auf `5c7d6ab` prüfte alle 100 vorgesehenen Dateien und fand
+einen weiteren echten Fehler: „Kein Problem, ich übernehme den Bericht“ wurde allein wegen „kein“
+als unverbindlich verworfen. Zwei echte Vorherfehler belegen dies im klassischen und erweiterten
+Auswertungsweg. Die gemeinsame Prüfung erkennt nun die festen Redewendungen „kein Problem“,
+„keine Sorge“ und „not a problem“ als ganze Wörter. Unabhängige Ablehnungen bleiben erhalten;
+ein längeres Wort wie „Sorgepflicht“ wird nicht versehentlich herausgeschnitten.
+
+Die bestehenden öffentlichen Regressionen prüfen jetzt 20 Workspace- und 19 klassische Fälle,
+darunter 18 neue Varianten mit Großschreibung, Satzzeichen, positiver Zusage, nachfolgender Ablehnung
+und Wortgrenzen. Abgewiesene Workspace-Antworten lassen den ganzen Zustand byteunverändert.
+Zehn synthetische ältere klassische Checkpoints bleiben beim strikten Lesen bytegleich;
+die neue Generierungsregel filtert keine gespeicherten Ergebnisse nachträglich.
+Alle 545 Rusttests bestehen einschließlich der 149 Notizen- und 34 Providerprotokolltests.
+
+Der zusätzliche vage Testhygienehinweis wurde nach genauer Prüfung der betreffenden Replaytests,
+temporären Verzeichnisse, netzwerklosen Metadateninitialisierung und begrenzten Fixturebereinigung
+ausdrücklich zurückgenommen. Er war kein weiterer belegter Fehler. Die damaligen zwei sauberen
+Codex-Runden bleiben historische Nachweise; die vollständige CodeRabbit-Runde war nicht sauber.
+LanguageTool konnte dort nicht jeden Textchunk prüfen; diese Hilfsanalyse wird nicht als vollständig
+ausgegeben. Es fehlte jedoch kein Dateipatch in der eigentlichen vollständigen Quellprüfung.
 
 ## Reviewabdeckung und Veröffentlichung
 
