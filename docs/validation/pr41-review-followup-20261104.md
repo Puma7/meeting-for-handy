@@ -5,6 +5,11 @@ Dieser Vermerk beschreibt die tatsächlich geprüften Funktionen und ihre Grenze
 Ausführliche frühere Fassungen bleiben in der Git-Historie und den privaten Belegen erhalten.
 Der vollständige TEST_REPORT bleibt byteunverändert; er wurde für diese Nacharbeit nicht neu veröffentlicht.
 
+Die letzte Korrektur betrifft ausschließlich die historische UI-Testzählung in diesem Vermerk.
+Produkt-, Test-, Abhängigkeits- und Konfigurationsbytes bleiben gegenüber `aa72dbd` unverändert.
+Die zugeordneten Rust-/UI-/Modellnachweise dieses geprüften Stands wurden dafür nicht erneut ausgeführt;
+`verify.ps1` ist vor dem folgenden Quellupload erneut erforderlich.
+
 ## Verhalten und Schutzgrenzen
 
 - Klassische Transkriptansicht und optionaler Advanced Meeting Assistant bleiben getrennt nutzbar.
@@ -425,7 +430,8 @@ dadurch weder Aufnahme noch Auswertung. Ohne Hinweise entsteht kein zusätzliche
 Vier vollständige App-Regressionen scheiterten vorher tatsächlich an fehlenden Hinweisen
 oder Aktionen und bestehen nachher. Ein zusätzlicher Bridge-Fall prüft den unveränderten
 aktiven Tab beim Einblenden, Wechseln und Entfernen eines synthetischen Löschstatus.
-Alle 385 UI-Tests, TypeScript/Build/Format und acht tatsächliche App-Browserabläufe bestehen.
+Auf dem damaligen Korrekturstand bestanden alle 385 UI-Tests, TypeScript/Build/Format
+und acht tatsächliche App-Browserabläufe.
 Frühere Fixture-, Typprüfungs- und private Favicon-Fehler bleiben als Zwischenstufen erhalten;
 sie sind keine weiteren Produktfehler. Kein echter Lösch-, Geräte- oder installierter Agententest.
 
@@ -452,8 +458,8 @@ Drei echte Vorherfehler sind durch die tatsächlich gerenderten Aktions-, Bestä
 und Notizwege belegt; sieben Kontrollfälle bestanden bereits. Alle zehn Fälle bestehen
 nachher. Die Notizregression erhält ihren Entwurf auch nach dem erneuten Pollversuch;
 fehlgeschlagene menschliche Bestätigungen werden nicht automatisch wiederholt.
-Zeichenketten und Zahlen als Rückweisungen bleiben lesbar. Alle 391 UI-Tests,
-TypeScript, Produktionsbuild und vollständige Frontendformatprüfung bestehen frisch.
+Zeichenketten und Zahlen als Rückweisungen bleiben lesbar. Auf dem damaligen Korrekturstand
+bestanden alle 391 UI-Tests, TypeScript, Produktionsbuild und vollständige Frontendformatprüfung.
 Die acht Browserabläufe und echten DE/EN-Referenzen des Elternstands sind nicht wiederholt;
 native Implementierung, Prompts, Transport, Referenzfixture und Abhängigkeiten sind bytegleich.
 
@@ -614,7 +620,7 @@ Der vollständige Basis-bis-Head-Diff umfasst 102 Dateien, davon 100 nach den bi
 zwei Anbieterfilter-Ausnahmen für Lockdateien. Drei kleine neue Test-/Typdateien wurden fachlich
 gebündelt, ohne neue Filter oder Prüfregeländerungen. Zwei isolierte Markerfälle wurden in vier
 bestehende vollständige Interaktionsfälle übernommen; damals deshalb 368 statt zuvor 370 Tests.
-Die sechs Layoutregressionen und der Modulnamenfall ergaben zuletzt 375; vier Pollfehlerregressionen ergaben 379; der zusätzliche Batch-Fallback-Gegenfall erhöhte die damalige Anzahl auf 380; die fünf zusätzlichen Hinweis-/Bridge-Fälle ergaben 385; sechs zusätzliche Varianten für Error-/String-/Zahl-Rückweisungen ergeben aktuell 391.
+Die sechs Layoutregressionen und der Modulnamenfall ergaben 375; vier Pollfehlerregressionen ergaben 379; der zusätzliche Batch-Fallback-Gegenfall erhöhte die damalige Anzahl auf 380; die fünf zusätzlichen Hinweis-/Bridge-Fälle ergaben 385; sechs zusätzliche Varianten für Error-/String-/Zahl-Rückweisungen ergaben den Zwischenstand 391; die vier Fälle für beschädigte gespeicherte Auswertungen ergeben aktuell 395.
 Die ursprüngliche Fünf-Sekunden-Frist des verschobenen Vorschautests bleibt ausdrücklich erhalten.
 
 Vor Veröffentlichung werden Git-Root, Branch und bisheriger Remote-Head geprüft; normaler Fast-forward.
