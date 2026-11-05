@@ -60,6 +60,11 @@ const statusName = {
   unclear: "Zuordnung prüfen",
 };
 
+/** Present native/action failures consistently while preserving non-Error rejection values. */
+function workspaceErrorMessage(error) {
+  return error instanceof Error ? error.message : String(error);
+}
+
 /** Provide the application language to the isolated live-workspace renderer. */
 export function LiveWorkspace(props) {
   return (
@@ -245,8 +250,7 @@ function WorkspaceContents({
       try {
         next = await adapter.status(meeting.id);
       } catch (e) {
-        if (alive.current)
-          setPollError(e instanceof Error ? e.message : String(e));
+        if (alive.current) setPollError(workspaceErrorMessage(e));
         return;
       }
       if (!alive.current) return;
@@ -277,7 +281,7 @@ function WorkspaceContents({
       context.current = native ?? null;
       if (native) await syncContext();
     } catch (e) {
-      if (alive.current) setError(String(e));
+      if (alive.current) setError(workspaceErrorMessage(e));
     } finally {
       polling.current = false;
     }
@@ -452,7 +456,7 @@ function WorkspaceContents({
       await fn();
       await poll();
     } catch (e) {
-      setError(String(e));
+      setError(workspaceErrorMessage(e));
     } finally {
       setBusy(false);
     }
@@ -482,7 +486,7 @@ function WorkspaceContents({
       else setError(null);
       await poll();
     } catch (e) {
-      setError(String(e));
+      setError(workspaceErrorMessage(e));
     }
   }
   useEffect(() => {
@@ -580,7 +584,9 @@ function WorkspaceContents({
       current.current = saved;
       setState(saved);
       if (kind === "protocol" && !rejected)
-        void syncContext().catch((error) => setError(String(error)));
+        void syncContext().catch((error) =>
+          setError(workspaceErrorMessage(error)),
+        );
     },
   };
   /** Open an original source quote with explicit recognition-revision context. */

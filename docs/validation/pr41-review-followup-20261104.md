@@ -28,14 +28,14 @@ Der vollständige TEST_REPORT bleibt byteunverändert; er wurde für diese Nacha
 
 | Prüfung | Ergebnis und Bezug |
 | --- | --- |
-| Rust-Workspace / alle Targets | 551 frisch bestanden, darunter 155 Notizen- und 34 Providerprotokolltests; drei bestehende besondere Einstiege regulär ignoriert. Die bisherigen Kapazitäts-, Zahlen- und Wiederöffnungsfälle bleiben erhalten. Zwei neue Fälle prüfen Zahl und Verbindlichkeit bei unterschiedlicher Reihenfolge gültiger Fristbelege. |
-| Rustformat / Clippy | Auf diesem Korrekturstand frisch bestanden; gesperrte Abhängigkeiten und Warnungen als Fehler. |
-| Oberfläche | 385 Tests, TypeScript, Produktionsbuild und vollständiger Formatcheck unter src frisch bestanden. Vier neue vollständige App-Fälle prüfen später eingehende Agentenanfragen und Geräteverluste in Deutsch/Englisch. Ein zusätzlicher tatsächlicher Bridge-/Shadow-DOM-Fall prüft, dass wechselnde globale Hinweise den gewählten Tab und die laufende Oberfläche erhalten. |
+| Rust-Workspace / alle Targets | Auf `5b20e40` bestanden 551; native Quellen/Tests/Abhängigkeiten sind seitdem bytegleich, deshalb lokal nicht erneut ausgeführt. Darunter 155 Notizen- und 34 Providerprotokolltests; drei bestehende besondere Einstiege regulär ignoriert. Die bisherigen Kapazitäts-, Zahlen- und Wiederöffnungsfälle bleiben erhalten. Zwei neue Fälle prüfen Zahl und Verbindlichkeit bei unterschiedlicher Reihenfolge gültiger Fristbelege. |
+| Rustformat / Clippy | Auf dem bytegleichen nativen Stand `5b20e40` bestanden, lokal nicht erneut ausgeführt; gesperrte Abhängigkeiten und Warnungen als Fehler. |
+| Oberfläche | 391 Tests, TypeScript, Produktionsbuild und vollständiger Formatcheck unter src frisch bestanden. Vier neue vollständige App-Fälle prüfen später eingehende Agentenanfragen und Geräteverluste in Deutsch/Englisch. Ein zusätzlicher tatsächlicher Bridge-/Shadow-DOM-Fall prüft, dass wechselnde globale Hinweise den gewählten Tab und die laufende Oberfläche erhalten. |
 | Projektfreigabe | `verify.ps1` vor jeder Bereitstellung: 47 PCM-, 35 Notizen-, 28 Vorlagen-, acht Agenten- und Monitorprüfungen bestanden. Der folgende Quellupload bleibt an einen abschließenden erfolgreichen Lauf gebunden. |
-| Echte lokale Referenzen Deutsch und Englisch | Nach den abschließenden Korrekturen: Deutsch 116.6886547 s (0 reguläre Validierungswiederholungen), Englisch 127.5065369 s (0 Wiederholungen). Beide bestanden positive Aufgabe, unverbindliche Aussage, Impulserhalt, menschlichen Status nach Protokolländerung und bytegleiche Wiederöffnung; englische Aufgaben behalten das wörtliche „I’ll“. Unverändert ist eine vollständig validierte Wiederholung je Anfrage zulässig; null Wiederholungen sind keine Freigabeschwelle. Die vorherigen Läufe auf `7fb1ad2` mit DE 106,8706213 s und EN 111,7106681 s bleiben historische Nachweise. |
+| Echte lokale Referenzen Deutsch und Englisch | Auf `5b20e40`, vor der anschließenden reinen UI-Fehlermeldungsformatierung: Deutsch 116.6886547 s (0 reguläre Validierungswiederholungen), Englisch 127.5065369 s (0 Wiederholungen). Beide bestanden positive Aufgabe, unverbindliche Aussage, Impulserhalt, menschlichen Status nach Protokolländerung und bytegleiche Wiederöffnung; englische Aufgaben behalten das wörtliche „I’ll“. Unverändert ist eine vollständig validierte Wiederholung je Anfrage zulässig; null Wiederholungen sind keine Freigabeschwelle. Die vorherigen Läufe auf `7fb1ad2` mit DE 106,8706213 s und EN 111,7106681 s bleiben historische Nachweise. |
 | Frühere lokale Referenzen | Deutsch 100,9989873 s und Englisch 125,0518623 s auf dem Elternstand `3d4d013`, jeweils ohne Validierungswiederholung. Die deutsche Zusage enthält tatsächlich „jedenfalls“. Diese Läufe werden nicht als erneut ausgeführt ausgegeben. |
-| Langsammodell / zwei Spuren | Auf diesem Korrekturstand frisch ausdrücklich ausgeführter besonderer Test: 244,23 s Laufzeit, 210 s kontrollierte SSE-Antwortpause, nächster Refresh nach 210,0402066 s, maximal eine Modellanfrage, ein erhaltener Impuls. Samples je Spur 3749440/3749440, geteilt durch 16.000 Hz = 234,34/234,34 s. Beide dauerhaften PCM-Schreiber liefen nach dem Auswertungsstopp weiter. Tatsächlicher nativer Worker mit kontrollierter Antwort und generiertem PCM, keine Geräte/ASR oder Zweistundenprüfung. Frühere Läufe bleiben historische Belege. |
-| Browsergegenprüfung | Acht neue Abläufe mit tatsächlicher vollständiger App einschließlich Workspace/Shadow-DOM bei 390×844 dunkel und 740×900 px hell, jeweils Deutsch/Englisch: späte Agentenanfrage sichtbar, Prüfen erreichbar, bestehende Ablehnung versendet exakt einmal false; Geräteverlust während synthetischer Aufnahme sichtbar und schließbar. Keine Aufnahme-/Modellstarts oder -stopps, keine Konsolen-/Seitenfehler und kein horizontaler Überlauf. Bestehender Edge 156 / Playwright 1.57 mit synthetischem IPC-Adapter, kein nativer Geräte-/Agentenprozess oder echter Löschlauf. Sechs Pollfehlerabläufe auf `f728081` und frühere Sidebarprüfung bleiben historische Nachweise. |
+| Langsammodell / zwei Spuren | Auf `5b20e40` ausdrücklich ausgeführter besonderer Test; bytegleicher nativer Stand, hier nicht wiederholt: 244,23 s Laufzeit, 210 s kontrollierte SSE-Antwortpause, nächster Refresh nach 210,0402066 s, maximal eine Modellanfrage, ein erhaltener Impuls. Samples je Spur 3749440/3749440, geteilt durch 16.000 Hz = 234,34/234,34 s. Beide dauerhaften PCM-Schreiber liefen nach dem Auswertungsstopp weiter. Tatsächlicher nativer Worker mit kontrollierter Antwort und generiertem PCM, keine Geräte/ASR oder Zweistundenprüfung. Frühere Läufe bleiben historische Belege. |
+| Browsergegenprüfung | Auf `5b20e40` acht Abläufe mit tatsächlicher vollständiger App einschließlich Workspace/Shadow-DOM bei 390×844 dunkel und 740×900 px hell, jeweils Deutsch/Englisch: späte Agentenanfrage sichtbar, Prüfen erreichbar, bestehende Ablehnung versendet exakt einmal false; Geräteverlust während synthetischer Aufnahme sichtbar und schließbar. Keine Aufnahme-/Modellstarts oder -stopps, keine Konsolen-/Seitenfehler und kein horizontaler Überlauf. Bestehender Edge 156 / Playwright 1.57 mit synthetischem IPC-Adapter, kein nativer Geräte-/Agentenprozess oder echter Löschlauf. Sechs Pollfehlerabläufe auf `f728081` und frühere Sidebarprüfung bleiben historische Nachweise. |
 
 Die echten Referenzen verwendeten ausschließlich synthetischen Text und das vorhandene
 **google/gemma-4-e4b Q4_K_M** mit 6.326.936.720 Modellbytes, LM Studio **0.4.26.0**,
@@ -438,6 +438,32 @@ hatten 10.066 ms statt höchstens erlaubten 10.000 ms. Die darüber hinausgehend
 ist nicht bewiesen. Kein erneuter alter Lauf wurde angefordert; der neue Head benötigt
 neue erfolgreiche Ziel-CI. Dauergrenzen, PCM und Verifier bleiben unverändert.
 
+## Einheitliche verständliche Fehlermeldungen
+
+Der vollständige CodeRabbit-Lauf auf `5b20e40` fand noch eine sichtbare Unstimmigkeit:
+Modellaktionen, menschliche Statusänderungen, Notizveröffentlichung und die im Statuspoll
+angestoßene Kontextveröffentlichung zeigten bei geworfenen Error-Objekten den technischen
+Vorsatz „Error:“. Die eigentliche Statusabfrage verwendete bereits nur die Meldung.
+Alle Wege verwenden jetzt dieselbe Darstellung: Error.message für Error-Objekte,
+sonst weiterhin String-Konvertierung für native Zeichenketten und andere Rückweisungswerte.
+Fehlerkanäle, Sichtbarkeitsdauer, Daten, Wiederholungsregeln und Aufnahmezustand bleiben gleich.
+
+Drei echte Vorherfehler sind durch die tatsächlich gerenderten Aktions-, Bestätigungs-
+und Notizwege belegt; sieben Kontrollfälle bestanden bereits. Alle zehn Fälle bestehen
+nachher. Die Notizregression erhält ihren Entwurf auch nach dem erneuten Pollversuch;
+fehlgeschlagene menschliche Bestätigungen werden nicht automatisch wiederholt.
+Zeichenketten und Zahlen als Rückweisungen bleiben lesbar. Alle 391 UI-Tests,
+TypeScript, Produktionsbuild und vollständige Frontendformatprüfung bestehen frisch.
+Die acht Browserabläufe und echten DE/EN-Referenzen des Elternstands sind nicht wiederholt;
+native Implementierung, Prompts, Transport, Referenzfixture und Abhängigkeiten sind bytegleich.
+
+Die beiden zusätzlich behaupteten Testprobleme mit temporären Dateien und lokalen
+Modellservern nahm CodeRabbit auf Rückfrage ausdrücklich als unbelegt zurück.
+Das behebt oder versteckt keinen Testfehler. Der vollständige Lauf deckte alle 100
+vorgesehenen Dateien ab, war wegen des gültigen Fehlermeldungsbefunds aber nicht sauber.
+Zwei saubere Codex-Codeprüfungen auf `5b20e40` bleiben historische Nachweise;
+neue Reviews und aktuelle CI müssen am endgültigen Head tatsächlich abschließen.
+
 ## Reviewabdeckung und Veröffentlichung
 
 Alle 16 ursprünglichen Sourcery-Anmerkungen und sämtliche bisherigen CodeRabbit-/Codex-Befunde
@@ -455,7 +481,7 @@ Der vollständige Basis-bis-Head-Diff umfasst 102 Dateien, davon 100 nach den bi
 zwei Anbieterfilter-Ausnahmen für Lockdateien. Drei kleine neue Test-/Typdateien wurden fachlich
 gebündelt, ohne neue Filter oder Prüfregeländerungen. Zwei isolierte Markerfälle wurden in vier
 bestehende vollständige Interaktionsfälle übernommen; damals deshalb 368 statt zuvor 370 Tests.
-Die sechs Layoutregressionen und der Modulnamenfall ergaben zuletzt 375; vier Pollfehlerregressionen ergaben 379; der zusätzliche Batch-Fallback-Gegenfall erhöhte die damalige Anzahl auf 380; die fünf zusätzlichen Hinweis-/Bridge-Fälle ergeben aktuell 385.
+Die sechs Layoutregressionen und der Modulnamenfall ergaben zuletzt 375; vier Pollfehlerregressionen ergaben 379; der zusätzliche Batch-Fallback-Gegenfall erhöhte die damalige Anzahl auf 380; die fünf zusätzlichen Hinweis-/Bridge-Fälle ergaben 385; sechs zusätzliche Varianten für Error-/String-/Zahl-Rückweisungen ergeben aktuell 391.
 Die ursprüngliche Fünf-Sekunden-Frist des verschobenen Vorschautests bleibt ausdrücklich erhalten.
 
 Vor Veröffentlichung werden Git-Root, Branch und bisheriger Remote-Head geprüft; normaler Fast-forward.
