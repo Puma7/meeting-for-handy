@@ -137,7 +137,8 @@ pub(crate) fn apply(
             crate::validation::screen_facts
         };
         let retained = old
-            .map(|old| retained_update_evidence(state, old, &c))
+            .map(|old| retained_update_evidence(state, old, &c, request))
+            .transpose()?
             .unwrap_or_default();
         let mut text_evidence = c.evidence.clone();
         if c.text.is_none() && c.kind != "agenda" && old.is_some() {
@@ -345,16 +346,20 @@ pub(crate) fn apply(
     Ok(events)
 }
 
-/// Retain the unchanged text's revision evidence and one witness per inherited metadata value.
-/// Superseded status quotes remain in immutable history instead of accumulating in the current view.
+/// Select text and metadata witnesses within the unchanged combined six-evidence budget.
+/// Every new status quote is kept; complete older evidence remains in immutable history.
 fn retained_update_evidence(
     state: &WorkspaceState,
     old: &Entity,
     change: &Change,
-) -> Vec<crate::Evidence> {
-    let mut retained = Vec::new();
-    if change.text.is_none() && change.kind != "agenda" {
-        let text_evidence = state
+    request: &Request,
+) -> Result<Vec<crate::Evidence>> {
+    if change.kind == "agenda" {
+        return Ok(Vec::new());
+    }
+    let keep_text = change.text.is_none();
+    let text_evidence = if keep_text {
+        state
             .events
             .iter()
             .rev()
@@ -362,33 +367,94 @@ fn retained_update_evidence(
             .take_while(|event| event.text == old.text)
             .last()
             .map(|event| &event.evidence)
-            .unwrap_or(&old.evidence);
-        retained.extend(text_evidence.iter().cloned());
-    }
-    for value in [
-        old.owner.as_ref().filter(|_| change.owner.is_none()),
-        old.due.as_ref().filter(|_| change.due.is_none()),
-    ]
-    .into_iter()
-    .flatten()
-    {
-        let value = value.to_lowercase();
-        if !change
-            .evidence
+            .unwrap_or(&old.evidence)
+            .as_slice()
+    } else {
+        &[]
+    };
+    ensure!(text_evidence.len() <= 6, "Ungültige frühere Beleganzahl.");
+    let kind = if change.kind == "task" {
+        crate::Kind::Tasks
+    } else {
+        crate::Kind::Summary
+    };
+    let screen = if change.kind == "task" {
+        crate::validation::screen_task_status_facts
+    } else {
+        crate::validation::screen_facts
+    };
+    let mut best: Option<Vec<crate::Evidence>> = None;
+    // At most 64 subsets, independent of meeting length. Do not drop a submitted quote
+    // or raise the source limit to make an otherwise invalid assessment fit.
+    for mask in 0..(1usize << text_evidence.len()) {
+        let mut retained = text_evidence
             .iter()
-            .chain(&retained)
-            .any(|evidence| evidence.quote.to_lowercase().contains(&value))
+            .enumerate()
+            .filter(|(i, _)| mask & (1 << i) != 0)
+            .map(|(_, evidence)| evidence.clone())
+            .collect::<Vec<_>>();
+        if keep_text
+            && retained.is_empty()
+            && !change.evidence.iter().any(|e| text_evidence.contains(e))
         {
-            if let Some(evidence) = old
+            continue;
+        }
+        for value in [
+            old.owner.as_ref().filter(|_| change.owner.is_none()),
+            old.due.as_ref().filter(|_| change.due.is_none()),
+        ]
+        .into_iter()
+        .flatten()
+        {
+            let value = value.to_lowercase();
+            if !change
                 .evidence
                 .iter()
-                .find(|evidence| evidence.quote.to_lowercase().contains(&value))
+                .chain(&retained)
+                .any(|e| e.quote.to_lowercase().contains(&value))
             {
-                retained.push(evidence.clone());
+                if let Some(evidence) = old.evidence.iter().find(|e| {
+                    e.quote.to_lowercase().contains(&value)
+                        && request
+                            .transcript_sources
+                            .iter()
+                            .any(|s| s.id == e.source_id && s.text.contains(&e.quote))
+                }) {
+                    retained.push(evidence.clone());
+                }
             }
         }
+        let mut evidence = change.evidence.clone();
+        for previous in &retained {
+            if !evidence.contains(previous) {
+                evidence.push(previous.clone());
+            }
+        }
+        if evidence.len() > 6 {
+            continue;
+        }
+        let checked = screen(
+            vec![crate::Fact {
+                text: change.text.clone().unwrap_or_else(|| old.text.clone()),
+                owner: change.owner.clone().or_else(|| old.owner.clone()),
+                due: change.due.clone().or_else(|| old.due.clone()),
+                evidence,
+            }],
+            &request.transcript_sources,
+            &kind,
+            "workspace",
+            1,
+        );
+        if checked.items.len() == 1
+            && checked.rejected.is_empty()
+            && best
+                .as_ref()
+                .is_none_or(|prior| retained.len() < prior.len())
+        {
+            best = Some(retained);
+        }
     }
-    retained
+    best.context("Text, Metadaten und neuer Status benötigen gemeinsam zulässige Originalbelege innerhalb der unveränderten Grenze.")
 }
 
 // Shared exact-word polarity screen. Apostrophes tokenize "we'll"/"we’ll"

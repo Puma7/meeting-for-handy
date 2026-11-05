@@ -127,19 +127,23 @@ fn dropping_writer_releases_its_lease_even_with_a_duplicated_handle() {
 
 #[test]
 fn status_only_evidence_stays_bounded_for_impulses_with_durable_history() {
-    for replace_text in [false, true] {
-        assert_status_only_evidence_history("impulse", replace_text);
+    for initial_quotes in [1, 6] {
+        for replace_text in [false, true] {
+            assert_status_only_evidence_history("impulse", replace_text, initial_quotes);
+        }
     }
 }
 
 #[test]
 fn status_only_evidence_stays_bounded_for_tasks_with_literal_metadata() {
-    for replace_text in [false, true] {
-        assert_status_only_evidence_history("task", replace_text);
+    for initial_quotes in [1, 6] {
+        for replace_text in [false, true] {
+            assert_status_only_evidence_history("task", replace_text, initial_quotes);
+        }
     }
 }
 
-fn assert_status_only_evidence_history(kind: &str, replace_text: bool) {
+fn assert_status_only_evidence_history(kind: &str, replace_text: bool, initial_quotes: usize) {
     let dir = tempfile::tempdir().unwrap();
     let mut runner = WorkspaceRunner::open(dir.path()).unwrap();
     runner.set_context(Default::default()).unwrap();
@@ -157,6 +161,17 @@ fn assert_status_only_evidence_history(kind: &str, replace_text: bool) {
     }
     .into();
     req.transcript_sources[0].text = original.into();
+    let mut initial_evidence = vec![json!({"sourceId":"s_one","quote":original})];
+    for label in ["alpha", "bravo", "charlie", "delta", "echo"]
+        .into_iter()
+        .take(initial_quotes - 1)
+    {
+        let quote = format!("Zulu review checkpoint {label} was mentioned.");
+        req.transcript_sources[0]
+            .text
+            .push_str(&format!(" {quote}"));
+        initial_evidence.push(json!({"sourceId":"s_one","quote":quote}));
+    }
     let change = &mut answer["changes"][0];
     change["kind"] = json!(kind);
     change["text"] = json!(if kind == "impulse" {
@@ -174,7 +189,7 @@ fn assert_status_only_evidence_history(kind: &str, replace_text: bool) {
     } else {
         json!(null)
     };
-    change["evidence"][0]["quote"] = json!(original);
+    change["evidence"] = json!(initial_evidence);
     answer["overviewRefs"] = json!([]);
     let mut next = runner.state.clone();
     let events = validate::apply(&mut next, &req, &answer.to_string()).unwrap();
@@ -190,6 +205,7 @@ fn assert_status_only_evidence_history(kind: &str, replace_text: bool) {
         .unwrap();
     let id = runner.state.entities[0].id.clone();
     let original_event = serde_json::to_vec(&runner.state.events[0]).unwrap();
+    assert_eq!(runner.state.events[0].evidence.len(), initial_quotes);
     let mut files = std::collections::BTreeMap::new();
     let mut all_sources = req.transcript_sources.clone();
     let mut text_source_id = "s_one";
@@ -424,6 +440,65 @@ fn assert_status_only_evidence_history(kind: &str, replace_text: bool) {
         assert_eq!(serde_json::to_vec(&next).unwrap(), before);
         for (path, bytes) in &files {
             assert_eq!(&std::fs::read(path).unwrap(), bytes);
+        }
+    }
+}
+
+#[test]
+fn six_initial_quotes_select_required_number_witnesses_without_raising_the_budget() {
+    for required in [2, 6] {
+        let (mut state, mut req, mut answer) = setup();
+        req.purpose = "reconcile".into();
+        let quotes = (1..=6)
+            .map(|n| format!("Phase {n} needs a review."))
+            .collect::<Vec<_>>();
+        req.transcript_sources[0].text = quotes.join(" ");
+        let numbers = (1..=required)
+            .map(|n| n.to_string())
+            .collect::<Vec<_>>()
+            .join(", ");
+        let change = &mut answer["changes"][0];
+        change["kind"] = json!("impulse");
+        change["text"] = json!(format!("Who reviews phases {numbers}?"));
+        change["due"] = json!(null);
+        change["evidence"] = json!(quotes
+            .iter()
+            .map(|q| json!({"sourceId":"s_one","quote":q}))
+            .collect::<Vec<_>>());
+        answer["overviewRefs"] = json!([]);
+        validate::apply(&mut state, &req, &answer.to_string()).unwrap();
+        let history = serde_json::to_vec(&state.events).unwrap();
+        let before = serde_json::to_vec(&state).unwrap();
+        req.state = state.entities.clone();
+        req.transcript_sources.push(Source {
+            id: "s_done".into(),
+            source: "system".into(),
+            start_ms: 3000,
+            end_ms: 6000,
+            text: "The phase review was discussed and resolved.".into(),
+        });
+        let change = &mut answer["changes"][0];
+        change["targetId"] = json!(state.entities[0].id);
+        change["targetRevision"] = json!(1);
+        change["text"] = json!(null);
+        change["status"] = json!("discussed");
+        change["evidence"] =
+            json!([{"sourceId":"s_done","quote":"The phase review was discussed and resolved."}]);
+        let result = validate::apply(&mut state, &req, &answer.to_string());
+        if required == 6 {
+            assert!(result.is_err(), "Six independently required text quotes plus a new status cannot fit the unchanged limit");
+            assert_eq!(serde_json::to_vec(&state).unwrap(), before);
+        } else {
+            assert!(result.is_ok(), "{result:?}");
+            assert_eq!(state.entities[0].evidence.len(), 3);
+            for quote in &quotes[..2] {
+                assert!(state.entities[0].evidence.iter().any(|e| &e.quote == quote));
+            }
+            assert!(state.entities[0]
+                .evidence
+                .iter()
+                .any(|e| e.source_id == "s_done"));
+            assert_eq!(serde_json::to_vec(&state.events[..1]).unwrap(), history);
         }
     }
 }
