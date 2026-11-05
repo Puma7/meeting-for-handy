@@ -28,14 +28,14 @@ Der vollständige TEST_REPORT bleibt byteunverändert; er wurde für diese Nacha
 
 | Prüfung | Ergebnis und Bezug |
 | --- | --- |
-| Rust-Workspace / alle Targets | 546 frisch bestanden, darunter 150 Notizen- und 34 Providerprotokolltests; drei bestehende besondere Einstiege regulär ignoriert. Neue Zusagen-/Ablehnungsfälle und die vollständige HTTP-/SSE-Phasen- und Wiederöffnungsregression sind enthalten. Der unten getrennt ausgewiesene Langsamtest bleibt historisch. |
+| Rust-Workspace / alle Targets | 548 frisch bestanden, darunter 152 Notizen- und 34 Providerprotokolltests; drei bestehende besondere Einstiege regulär ignoriert. Vier neue durchgängige Persistenzvarianten prüfen wiederholte Statusänderungen bei Impulsen und Aufgaben, jeweils mit ursprünglicher oder geänderter Textfassung. Der Langsamtest bleibt historisch. |
 | Rustformat / Clippy | Auf diesem Korrekturstand frisch bestanden; gesperrte Abhängigkeiten und Warnungen als Fehler. |
-| Oberfläche | 379 Tests, TypeScript, Produktionsbuild und vollständiger Formatcheck unter src auf diesem Korrekturstand frisch bestanden. Die vier zusätzlichen echten Vorher-/Nachherfälle prüfen Statusfehler, Erholung sowie den Erhalt fehlgeschlagener manueller Aktualisierung und Bestätigung. |
+| Oberfläche | 380 Tests, TypeScript, Produktionsbuild und vollständiger Formatcheck unter src auf diesem Korrekturstand frisch bestanden. Zwei vollständige App-Interaktionsfälle prüfen anfängliche Streamingpräferenz, Batch-Fallback ohne Streaming und den Erhalt bewusster Batchauswahl nach Katalogaktualisierung. Die vier Pollfehlerregressionen sind weiterhin enthalten. |
 | Projektfreigabe | `verify.ps1` vor jeder Bereitstellung: 47 PCM-, 35 Notizen-, 28 Vorlagen-, acht Agenten- und Monitorprüfungen bestanden. Der folgende Quellupload bleibt an einen abschließenden erfolgreichen Lauf gebunden. |
-| Echte lokale Referenzen Deutsch und Englisch | Auf dem finalen gemeinsamen Korrekturstand: Deutsch 99.6440722 s (0 reguläre Validierungswiederholungen), Englisch 124.4921306 s (0 Wiederholungen). Beide Läufe bestanden positive Aufgabe, unverbindliche Aussage, Impulserhalt, menschlichen Status nach Protokolländerung und bytegleiche Wiederöffnung. Die englische Aufgabe enthält jetzt tatsächlich „I’ll“ mit typografischem Apostroph im Modell-Evidenzzitat. Frühere 27-Vorproben vor der gemeinsamen Ablehnungskorrektur bleiben historische Teilstände. Die unveränderte Wiederholungsregel erlaubt eine vollständig validierte Wiederholung je Anfrage; null Wiederholungen sind keine Freigabeschwelle. |
+| Echte lokale Referenzen Deutsch und Englisch | Nach der gemeinsamen Statusbeleg- und Vorauswahlkorrektur: Deutsch 104.6295893 s (0 reguläre Validierungswiederholungen), Englisch 162.0656661 s (0 Wiederholungen). Beide Läufe bestanden positive Aufgabe, unverbindliche Aussage, Impulserhalt, menschlichen Status nach Protokolländerung und bytegleiche Wiederöffnung; englische Aufgaben behalten das wörtliche „I’ll“. Die unveränderte Regel erlaubt eine vollständig validierte Wiederholung je Anfrage; null Wiederholungen sind keine Freigabeschwelle. Die vorherigen finalen 27-Referenzen DE 99,6440722 s und EN 124,4921306 s ohne Wiederholung bleiben historische Nachweise. |
 | Frühere lokale Referenzen | Deutsch 100,9989873 s und Englisch 125,0518623 s auf dem Elternstand `3d4d013`, jeweils ohne Validierungswiederholung. Die deutsche Zusage enthält tatsächlich „jedenfalls“. Diese Läufe werden nicht als erneut ausgeführt ausgegeben. |
 | Langsammodell / zwei Spuren | Auf dem früheren `aa63003` ausdrücklich ausgeführter besonderer Test, hier nicht erneut ausgeführt: 244,32 s Laufzeit, 210 s kontrollierte SSE-Antwortpause, nächster Refresh nach 210,0415725 s, maximal eine Modellanfrage, ein erhaltener Impuls. Samples je Spur 3758720/3758720, jeweils geteilt durch 16.000 Hz = 234,92/234,92 s. Beide dauerhaften PCM-Schreiber liefen nach dem Auswertungsstopp weiter. Worker-, Transport-, Audio-Schreiber- und Slow-Fixture-Dateien bleiben byteunverändert. Der danach korrigierte Import wird durch vier Persistenzfälle geprüft; die gemeinsame Zusagenprüfung ist ebenfalls nach diesem Langsamtest geändert worden. Dieser historische Lauf wird ausdrücklich nicht als erneute Prüfung dieser Änderungen ausgegeben. Frühere Läufe auf `1768125` und `3d4d013` bleiben erhalten. |
-| Browsergegenprüfung | Auf diesem Stand sechs Abläufe bei 390×844 und 740×900 px mit tatsächlicher LiveWorkspace-Komponente und synthetischem Adapter: Statuswarnung verschwindet nach erfolgreichem Poll; Fehler einer manuellen Aktualisierung oder Bestätigung bleiben trotz Pollfehler und Erholung erhalten. Bestätigung genau einmal versandt, keine automatische Wiederholung, kein Aufnahme-/Modellstart, keine Konsolen-/Seitenfehler und kein horizontaler Überlauf. Frühere Sidebarprüfung auf `aa63003` bleibt historischer Beleg; sie wird nicht als jetzt wiederholt ausgegeben. Kein nativer IPC- oder Gerätezugriff. |
+| Browsergegenprüfung | Auf `f728081` sechs Abläufe bei 390×844 und 740×900 px mit tatsächlicher LiveWorkspace-Komponente und synthetischem Adapter: Statuswarnung verschwindet nach erfolgreichem Poll; Fehler einer manuellen Aktualisierung oder Bestätigung bleiben trotz Pollfehler und Erholung erhalten. Bestätigung genau einmal versandt, keine automatische Wiederholung, kein Aufnahme-/Modellstart, keine Konsolen-/Seitenfehler und kein horizontaler Überlauf. Frühere Sidebarprüfung auf `aa63003` bleibt historischer Beleg; sie wird nicht als jetzt wiederholt ausgegeben. Die hierbei geprüfte LiveWorkspace-Komponente ist seitdem byteunverändert; kein neuer Browserlauf für die App-Vorauswahl wird behauptet. Kein nativer IPC- oder Gerätezugriff. |
 
 Die echten Referenzen verwendeten ausschließlich synthetischen Text und das vorhandene
 **google/gemma-4-e4b Q4_K_M** mit 6.326.936.720 Modellbytes, LM Studio **0.4.26.0**,
@@ -311,6 +311,55 @@ es wurde dafür kein weiterer belegter Fehler benannt. Alle Risiko-/Zusatz-/outs
 und Antworten wurden gelesen. Die drei Korrekturen benötigen neue Reviews und CI auf demselben
 veröffentlichten Stand; frühere saubere Codex-Runden und grüne CI bleiben historische Belege.
 
+## Statusbelege ohne unbegrenztes Anwachsen
+
+Die nächste Codex-Runde auf `f728081` fand einen echten Fehler bei aufeinanderfolgenden
+Statusänderungen. Fünf neue unklare Bewertungen eines Impulses sammelten sechs Belege;
+die anschließend gültige besprochen-Bewertung scheiterte als siebter Beleg an EvidenceCount.
+Die öffentliche Persistenzregression reproduzierte denselben Überlauf auch bei Aufgaben.
+
+Der aktuelle Eintrag behält jetzt die Belege seiner unveränderten Textfassung aus dem bestehenden
+Verlauf und nötigenfalls einen wörtlichen Nachweis je übernommener Zuständigkeit/Frist.
+Die neu eingereichte Statusaussage muss weiterhin eigenständig gültig sein. Frühere Statuszitate
+bleiben unverändert in den historischen Ereignissen und Revisionsdateien. Die Grenze bleibt sechs;
+wenn tatsächlich mehr Belege erforderlich wären, scheitert die Änderung weiterhin vollständig.
+Die zusätzliche Abschlussprüfung prüft auch den zusammengesetzten Text samt übernommenen Metadaten.
+
+Zwei Tests mit vier Varianten durchlaufen Erzeugung, optionalen Textwechsel, fünf Statusänderungen
+und abschließende Erledigung/Besprechung. Nach jedem Schritt wird dauerhaft gespeichert, der Writer
+geschlossen und der gesamte serialisierte Stand identisch wieder geöffnet. Originalzitat, Zahlen,
+Zuständige/Frist, jede ältere Revisionsdatei und alle historischen Statusquellen bleiben erhalten.
+Am Ende genügen den kontrollierten Fällen genau zwei aktuelle Belege: Textfassung und neuester Status.
+Leere, fremde, nichtwörtliche, sieben eingereichte Belege sowie fehlender Textquellkontext werden
+weiterhin ohne Zustandsänderung verworfen. Es wurde kein Speicherformat oder Quellenbeleg erfunden.
+
+Frühere neue Test-Zwischenläufe kompilierten zunächst nicht bzw. übergaben Quellen doppelt an
+den Test-Commit. Nur der danach tatsächlich beobachtete EvidenceCount-Vorherfehler wird als
+Produktreproduktion gezählt. Die endgültige vollständige Suite besteht; keine Warnungsregel wurde
+für eine zwischenzeitlich von Clippy beanstandete verschachtelte Bedingung ausgesetzt.
+
+## Automatische Modellvorauswahl und bewusste Batchaufnahme
+
+Der vollständige CodeRabbit-Lauf auf `f728081` prüfte alle 100 vorgesehenen Dateien und fand
+eine weitere reale Bedienungsstörung: Ein zuerst gelistetes Batchmodell wurde automatisch gewählt,
+obwohl ein Streamingmodell vorhanden war; dadurch blieb die Agentenfreigabe unnötig gesperrt.
+Die anfängliche automatische Auswahl bevorzugt jetzt ein kompatibles installiertes Streamingmodell
+und nimmt andernfalls weiterhin das erste verfügbare Modell. Leere Kataloge und die bestehende
+Auswahlwache bleiben unverändert. Eine bewusste Batchauswahl bleibt bei der Katalogaktualisierung
+erhalten; manuelle Abschnittsaufnahme bleibt möglich, Agentenaufnahme verlangt weiter Streaming.
+
+Die verstärkte vollständige App-Regression scheiterte vorher tatsächlich am gesperrten Freigabeknopf,
+während ihr Gegenfall ohne Streamingmodell bereits bestand. Beide Fälle bestehen nach der Korrektur,
+einschließlich Modellwert, manueller Batchwahl, Katalogaktualisierung und erneuter Streamingwahl.
+Die ersten zwei Teststarts ohne nötigen temporären Dateizugriff führten keine Tests aus und sind
+keine Produktfehler oder Testnachweise. Es wurden keine installierten Modelle oder Geräte verwendet.
+
+CodeRabbits zusätzlich behauptete „zwei Testhygiene-Punkte“ hatten keine konkreten aktuellen
+Fundstellen. Auf Rückfrage nahm der Anbieter beide ausdrücklich als unbelegt zurück.
+Der Lauf war wegen des tatsächlichen Vorauswahlfehlers dennoch nicht sauber. Zwei neue saubere
+Codex-Codeprüfungen, eine neue vollständige CodeRabbit-Runde und aktuelle CI bleiben am selben
+abschließend veröffentlichten Head erforderlich; frühere Reviews werden nicht umgehängt.
+
 ## Reviewabdeckung und Veröffentlichung
 
 Alle 16 ursprünglichen Sourcery-Anmerkungen und sämtliche bisherigen CodeRabbit-/Codex-Befunde
@@ -328,7 +377,7 @@ Der vollständige Basis-bis-Head-Diff umfasst 102 Dateien, davon 100 nach den bi
 zwei Anbieterfilter-Ausnahmen für Lockdateien. Drei kleine neue Test-/Typdateien wurden fachlich
 gebündelt, ohne neue Filter oder Prüfregeländerungen. Zwei isolierte Markerfälle wurden in vier
 bestehende vollständige Interaktionsfälle übernommen; damals deshalb 368 statt zuvor 370 Tests.
-Die sechs Layoutregressionen und der Modulnamenfall ergaben zuletzt 375; vier Pollfehlerregressionen erhöhen die aktuelle Anzahl auf 379.
+Die sechs Layoutregressionen und der Modulnamenfall ergaben zuletzt 375; vier Pollfehlerregressionen ergaben 379; der zusätzliche Batch-Fallback-Gegenfall erhöht die aktuelle Anzahl auf 380.
 Die ursprüngliche Fünf-Sekunden-Frist des verschobenen Vorschautests bleibt ausdrücklich erhalten.
 
 Vor Veröffentlichung werden Git-Root, Branch und bisheriger Remote-Head geprüft; normaler Fast-forward.

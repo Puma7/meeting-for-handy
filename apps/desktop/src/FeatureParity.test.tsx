@@ -506,68 +506,86 @@ it("passes only the approved agent scope and current UI devices without starting
   expect(data.api.startMeeting).not.toHaveBeenCalled();
 });
 
-it("blocks agent approval for batch-only models while allowing manual section capture", async () => {
-  const data = fixture();
-  const current = data.getState();
-  data.setState({
-    ...current,
-    activeMeeting: null,
-    handy: {
-      ...current.handy!,
-      models: [
-        ...current.handy!.models,
-        {
-          id: "parakeet-ultra",
-          name: "Parakeet Ultra",
-          isDownloaded: true,
-          supportsStreaming: false,
-          supportsBatch: true,
-        },
-      ],
-    },
-    agent: {
-      connected: true,
-      label: "Synthetic agent",
-      ownerId: "fixture-owner",
-      revoked: false,
-      pending: {
-        requestId: "fixture-batch-request",
-        title: "Explicit request",
-        includeMicrophone: false,
-        maxDurationSeconds: 600,
-        status: "pending",
+it.each([true, false])(
+  "prefers streaming initially and preserves explicit batch capture (stream available: %s)",
+  async (hasStreaming) => {
+    const data = fixture();
+    const current = data.getState();
+    data.setState({
+      ...current,
+      activeMeeting: null,
+      handy: {
+        ...current.handy!,
+        models: [
+          {
+            id: "parakeet-ultra",
+            name: "Parakeet Ultra",
+            isDownloaded: true,
+            supportsStreaming: false,
+            supportsBatch: true,
+          },
+          ...(hasStreaming ? current.handy!.models : []),
+        ],
       },
-      ownedSessionId: null,
-      expiresAtUnixMs: null,
-    },
-  });
-  render(<App api={data.api} />);
-  const approve = await screen.findByRole("button", {
-    name: "Diese Aufnahme erlauben",
-  });
-  await waitFor(() =>
-    expect((approve as HTMLButtonElement).disabled).toBe(false),
-  );
-  await userEvent.selectOptions(
-    screen.getByLabelText("Erkennungsmodell aus Handy"),
-    "parakeet-ultra",
-  );
-  expect(
-    (
-      screen.getByRole("button", {
-        name: "Aufnahme starten",
-      }) as HTMLButtonElement
-    ).disabled,
-  ).toBe(false);
-  expect((approve as HTMLButtonElement).disabled).toBe(true);
-  await userEvent.click(approve);
-  expect(data.api.agentDecideRecording).not.toHaveBeenCalled();
-  await userEvent.selectOptions(
-    screen.getByLabelText("Erkennungsmodell aus Handy"),
-    "streaming",
-  );
-  expect((approve as HTMLButtonElement).disabled).toBe(false);
-});
+      agent: {
+        connected: true,
+        label: "Synthetic agent",
+        ownerId: "fixture-owner",
+        revoked: false,
+        pending: {
+          requestId: "fixture-batch-request",
+          title: "Explicit request",
+          includeMicrophone: false,
+          maxDurationSeconds: 600,
+          status: "pending",
+        },
+        ownedSessionId: null,
+        expiresAtUnixMs: null,
+      },
+    });
+    render(<App api={data.api} />);
+    const approve = await screen.findByRole("button", {
+      name: "Diese Aufnahme erlauben",
+    });
+    await waitFor(() =>
+      expect((approve as HTMLButtonElement).disabled).toBe(!hasStreaming),
+    );
+    expect(
+      (screen.getByLabelText("Erkennungsmodell aus Handy") as HTMLSelectElement)
+        .value,
+    ).toBe(hasStreaming ? "streaming" : "parakeet-ultra");
+    await userEvent.selectOptions(
+      screen.getByLabelText("Erkennungsmodell aus Handy"),
+      "parakeet-ultra",
+    );
+    expect(
+      (
+        screen.getByRole("button", {
+          name: "Aufnahme starten",
+        }) as HTMLButtonElement
+      ).disabled,
+    ).toBe(false);
+    expect((approve as HTMLButtonElement).disabled).toBe(true);
+    await userEvent.click(approve);
+    expect(data.api.agentDecideRecording).not.toHaveBeenCalled();
+    await userEvent.click(
+      screen.getByRole("button", { name: "Aktualisieren" }),
+    );
+    await waitFor(() => expect(data.api.refreshHandy).toHaveBeenCalledOnce());
+    expect(
+      (screen.getByLabelText("Erkennungsmodell aus Handy") as HTMLSelectElement)
+        .value,
+    ).toBe("parakeet-ultra");
+    expect((approve as HTMLButtonElement).disabled).toBe(true);
+    if (hasStreaming) {
+      await userEvent.selectOptions(
+        screen.getByLabelText("Erkennungsmodell aus Handy"),
+        "streaming",
+      );
+      expect((approve as HTMLButtonElement).disabled).toBe(false);
+    }
+  },
+);
 
 it("never attaches a revoked preview URL when retrying a media failure", async () => {
   const revoked = new Set<string>();

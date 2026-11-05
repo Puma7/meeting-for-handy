@@ -702,7 +702,9 @@ export default function App({ api = desktopApi }: { api?: DesktopApi }) {
       }
     } else if (!initialModelSelected.current && models.length) {
       initialModelSelected.current = true;
-      setModelId(models[0].id);
+      setModelId(
+        (models.find((item) => item.supportsStreaming) ?? models[0]).id,
+      );
     }
   }, [app?.handy, modelId, handyRefreshFailure, t.modelUnavailable]);
   /**

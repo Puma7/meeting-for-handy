@@ -136,36 +136,37 @@ pub(crate) fn apply(
         } else {
             crate::validation::screen_facts
         };
+        let retained = old
+            .map(|old| retained_update_evidence(state, old, &c))
+            .unwrap_or_default();
         let mut text_evidence = c.evidence.clone();
-        if c.text.is_none() && c.kind != "agenda" {
-            if let Some(old) = old {
-                // Old text evidence may support its unchanged numbers, but it
-                // cannot rescue an unsupported/nonbinding new status claim.
-                let status = crate::Fact {
-                    text: c
-                        .evidence
-                        .first()
-                        .map(|e| e.quote.clone())
-                        .unwrap_or_default(),
-                    owner: c.owner.clone(),
-                    due: c.due.clone(),
-                    evidence: c.evidence.clone(),
-                };
-                let status = screen(
-                    vec![status],
-                    &request.transcript_sources,
-                    &kind,
-                    "workspace",
-                    1,
-                );
-                ensure!(
-                    status.items.len() == 1 && status.rejected.is_empty(),
-                    "Der neue Status hat keinen eigenständig zulässigen Originalbeleg."
-                );
-                for evidence in &old.evidence {
-                    if !text_evidence.contains(evidence) {
-                        text_evidence.push(evidence.clone());
-                    }
+        if c.text.is_none() && c.kind != "agenda" && old.is_some() {
+            // Old text evidence may support its unchanged numbers, but it
+            // cannot rescue an unsupported/nonbinding new status claim.
+            let status = crate::Fact {
+                text: c
+                    .evidence
+                    .first()
+                    .map(|e| e.quote.clone())
+                    .unwrap_or_default(),
+                owner: c.owner.clone(),
+                due: c.due.clone(),
+                evidence: c.evidence.clone(),
+            };
+            let status = screen(
+                vec![status],
+                &request.transcript_sources,
+                &kind,
+                "workspace",
+                1,
+            );
+            ensure!(
+                status.items.len() == 1 && status.rejected.is_empty(),
+                "Der neue Status hat keinen eigenständig zulässigen Originalbeleg."
+            );
+            for evidence in &retained {
+                if !text_evidence.contains(evidence) {
+                    text_evidence.push(evidence.clone());
                 }
             }
         }
@@ -250,18 +251,8 @@ pub(crate) fn apply(
             existing.status = c.status;
             existing.attention = c.attention;
             existing.evidence = c.evidence.clone();
-            for evidence in &before.evidence {
-                if ((c.text.is_none() && c.kind != "agenda")
-                    || existing
-                        .owner
-                        .as_ref()
-                        .is_some_and(|v| evidence.quote.to_lowercase().contains(&v.to_lowercase()))
-                    || existing
-                        .due
-                        .as_ref()
-                        .is_some_and(|v| evidence.quote.to_lowercase().contains(&v.to_lowercase())))
-                    && !existing.evidence.contains(evidence)
-                {
+            for evidence in &retained {
+                if !existing.evidence.contains(evidence) {
                     existing.evidence.push(evidence.clone());
                 }
             }
@@ -271,6 +262,21 @@ pub(crate) fn apply(
             }
             if c.due.is_some() {
                 existing.due = c.due;
+            }
+            if existing.kind != "agenda" {
+                let checked = screen(
+                    vec![crate::Fact {
+                        text: existing.text.clone(),
+                        owner: existing.owner.clone(),
+                        due: existing.due.clone(),
+                        evidence: existing.evidence.clone(),
+                    }],
+                    &request.transcript_sources,
+                    &kind,
+                    "workspace",
+                    1,
+                );
+                ensure!(checked.items.len() == 1 && checked.rejected.is_empty(), "Der aktualisierte Eintrag benötigt zulässige Originalbelege für Text und Metadaten.");
             }
             if *existing == before {
                 continue;
@@ -337,6 +343,52 @@ pub(crate) fn apply(
     next.events.extend(events.clone());
     *state = next;
     Ok(events)
+}
+
+/// Retain the unchanged text's revision evidence and one witness per inherited metadata value.
+/// Superseded status quotes remain in immutable history instead of accumulating in the current view.
+fn retained_update_evidence(
+    state: &WorkspaceState,
+    old: &Entity,
+    change: &Change,
+) -> Vec<crate::Evidence> {
+    let mut retained = Vec::new();
+    if change.text.is_none() && change.kind != "agenda" {
+        let text_evidence = state
+            .events
+            .iter()
+            .rev()
+            .filter(|event| event.entity_id == old.id)
+            .take_while(|event| event.text == old.text)
+            .last()
+            .map(|event| &event.evidence)
+            .unwrap_or(&old.evidence);
+        retained.extend(text_evidence.iter().cloned());
+    }
+    for value in [
+        old.owner.as_ref().filter(|_| change.owner.is_none()),
+        old.due.as_ref().filter(|_| change.due.is_none()),
+    ]
+    .into_iter()
+    .flatten()
+    {
+        let value = value.to_lowercase();
+        if !change
+            .evidence
+            .iter()
+            .chain(&retained)
+            .any(|evidence| evidence.quote.to_lowercase().contains(&value))
+        {
+            if let Some(evidence) = old
+                .evidence
+                .iter()
+                .find(|evidence| evidence.quote.to_lowercase().contains(&value))
+            {
+                retained.push(evidence.clone());
+            }
+        }
+    }
+    retained
 }
 
 // Shared exact-word polarity screen. Apostrophes tokenize "we'll"/"we’ll"
