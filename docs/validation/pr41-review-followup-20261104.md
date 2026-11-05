@@ -2,15 +2,17 @@
 
 Stand: 5. November 2026. Version **1.1.0-beta.1**, unverändert.
 
-Die aktuelle Nacharbeit behebt drei bestätigte CodeRabbit-Befunde: Kartenmenüs
-schließen nach erneutem Maus- oder Touchklick zuverlässig, der Einfügehinweis ist
-im Dunkelmodus lesbar, und klassische Ollama-Auswertungsfehler werden als
-Auswertungsfehler erklärt. Verwaltungsfehler bleiben getrennt erkennbar.
-Alle bisherigen Korrekturen einschließlich des englischen Referenzpatches
-`93335102ed` bleiben enthalten.
+Die aktuelle Nacharbeit erhält beim Wechsel des Textmodells unveränderte
+geerbte Quellenkennungen. Eine manuell erledigte Aufgabe wird dadurch bei der
+erneuten Verarbeitung desselben Transkripts nicht als neuer offener Auftrag
+angelegt. Tatsächlich zurückgezogene Quellen behalten ihre Zurücknahme;
+neue unabhängige Zusagen bleiben neue Aufgaben.
 
-Die [ausführliche bisherige Fassung](https://github.com/Puma7/meeting-for-handy/blob/0d8c03ca7d71172e8086894fad4cf405acd72881/docs/validation/pr41-review-followup-20261104.md)
-bewahrt die genauen früheren Vorher-/Nachherfälle unveränderlich in Git.
+Die vorherigen Kartenmenü-, Kontrast- und Ollama-Diagnostikkorrekturen sowie
+alle früheren Reviewkorrekturen einschließlich des englischen Referenzpatches
+`93335102ed` bleiben enthalten.
+Die [ausführliche bisherige Fassung](https://github.com/Puma7/meeting-for-handy/blob/8d0ba2139028af03a44e6e6f507df3efe46f8a9a/docs/validation/pr41-review-followup-20261104.md)
+und deren verlinkte Detailhistorie bleiben unveränderlich in Git.
 Private Rohbelege, fehlgeschlagene Läufe und alte Reviewfassungen bleiben erhalten.
 Historische Nachweise werden nicht als erneut ausgeführt ausgegeben.
 Der vollständige TEST_REPORT bleibt gegenüber dem PR-Basisstand byteunverändert.
@@ -43,6 +45,44 @@ Modellfassungen und menschliche Bestätigungen bleiben versioniert erhalten.
 Schlüssel werden nicht protokolliert oder als Klartext gespeichert.
 
 ## Aktuelle Korrekturen und echte Vorherfälle
+
+### Modellwechsel und Quellenidentität
+
+Der [Codex-Befund](https://github.com/Puma7/meeting-for-handy/pull/41#discussion_r4485201700)
+auf `8d0ba21` war gültig. Modell B übernahm menschlich bestätigte Aufgaben
+von Modell A, vergab einem unveränderten Transkriptabschnitt bei der ersten
+Verarbeitung aber eine neue Kennung. Dadurch fehlte die vorhandene erledigte
+Aufgabe im Aufgaben-Kontext; eine wiederholte Zusage erzeugte ein offenes Duplikat.
+
+Vorher reproduzierten der unmittelbare Wechsel und der Wechsel mit vorheriger
+Wiederöffnung jeweils eine zweite Aufgabe und fehlenden terminalen Kontext.
+Der neue Test verwendet die tatsächlichen Modelllauf-Ordner, Kontextbestätigung,
+Pending-Auswahl, Requests, Validierung und dauerhafte Speicherung.
+Nur die Modellantworten liefert ein begrenzter eigener HTTP-Prüfserver.
+Nachher bleiben Kennung, menschlicher Status, Metadaten und Wiederöffnung stabil;
+der tatsächlich versendete Aufgaben-Kontext enthält die erledigte Identität.
+Eine spätere identische Zusage aus einem unabhängigen Abschnitt erhält weiterhin
+eine neue Kennung und erzeugt eine neue offene Aufgabe. Alte Dateien bleiben erhalten.
+
+Unveränderte geerbte Quellen behalten ihre Identität nur bei gleicher Abschnitts-,
+Spur-, Zeit- und Textzuordnung, ohne Zurücknahme und vor der ersten eigenen
+Verarbeitung dieses Abschnitts. Korrekturen und zurückgekehrte frühere Fassungen
+werden nicht als unverändert behandelt.
+
+Zusätzlich werden bekannte Zurücknahmen historischer Ereignisquellen vererbt.
+Eine kontrollierte Gegenprobe verlor diesen Marker vorher beim Wechsel.
+Danach erhält derselbe Text einer zurückgezogenen historischen Quelle eine neue Kennung;
+der weiterhin gültige aktuelle Beleg behält dagegen seine bisherige Kennung.
+Alle neun Modellvererbungsfälle einschließlich Quellenänderung, Entfernung,
+Wiederherstellung, Chronologie und bytegleicher Wiederöffnung bestehen.
+Statische Prompts, Vertragsdateien, Belegbudget und Produktionsfristen bleiben
+unverändert. Das ist eine kontrollierte Orchestrierungsregression, kein echter
+Zweimodell-Inferenzlauf.
+
+### Vorherige Korrekturen auf unveränderten Komponenten
+
+Die folgenden Karten-/Diagnostik-Nachweise stammen vom bytegleichen
+`8d0ba21`-Stand und wurden hier nicht erneut ausgeführt.
 
 ### Kartenmenü
 
@@ -98,11 +138,11 @@ bleiben unverändert. Echte Ollama-Inferenz wird daraus nicht behauptet.
 
 | Prüfung | Tatsächliches Ergebnis |
 | --- | --- |
-| Rust-Workspace, alle Targets | **565 bestanden**, darunter **166 Notizenfälle** und **37 Providerprotokollfälle**; drei bestehende besondere Einstiege regulär ignoriert. |
+| Rust-Workspace, alle Targets | **567 bestanden**, darunter **168 Notizenfälle** und **37 Providerprotokollfälle**; drei bestehende besondere Einstiege regulär ignoriert. |
 | Rustformat und Clippy | Bestanden, gesperrte Abhängigkeiten und Warnungen als Fehler. |
-| Frontend | **414 Tests in 21 Dateien**, TypeScript, Produktionsbuild und vollständige Formatprüfung bestanden. Zwei Testworker und bisherige Fristen unverändert. |
-| Lokale Modellreferenz Deutsch | **101.8893706 s**, 1 reguläre vollständig validierte Wiederholungen. |
-| Lokale Modellreferenz Englisch | **97.1079184 s**, 0 reguläre vollständig validierte Wiederholungen. |
+| Frontend | Auf den hier bytegleichen Komponenten von `8d0ba21`: **414 Tests in 21 Dateien**, TypeScript, Produktionsbuild und Format bestanden; hier nicht erneut ausgeführt. Zwei Testworker und bisherige Fristen unverändert. |
+| Lokale Modellreferenz Deutsch | **134.2789829 s**; reguläre vollständig validierte Wiederholungen: **1**. |
+| Lokale Modellreferenz Englisch | **164.4314505 s**; reguläre vollständig validierte Wiederholungen: **0**. |
 | Projektprüfung | Nach diesem letzten Dokumentedit vor Upload erneut `verify.ps1` erforderlich. Sie prüft 47 PCM-, 35 Notizen-, 28 Vorlagen-, acht Agenten- und Monitorfälle. |
 
 Beide neuen Referenzen prüfen positive Aufgaben, unverbindliche Aussagen,
@@ -138,6 +178,16 @@ Das ist kein echter Parakeet- oder physischer Zweistundenlauf.
 Die 21 Paketregressionen auf `91f0985` verwendeten synthetische ZIPs;
 hier wurde kein neues Produktpaket oder Installer bereitgestellt.
 
+Ein zusätzlicher echter deutscher Referenzversuch dieses nativen Stands
+speicherte die ausdrückliche Zusage nur als unklaren Fakt und keine Aufgabe.
+Die Referenzprüfung scheiterte deshalb ausdrücklich. Die Aufgabenphasen-Antwort
+und deren Retryzahl wurden nicht separat gespeichert; eine weitergehende Ursache
+wird nicht behauptet. Es waren keine geerbten Quellen beteiligt.
+Der Fehllauf und alle gesicherten Dateien bleiben erhalten. Das nachfolgende
+Referenzpaar ist ein eigener Durchlauf mit unverändertem Code, Modell,
+Prompt und Bestehenskriterien. Es beweist keine vollständige Erkennung aller
+Aufgaben in beliebigen Modellantworten.
+
 Ein echter deutscher Referenzversuch auf `da6b5c2` speicherte Fenster 1 und
 hielt wegen einer nichtleeren `unresolvedContextIds`-Antwort sicher an.
 Der konkrete angeforderte Kontext wurde nicht separat gespeichert;
@@ -171,6 +221,12 @@ Diese früheren CI-Ergebnisse werden nicht auf den neuen Head übertragen.
 Dessen eigene aktuelle CI und saubere Reviews bleiben erforderlich.
 
 ## Reviewstand und bewahrte Schutzmechanismen
+
+Die erste Codex-Runde auf dem direkten Vorgänger `8d0ba21` fand den oben
+korrigierten Quellenfehler. Sie war kein sauberer Abschluss. Auf diesem
+Zwischenstand wurde kein weiterer vollständiger CodeRabbit-Auftrag verbraucht.
+Für den endgültigen Head bleiben zwei frische saubere Codex-Codeprüfungen, eine
+vollständige saubere CodeRabbit-Runde und dessen eigene grüne CI erforderlich.
 
 Alle 16 ursprünglichen [Sourcery-Anmerkungen](https://github.com/Puma7/meeting-for-handy/pull/41#pullrequestreview-5748992615)
 wurden einzeln gegen den Code geprüft, beantwortet und geschlossen.
@@ -231,9 +287,9 @@ werden nicht still ersetzt. Archiviertes Audio muss zuerst wiederhergestellt
 werden. Legacy-Originalsitzungen bleiben lesbar; nachträgliche Erkennung dieser
 älteren Sitzungen benötigt weiterhin die bisherige Programmversion.
 
-Statische Prompts, Vertragsdateien, Aufnahme-/ASR-Logik, Modellreservierungen,
+Statische Prompts, Vertragsdateien, UI, Transport, Aufnahme-/ASR-Logik, Modellreservierungen,
 Abhängigkeiten, Datenschutz-/Reviewer-Konfiguration, Version und vollständiger
-TEST_REPORT bleiben gegenüber `0d8c03c` unverändert.
+TEST_REPORT bleiben gegenüber `8d0ba21` unverändert.
 
 Physische Aufnahme-, Berechtigungs-, Geräteverlust- und zweistündige Gerätetests
 wurden vom Nutzer auf später verschoben. Keine neue echte Parakeet-Dauer-,

@@ -174,6 +174,12 @@ impl WorkspaceRunner {
             .chain(&previous.inherited_sources)
             .filter(|source| source_ids.contains(&source_id(source)))
         {
+            // Historical event evidence can refer to a withdrawn original.
+            // Import its retirement as well, so matching text cannot revive its authority.
+            let id = source_id(source);
+            if previous.superseded_sources.contains(&id) && !next.superseded_sources.contains(&id) {
+                next.superseded_sources.push(id);
+            }
             if !next
                 .processed
                 .iter()
@@ -218,11 +224,34 @@ impl WorkspaceRunner {
             .chain(&self.state.inherited_sources)
             .map(|s| s.id.clone())
             .collect::<HashSet<_>>();
+        let mut assigned = HashSet::new();
         for source in &mut pending {
+            // A new model still processes this text, but unchanged inherited
+            // evidence retains its original identity for human-task deduplication.
+            if let Some(inherited) = self.state.inherited_sources.iter().find(|old| {
+                old.key == source.key
+                    && old.chunk == source.chunk
+                    && old.source == source.source
+                    && old.start_ms == source.start_ms
+                    && old.end_ms == source.end_ms
+                    && old.text == source.text
+                    && !assigned.contains(&old.id)
+                    && !self.state.superseded_sources.contains(&source_id(old))
+                    && !self
+                        .state
+                        .processed
+                        .iter()
+                        .any(|seen| seen.key == old.key && seen.chunk == old.chunk)
+            }) {
+                source.id.clone_from(&inherited.id);
+                assigned.insert(source.id.clone());
+                continue;
+            }
             while used.contains(&source.id) {
                 source.id.push('r');
             }
             used.insert(source.id.clone());
+            assigned.insert(source.id.clone());
         }
         pending.sort_by(|a, b| {
             (a.start_ms, &a.source, &a.key, a.chunk).cmp(&(b.start_ms, &b.source, &b.key, b.chunk))

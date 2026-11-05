@@ -1,6 +1,347 @@
 use super::*;
 
 #[test]
+fn model_switch_keeps_retired_historical_sources_retired() {
+    let root = tempfile::tempdir().unwrap();
+    let old_text = LiveText {
+        key: "old".into(),
+        track: "system".into(),
+        start_ms: 0,
+        end_ms: 3000,
+        text: "I will send the report.".into(),
+    };
+    let new_text = LiveText {
+        key: "new".into(),
+        track: "system".into(),
+        start_ms: 4000,
+        end_ms: 7000,
+        text: "I will check the report.".into(),
+    };
+    let live = live::pending(&[], &[old_text.clone(), new_text.clone()]);
+    let originals = live
+        .iter()
+        .map(|s| Source {
+            id: source_id(s),
+            source: s.source.clone(),
+            start_ms: s.start_ms,
+            end_ms: s.end_ms,
+            text: s.text.clone(),
+        })
+        .collect::<Vec<_>>();
+    let first_folder = root.path().join("model-a");
+    let mut a = WorkspaceRunner::open(&first_folder).unwrap();
+    a.set_context(Default::default()).unwrap();
+    let context = a.context.lock().unwrap().clone();
+    let mut state = a.state.clone();
+    let mut req = Request::new(
+        "r_seed".into(),
+        &context,
+        &state,
+        vec![],
+        std::slice::from_ref(&originals[0]),
+        originals.clone(),
+    );
+    req.purpose = "tasks".into();
+    let answer = json!({"contractVersion":CONTRACT_VERSION,"requestId":"r_seed","changes":[{"proposalId":"p_task","kind":"task","targetId":null,"targetRevision":null,"text":"Send the report","status":"open","attention":"current","owner":null,"due":null,"evidence":[{"sourceId":originals[0].id,"quote":originals[0].text}],"relatedEntityIds":[]}],"overviewRefs":[],"unresolvedContextIds":[],"moreChangesPossible":false});
+    validate::apply(&mut state, &req, &answer.to_string()).unwrap();
+    let id = state.entities[0].id.clone();
+    let mut req = Request::new(
+        "r_edit".into(),
+        &context,
+        &state,
+        state.entities.clone(),
+        std::slice::from_ref(&originals[1]),
+        originals.clone(),
+    );
+    req.purpose = "tasks".into();
+    let answer = json!({"contractVersion":CONTRACT_VERSION,"requestId":"r_edit","changes":[{"proposalId":"p_edit","kind":"task","targetId":id,"targetRevision":state.entities[0].revision,"text":"Check the report","status":"open","attention":"current","owner":null,"due":null,"evidence":[{"sourceId":originals[1].id,"quote":originals[1].text}],"relatedEntityIds":[]}],"overviewRefs":[],"unresolvedContextIds":[],"moreChangesPossible":false});
+    validate::apply(&mut state, &req, &answer.to_string()).unwrap();
+    assert_eq!(state.entities[0].evidence.len(), 1);
+    assert_eq!(state.entities[0].evidence[0].source_id, originals[1].id);
+    assert!(state
+        .events
+        .iter()
+        .any(|e| e.evidence.iter().any(|v| v.source_id == originals[0].id)));
+    state.originals = originals.clone();
+    state.processed = live;
+    a.commit(
+        state,
+        originals.clone(),
+        vec![],
+        &AnalysisControl::default(),
+        &context,
+    )
+    .unwrap();
+    let mut context = a.context.lock().unwrap().clone();
+    context.overrides.push(Override {
+        id: id.clone(),
+        expected_revision: a.state.entities[0].revision,
+        status: "completed".into(),
+        saved: true,
+    });
+    drop(a);
+    update_context(&first_folder, &context).unwrap();
+    let mut a = WorkspaceRunner::open(&first_folder).unwrap();
+    assert!(a.pending(std::slice::from_ref(&new_text)).is_empty());
+    let client = TextClient::new(&crate::Connection {
+        endpoint: "http://127.0.0.1:1/v1/".into(),
+        model: "no-request".into(),
+        mode: "local".into(),
+        cloud_consent: false,
+        api_key: String::new(),
+    })
+    .unwrap();
+    a.update(&client, &[], &AnalysisControl::default(), "en")
+        .unwrap();
+    let previous = a.view();
+    assert!(previous.superseded_sources.contains(&originals[0].id));
+    assert!(!previous.context_excluded_ids.contains(&id));
+    assert!(previous.entities[0].human_locked);
+    assert_eq!(previous.entities[0].status, "completed");
+    let second_folder = root.path().join("model-b");
+    let mut b = WorkspaceRunner::open(&second_folder).unwrap();
+    b.set_context(Default::default()).unwrap();
+    b.inherit_manual(&previous).unwrap();
+    drop(b);
+    let b = WorkspaceRunner::open(&second_folder).unwrap();
+    assert!(b.state.superseded_sources.contains(&originals[0].id));
+    assert_eq!(b.state.originals, originals);
+    let pending = b.pending(&[old_text, new_text]);
+    assert_eq!(pending.len(), 2);
+    assert_ne!(
+        source_id(&pending[0]),
+        originals[0].id,
+        "A withdrawn historical identity must never be revived by equal text."
+    );
+    assert_eq!(
+        source_id(&pending[1]),
+        originals[1].id,
+        "The still-valid current witness retains its identity."
+    );
+    assert_eq!(b.state.entities[0], previous.entities[0]);
+    assert_eq!(
+        serde_json::to_vec(&b.view()).unwrap(),
+        serde_json::to_vec(&read_state(&second_folder).unwrap()).unwrap()
+    );
+}
+
+#[test]
+fn model_switch_reuses_unchanged_inherited_sources_without_reopening_human_tasks() {
+    use std::{
+        io::{Read, Write},
+        net::TcpListener,
+        sync::{
+            atomic::{AtomicBool, Ordering},
+            Arc,
+        },
+        thread,
+        time::{Duration, Instant},
+    };
+    let mut failures = Vec::new();
+    for reopen in [false, true] {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let endpoint = format!("http://{}/v1/", listener.local_addr().unwrap());
+        let stop = Arc::new(AtomicBool::new(false));
+        let server_stop = stop.clone();
+        let server = thread::spawn(move || {
+            let mut requests = Vec::new();
+            let deadline = Instant::now() + Duration::from_secs(10);
+            while !server_stop.load(Ordering::SeqCst) {
+                assert!(Instant::now() < deadline);
+                let mut stream = match accept_synthetic_before(
+                    &listener,
+                    Instant::now() + Duration::from_millis(100),
+                ) {
+                    Ok(stream) => stream,
+                    Err(e) if e.kind() == std::io::ErrorKind::TimedOut => continue,
+                    Err(e) => panic!("{e}"),
+                };
+                let mut bytes = Vec::new();
+                let mut buffer = [0; 8192];
+                let header = loop {
+                    let n = stream.read(&mut buffer).unwrap();
+                    assert!(n > 0 && bytes.len() < 500000);
+                    bytes.extend_from_slice(&buffer[..n]);
+                    if let Some(at) = bytes.windows(4).position(|b| b == b"\r\n\r\n") {
+                        break at + 4;
+                    }
+                };
+                let size = String::from_utf8_lossy(&bytes[..header])
+                    .lines()
+                    .filter_map(|l| l.split_once(':'))
+                    .find(|(k, _)| k.eq_ignore_ascii_case("content-length"))
+                    .unwrap()
+                    .1
+                    .trim()
+                    .parse::<usize>()
+                    .unwrap();
+                assert!(size < 500000);
+                while bytes.len() < header + size {
+                    let n = stream.read(&mut buffer).unwrap();
+                    assert!(n > 0);
+                    bytes.extend_from_slice(&buffer[..n]);
+                }
+                let body: serde_json::Value =
+                    serde_json::from_slice(&bytes[header..header + size]).unwrap();
+                let req: serde_json::Value =
+                    serde_json::from_str(body["messages"][1]["content"].as_str().unwrap()).unwrap();
+                let mut changes = vec![];
+                if req["purpose"] == "tasks" {
+                    for source in req["transcriptSources"]
+                        .as_array()
+                        .unwrap()
+                        .iter()
+                        .filter(|s| {
+                            req["window"]["requiredSourceIds"]
+                                .as_array()
+                                .unwrap()
+                                .contains(&s["id"])
+                        })
+                    {
+                        if source["text"] == "I will send the report tomorrow." {
+                            changes.push(json!({"proposalId":format!("p_{}",changes.len()),"kind":"task","targetId":null,"targetRevision":null,"text":"Send the report","status":"open","attention":"current","owner":null,"due":"tomorrow","evidence":[{"sourceId":source["id"],"quote":source["text"]}],"relatedEntityIds":[]}));
+                        }
+                    }
+                }
+                let answer = json!({"contractVersion":CONTRACT_VERSION,"requestId":req["requestId"],"changes":changes,"overviewRefs":[],"unresolvedContextIds":[],"moreChangesPossible":false}).to_string();
+                requests.push(req);
+                let payload = format!(
+                    "data: {}\n\ndata: {}\n\n",
+                    json!({"choices":[{"delta":{"content":answer},"finish_reason":null}]}),
+                    json!({"choices":[{"delta":{},"finish_reason":"stop"}]})
+                );
+                write!(stream,"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{payload}",payload.len()).unwrap();
+            }
+            requests
+        });
+        let root = tempfile::tempdir().unwrap();
+        let connection = |model: &str| crate::Connection {
+            endpoint: endpoint.clone(),
+            model: model.into(),
+            mode: "local".into(),
+            cloud_consent: false,
+            api_key: String::new(),
+        };
+        let first =
+            crate::live::LiveRunner::start(root.path(), "meeting", connection("model-a"), "en")
+                .unwrap()
+                .with_workspace(Default::default())
+                .unwrap();
+        let first_folder = first.workspace_folder().unwrap();
+        drop(first);
+        let text = LiveText {
+            key: "part-0".into(),
+            track: "system".into(),
+            start_ms: 0,
+            end_ms: 3000,
+            text: "I will send the report tomorrow.".into(),
+        };
+        let client = TextClient::new(&connection("synthetic-switch")).unwrap();
+        let mut a = WorkspaceRunner::open(&first_folder).unwrap();
+        let pending = a.pending(std::slice::from_ref(&text));
+        let original_id = source_id(&pending[0]);
+        a.update(&client, &pending, &AnalysisControl::default(), "en")
+            .unwrap();
+        let entity_id = a.state.entities[0].id.clone();
+        let mut context = a.context.lock().unwrap().clone();
+        context.overrides.push(Override {
+            id: entity_id.clone(),
+            expected_revision: a.state.entities[0].revision,
+            status: "completed".into(),
+            saved: true,
+        });
+        drop(a);
+        update_context(&first_folder, &context).unwrap();
+        let completed = read_state(&first_folder).unwrap().entities[0].clone();
+        let old_files = std::fs::read_dir(&first_folder)
+            .unwrap()
+            .map(Result::unwrap)
+            .filter(|e| e.file_name().to_string_lossy().starts_with("revision-"))
+            .map(|e| (e.path(), std::fs::read(e.path()).unwrap()))
+            .collect::<Vec<_>>();
+        let second =
+            crate::live::LiveRunner::start(root.path(), "meeting", connection("model-b"), "en")
+                .unwrap()
+                .with_workspace(Default::default())
+                .unwrap();
+        let second_folder = second.workspace_folder().unwrap();
+        drop(second);
+        let mut b = WorkspaceRunner::open(&second_folder).unwrap();
+        assert!(b.state.processed.is_empty());
+        assert_eq!(b.state.entities[0], completed);
+        if reopen {
+            drop(b);
+            b = WorkspaceRunner::open(&second_folder).unwrap();
+        }
+        let pending = b.pending(std::slice::from_ref(&text));
+        let offered_id = source_id(&pending[0]);
+        b.update(&client, &pending, &AnalysisControl::default(), "en")
+            .unwrap();
+        if offered_id != original_id
+            || b.state.entities.iter().filter(|e| e.kind == "task").count() != 1
+        {
+            failures.push(format!(
+                "reopen={reopen}: {} -> {}; tasks={}",
+                original_id,
+                offered_id,
+                b.state.entities.iter().filter(|e| e.kind == "task").count()
+            ));
+        }
+        assert_eq!(
+            b.state.entities.iter().find(|e| e.id == entity_id).unwrap(),
+            &completed
+        );
+        assert!(b.pending(std::slice::from_ref(&text)).is_empty());
+        drop(b);
+        let mut b = WorkspaceRunner::open(&second_folder).unwrap();
+        let state = serde_json::to_vec(&b.view()).unwrap();
+        assert_eq!(
+            state,
+            serde_json::to_vec(&read_state(&second_folder).unwrap()).unwrap()
+        );
+        assert!(b.pending(std::slice::from_ref(&text)).is_empty());
+        let mut independent = text.clone();
+        independent.key = "part-1".into();
+        independent.start_ms = 4000;
+        independent.end_ms = 7000;
+        let pending = b.pending(&[text, independent]);
+        assert_eq!(pending.len(), 1);
+        assert_ne!(source_id(&pending[0]), original_id);
+        b.update(&client, &pending, &AnalysisControl::default(), "en")
+            .unwrap();
+        assert!(b
+            .state
+            .entities
+            .iter()
+            .any(|e| e.kind == "task" && e.status == "open" && e.id != entity_id));
+        for (path, bytes) in old_files {
+            assert_eq!(std::fs::read(path).unwrap(), bytes);
+        }
+        stop.store(true, Ordering::SeqCst);
+        let requests = server.join().unwrap();
+        let second_task = requests
+            .iter()
+            .filter(|r| r["purpose"] == "tasks")
+            .nth(1)
+            .unwrap();
+        if !second_task["state"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|e| e["id"] == entity_id && e["status"] == "completed" && e["humanLocked"] == true)
+        {
+            failures.push(format!(
+                "reopen={reopen}: inherited terminal identity missing from actual tasks request"
+            ));
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "Model-switch source regression: {failures:?}"
+    );
+}
+
+#[test]
 fn inherited_confirmations_keep_multi_entity_order_and_exact_reopen_state() {
     for (target, append_new) in [(0, false), (1, false), (2, false), (0, true)] {
         let dir = tempfile::tempdir().unwrap();
