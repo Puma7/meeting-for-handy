@@ -62,6 +62,7 @@ def main():
 const params = new URLSearchParams(location.search);
 const locale = params.get("locale") === "en" ? "en" : "de";
 const theme = params.get("theme") === "dark" ? "dark" : "light";
+const microphone = params.get("microphone");
 document.documentElement.dataset.theme = theme;
 document.documentElement.lang = locale;
 window.__sidebarBrowserFixture = {synthetic: true, loadCalls: 0};
@@ -72,7 +73,7 @@ const load = async () => {
 const status = <RecordingStatus locale={locale} paused={false} durationMs={65000}
   parts={[{source:"microphone", startSample:0, sampleCount:480000, status:"complete",
     text:"This is synthetic transcript text for the browser layout check."}]}
-  warningCount={1} microphoneSilent={false} microphoneMuted={false} backlogMs={35000}
+  warningCount={1} microphoneSilent={microphone === "silent"} microphoneMuted={microphone === "muted"} backlogMs={35000}
   getSystemLoad={load} onOpen={() => {}} />;
 createRoot(document.getElementById("root")).render(<div className="app-shell">
   <Sidebar app={{version:"synthetic",recording:true}} page="meeting" locale={locale}
@@ -95,12 +96,13 @@ export default {{root:{json.dumps(fixture.as_posix())},plugins:[react()],
     config_path = output / "vite.config.mjs"
     config_path.write_text(config, encoding="utf8")
     files = ["apps/desktop/src/views/Sidebar.tsx", "apps/desktop/src/views/RecordingStatus.tsx",
-             "apps/desktop/src/styles.css", "apps/desktop/src/handy-theme.css", "apps/desktop/src/i18n.ts"]
+             "apps/desktop/src/styles.css", "apps/desktop/src/handy-theme.css", "apps/desktop/src/i18n.ts",
+             "scripts/check-sidebar-browser.py"]
     report = {"at": datetime.now(timezone.utc).isoformat(), "synthetic": True,
               "actualSidebarAndRecordingStatus": True, "nativeIPCOrDeviceTest": False,
               "playwright": installed, "appVersion": json.loads((desktop / "package.json").read_text())["version"],
               "sourceHashes": {name: hashlib.sha256((root / name).read_bytes()).hexdigest() for name in files},
-              "rows": [], "pageErrors": [], "consoleErrors": [], "foreignRequests": [], "success": False}
+              "rows": [], "warningTooltips": [], "pageErrors": [], "consoleErrors": [], "foreignRequests": [], "success": False}
     server = worker = None
     try:
         with (output / "build.log").open("w", encoding="utf8") as log:
@@ -169,9 +171,24 @@ export default {{root:{json.dumps(fixture.as_posix())},plugins:[react()],
                                                            "noHorizontalOverflow": True})
                                     if locale == "de" and theme == "dark":
                                         page.screenshot(path=str(output / f"sidebar-{width}-{'collapsed' if collapsed else 'expanded'}.png"))
+                                    if collapsed:
+                                        for microphone in ["silent", "muted"]:
+                                            page.goto(base + f"?locale={locale}&theme={theme}&microphone={microphone}")
+                                            if "is-collapsed" not in (page.locator(".sidebar").get_attribute("class") or ""):
+                                                page.locator(".sidebar-toggle").click()
+                                            expect(page.locator(".sidebar")).to_have_class(re.compile("is-collapsed"))
+                                            head = page.locator(".sidebar-recording-head")
+                                            expect(head).to_be_visible()
+                                            title = head.get_attribute("title") or ""
+                                            microphone_text = (("Mikrofon nimmt nicht auf" if microphone == "silent" else "Mikrofon stummgeschaltet") if locale == "de" else ("Microphone is not recording" if microphone == "silent" else "Microphone muted"))
+                                            assert microphone_text in title, title
+                                            assert ("1 Hinweis zur Aufnahme" if locale == "de" else "1 recording notice") in title, title
+                                            assert ("Erkennung im Rückstand" if locale == "de" else "Transcription behind") in title, title
+                                            report["warningTooltips"].append({"width": width, "locale": locale, "theme": theme, "microphone": microphone, "collapsed": True, "actualTitle": title})
                             finally:
                                 context.close()
                 assert len(report["rows"]) == 24
+                assert len(report["warningTooltips"]) == 24
                 assert not report["pageErrors"] and not report["consoleErrors"] and not report["foreignRequests"], report
                 report["success"] = True
             finally:
@@ -188,7 +205,7 @@ export default {{root:{json.dumps(fixture.as_posix())},plugins:[react()],
         report["ownedServerStopped"] = worker is None or not worker.is_alive()
         with (output / "result.json").open("x", encoding="utf8") as proof:
             json.dump(report, proof, indent=2)
-        print(json.dumps({"success": report["success"], "flows": len(report["rows"]),
+        print(json.dumps({"success": report["success"], "flows": len(report["rows"]), "warningTooltips": len(report["warningTooltips"]),
                           "proof": str(output / "result.json"), "ownedServerStopped": report["ownedServerStopped"]}))
 
 

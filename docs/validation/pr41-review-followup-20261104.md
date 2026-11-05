@@ -1,11 +1,12 @@
 # PR 41: Validierungsstand
 
 Stand: 5. November 2026. Version: **1.1.0-beta.1**, unverändert.
-Diese Fassung ergänzt die sichere Wiederaufnahme beim Modellwechsel und die gemeinsame Aufgabenprüfung für negierte Prüfgegenstände,
+Diese Fassung ergänzt vollständige Aufnahmehinweise in kompakten Titeln. Die vorigen nativen
+Korrekturen betreffen sichere Wiederaufnahme beim Modellwechsel und die gemeinsame Aufgabenprüfung für negierte Prüfgegenstände,
 negative Aufgabenträger und bereits erledigte Erstellung.
-Native Validierung und die zugehörigen Rustregressionen sind aktualisiert. Frontend, Prompts,
-Transport, Audio/ASR, Modellreservierungen, Abhängigkeiten, Konfiguration und kompletter
-TEST_REPORT bleiben gegenüber dem jeweils benannten geprüften Elternstand byteunverändert.
+Die aktuelle Änderung betrifft RecordingStatus, seine UI-Gegenfälle und den Browserprüfer.
+Sämtliche nativen Produktions-/Testbytes, Prompts, Transport, Audio/ASR, Modellreservierungen,
+Abhängigkeiten, Konfiguration und kompletter TEST_REPORT bleiben gegenüber `87eba39` byteunverändert.
 Der vollständige TEST_REPORT wurde nicht für diese Nacharbeit neu veröffentlicht.
 
 Die [ausführliche bisherige Fassung](https://github.com/Puma7/meeting-for-handy/blob/96109374c3fa7d72ed0a3cea68706a90280fc484/docs/validation/pr41-review-followup-20261104.md)
@@ -43,25 +44,27 @@ nicht protokolliert oder als Klartext gespeichert. Keine Nutzermeetings wurden f
 
 ## Prüfungen und genauer Bezug
 
-Rust- und Modellprüfungen wurden nach der abschließenden nativen Korrektur frisch ausgeführt.
-Die nachfolgend ausdrücklich älteren Frontend-, Paket-, Browser- und Langsammodellnachweise
-werden nicht als erneut ausgeführt ausgegeben. `verify.ps1` ist vor Quellupload frisch erforderlich.
+Rust- und Modellprüfungen stammen vom abschließenden nativen Korrekturstand `87eba39`.
+Native Produktions-/Test-/Abhängigkeitsbytes sind seitdem unverändert, lokal nicht wiederholt.
+Oberfläche, TypeScript, Build, Format und Browserprüfungen sind für die Titelkorrektur frisch.
+Ältere Paket-/Langsammodellnachweise werden nicht als neu ausgeführt ausgegeben.
+`verify.ps1` ist nach dem letzten Dokumentedit vor Quellupload frisch erforderlich.
 
 | Prüfung | Tatsächliches Ergebnis |
 | --- | --- |
-| Rust-Workspace, alle Targets | Nach der abschließenden Zusagen-/Kontextprüfung frisch 558 bestanden, darunter 159 Notizen- und 37 Providerprotokolltests. Drei bestehende besondere Einstiege regulär ignoriert. Frühere Zwischenläufe vor den zusätzlichen Affirmations-, Sprecher- und Erledigt-Gegenproben sind kein endgültiger Nachweis. |
-| Rustformat und Clippy | Auf diesem nativen Korrekturstand frisch bestanden; gesperrte Abhängigkeiten, Warnungen als Fehler. |
-| Oberfläche | 395 Tests, TypeScript, Produktionsbuild und vollständige Frontendformatprüfung auf `aa72dbd` bestanden. Sämtliche Frontend-Produktions-, Typ- und Testbytes sind seitdem unverändert; lokal nicht wiederholt. 391 und 385 sind frühere Zwischenstände. |
-| Projektprüfung | Vorherige veröffentlichte Stände bestanden 47 PCM-, 35 Notizen-, 28 Vorlagen-, acht Agenten- und Monitorprüfungen. Für diese native Korrektur nach dem letzten Dokumentedit erneut vor Upload erforderlich. |
-| Echte lokale Referenzen | Nach der abschließenden nativen Korrektur frisch: Deutsch 101.3137551 s (0 reguläre Validierungswiederholungen), Englisch 114.7423001 s (0 Wiederholungen). Positive Aufgabe, unverbindliche Aussage, Impulserhalt, menschlicher Status nach Protokolländerung und bytegleiche Wiederöffnung bestanden. Wörtliches englisches „I’ll“ bleibt erhalten. Eine vollständig validierte Wiederholung je Anfrage bleibt zulässig; null Wiederholungen sind keine Freigabeschwelle. Frühere DE-/EN-Referenzen vor der abschließenden Aufgaben- und Freigabechronologie sind nicht dieser finale Nachweis. |
+| Rust-Workspace, alle Targets | 558 bestanden auf `87eba39`, darunter 159 Notizen- und 37 Providerprotokolltests; drei bestehende besondere Einstiege regulär ignoriert. Sämtliche nativen Bytes bleiben identisch; lokal nicht wiederholt. Frühere 557-/555-Test-Zwischenstände zählen nicht als dieser Nachweis. |
+| Rustformat und Clippy | Auf dem bytegleichen nativen `87eba39`-Stand bestanden; gesperrte Abhängigkeiten und Warnungen als Fehler. Lokal nicht wiederholt. |
+| Oberfläche | Frisch 399 Tests, TypeScript, Produktionsbuild und vollständige Frontendformatprüfung bestanden. Die vier neuen DE/EN-Gegenfälle scheiterten vorher tatsächlich; danach bestanden sie. Frühere 395/391/385 Zahlen bleiben historische Stände. Zwei Testworker, unveränderte Fristen und Schutzregeln. |
+| Projektprüfung | Vorherige veröffentlichte Stände bestanden 47 PCM-, 35 Notizen-, 28 Vorlagen-, acht Agenten- und Monitorprüfungen. Für jede Quellveröffentlichung nach dem letzten Dokumentedit erneut vor Upload erforderlich. |
+| Echte lokale Referenzen | Auf dem bytegleichen nativen `87eba39`-Stand, lokal nicht wiederholt: Deutsch 101.3137551 s (0 reguläre Validierungswiederholungen), Englisch 114.7423001 s (0 Wiederholungen). Positive Aufgabe, unverbindliche Aussage, Impulserhalt, menschlicher Status nach Protokolländerung und bytegleiche Wiederöffnung bestanden. Wörtliches englisches „I’ll“ bleibt erhalten. Eine vollständig validierte Wiederholung je Anfrage bleibt zulässig; null Wiederholungen sind keine Freigabeschwelle. Frühere DE-/EN-Referenzen vor der abschließenden Aufgaben- und Freigabechronologie sind nicht dieser finale Nachweis. |
 | Paketregression | 21 Prüfungen auf `91f0985`; Paketdateien seitdem unverändert. Tatsächlich erzeugter synthetischer ZIP prüft Streaming- oder Batchhinweis, Launcher, Fingerprint und Nichtüberschreibung. Kein lokales Produktpaket oder Installer daraus bereitgestellt. |
 | Kontrolliertes Langsammodell | Auf `35d53e8`: 244.33 s Gesamtlauf, 210 s SSE-Antwortpause, nächster Refresh nach 210.0421383 s, maximal eine Modellanfrage, ein erhaltener Impuls. 3737920 Samples je Spur / 16000 Hz = 233.62 s je Spur. Beide PCM-Schreiber liefen nach Auswertungsstopp weiter. Hier nicht erneut ausgeführt. |
-| Sidebar im Browser | 24 Abläufe auf `35d53e8`: 390/740/1280 Pixel × Deutsch/Englisch × hell/dunkel × ausgeklappt/eingeklappt. Geöffnete Rechnerdetails innerhalb des Fensters, kein horizontaler Überlauf, keine Seiten-/Konsolenfehler oder fremden Anfragen; eigener Server beendet. Betroffene Komponenten und Prüferbytes unverändert, hier nicht wiederholt. |
+| Sidebar im Browser | Frisch 24 tatsächliche Layoutabläufe plus 24 kombinierte Warn-Titel: 390/740/1280 Pixel, DE/EN, hell/dunkel, ein-/ausgeklappt; Titel zusätzlich stilles/stummes Mikrofon mit Aufnahmewarnung und Rückstand. Eigener Server/Browser beendet, keine Seiten-/Konsolenfehler, Fremdanfragen oder horizontalen Überläufe. Die Titelattribute stammen aus dem tatsächlichen Browser-DOM; kein nativer OS-Tooltip- oder Screenreader-Sprachnachweis. |
 
 Die echten Referenzen verwendeten ausschließlich synthetischen Text und das vorhandene
 **google/gemma-4-e4b Q4_K_M**, 6.326.936.720 Modellbytes, LM Studio **0.4.26.0**,
 Windows 11 Pro **26200**, Intel **i7-13700**, rund **64 GiB** physisches RAM.
-Keine Downloads oder Cloud. Während dieser Referenzen liefen keine anderen eigenen Prüfungen.
+Keine Downloads oder Cloud. Während dieser nativen Referenzen auf `87eba39` liefen keine anderen eigenen Prüfungen.
 Die Dauer umfasst Modellverarbeitung, Abschluss und Wiederöffnung. Beim aktuellen Referenzpaar
 wurden keine neuen Working-Set-, Private-Bytes- oder Grafikspeicherwerte erhoben.
 
@@ -237,6 +240,34 @@ Die verstärkte A-B-A-/C-HTTP-Regressionsprüfung und die Altstand-Gegenprobe be
 Frühere 557-Test-Zwischenläufe, frühere lokale Referenzpaare und die erste Projektprüfung sind
 historische Belege. Die oben benannten 558 Rusttests, 159 Notizenfälle und tatsächlichen
 Modellreferenzen gehören erst zum abschließenden Stand der Freigabechronologie.
+
+## Vollständige Titel für kombinierte Aufnahmehinweise
+
+Der vollständige [CodeRabbit-Lauf auf 87eba39](https://github.com/Puma7/meeting-for-handy/pull/41#pullrequestreview-5785086446)
+fand einen gültigen verbleibenden [Titelbefund](https://github.com/Puma7/meeting-for-handy/pull/41#discussion_r4480560193).
+Bei stillem oder stummgeschaltetem Mikrofon fehlten zusätzliche Aufnahmewarnungen im Titel
+des eingeklappten Status. Vier tatsächliche DE/EN-DOM-Gegenfälle scheiterten vorher.
+Mikrofonzustand, Aufnahmewarnungen und Erkennungsrückstand sind jetzt unabhängige Titelgründe.
+Der Mikrofontext, die Warnschwelle, Audio/Erkennung und das bisherige höfliche Ankündigungsverhalten
+bleiben erhalten. Entfernte Warnungen verschwinden auch aus dem Titel.
+
+Die vier Gegenfälle und die gesamten 399 UI-Tests bestehen. Der vorhandene Browserprüfer
+prüft tatsächliche Sidebar-/RecordingStatus-Komponenten: 24 Layoutabläufe und 24 kombinierte
+Titelzustände in Edge 156.0.4314.58 mit Playwright 1.57.0.
+Die kompakte und die volle Bildschirmaufnahme wurden visuell angesehen. CPU 25 Prozent und RAM 2/8 GiB
+bleiben synthetische Fixturewerte, keine Messung des Rechners. Keine native IPC, Aufnahme,
+Providersteuerung, Nutzermeetings oder Screenreader-Sprachausgabe sind damit geprüft.
+Der erste Browserdurchlauf erwartete nach einer Desktop-Seitenneuladung irrtümlich den zuvor
+eingeklappten lokalen Komponentenstatus. Der Prüfer klappt nun regulär über den vorhandenen
+Button ein; Fristen und Layoutgrenzen bleiben unverändert. Der erste Fehllauf bleibt erhalten,
+der eigene Server wurde auch dabei beendet. Der endgültige Durchlauf besteht vollständig.
+
+Die zwei sauberen Codex-Codequittungen auf dem vorherigen `87eba39` sind
+[Runde 1](https://github.com/Puma7/meeting-for-handy/pull/41#issuecomment-6658139444) und
+[Runde 2](https://github.com/Puma7/meeting-for-handy/pull/41#issuecomment-6658347014).
+Der vollständige CodeRabbit-Lauf war wegen des gültigen Titelbefunds kein sauberer Abschluss.
+Die folgende reine UI-/Prüferkorrektur benötigt eigene frische Reviews und CI auf ihrem Head.
+Native Rust-/Modellnachweise bleiben ausdrücklich ihrem bytegleichen `87eba39`-Stand zugeordnet.
 
 ## Reviewkorrekturen
 

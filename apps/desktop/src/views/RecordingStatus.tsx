@@ -126,7 +126,8 @@ export default function RecordingStatus({
   const backlogNote = de ? "Erkennung im Rückstand" : "Transcription behind";
   const checkLabel = de ? "Aufnahme prüfen" : "Check recording";
   const warningTitle = `${checkLabel}: ${[
-    microphoneSilent || microphoneMuted || warningCount > 0 ? audioNote : null,
+    microphoneSilent || microphoneMuted ? audioNote : null,
+    warningCount > 0 ? recordingNotices : null,
     behind ? backlogNote : null,
   ]
     .filter(Boolean)

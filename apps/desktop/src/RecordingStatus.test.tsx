@@ -66,6 +66,62 @@ const load = {
 
 beforeEach(() => localStorage.clear());
 
+it.each([
+  ["de", "silent"],
+  ["de", "muted"],
+  ["en", "silent"],
+  ["en", "muted"],
+] as const)(
+  "keeps capture notices beside the %s %s microphone tooltip in the collapsed sidebar",
+  (locale, mode) => {
+    const props = {
+      locale,
+      paused: false,
+      durationMs: 1000,
+      parts: [],
+      warningCount: 2,
+      microphoneSilent: mode === "silent",
+      microphoneMuted: mode === "muted",
+      backlogMs: 31_000,
+      onOpen: () => {},
+    };
+    const view = render(
+      <div className="sidebar is-collapsed">
+        <RecordingStatus {...props} />
+      </div>,
+    );
+    const title = () =>
+      view.container
+        .querySelector(".sidebar-recording-head")!
+        .getAttribute("title")!;
+    const microphone =
+      locale === "de"
+        ? mode === "silent"
+          ? "Mikrofon nimmt nicht auf"
+          : "Mikrofon stummgeschaltet"
+        : mode === "silent"
+          ? "Microphone is not recording"
+          : "Microphone muted";
+    expect(title()).toContain(microphone);
+    expect(title()).toContain(
+      locale === "de" ? "2 Hinweise zur Aufnahme" : "2 recording notices",
+    );
+    expect(title()).toContain(
+      locale === "de" ? "Erkennung im Rückstand" : "Transcription behind",
+    );
+    expect(screen.getByRole("status").textContent).toBe("");
+    view.rerender(
+      <div className="sidebar is-collapsed">
+        <RecordingStatus {...props} warningCount={0} />
+      </div>,
+    );
+    expect(title()).toContain(microphone);
+    expect(title()).not.toContain(
+      locale === "de" ? "zur Aufnahme" : "recording notice",
+    );
+  },
+);
+
 it.each(["de", "en"] as const)(
   "reports only active backlog warning reasons in %s",
   (locale) => {
