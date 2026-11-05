@@ -453,6 +453,26 @@ async function ready() {
 }
 beforeEach(() => localStorage.clear());
 
+/** Scope the observer fixture without undoing the test environment's storage globals. */
+function installWorkspaceObserver() {
+  const previous = Object.getOwnPropertyDescriptor(
+    globalThis,
+    "ResizeObserver",
+  );
+  Object.defineProperty(globalThis, "ResizeObserver", {
+    configurable: true,
+    writable: true,
+    value: class {
+      observe() {}
+      disconnect() {}
+    },
+  });
+  return () => {
+    if (previous) Object.defineProperty(globalThis, "ResizeObserver", previous);
+    else Reflect.deleteProperty(globalThis, "ResizeObserver");
+  };
+}
+
 it("keeps a late speaker model error visible after its settings disclosure closes", async () => {
   const api = fakeApi();
   api.startSpeakerExperiment = vi.fn();
@@ -1930,13 +1950,7 @@ it("opens the full-window workspace on demand and switches views without stoppin
   api.refreshLiveNotes = vi.fn();
   api.setLiveNotesInterval = vi.fn();
   api.localModelSetup = vi.fn();
-  vi.stubGlobal(
-    "ResizeObserver",
-    class {
-      observe() {}
-      disconnect() {}
-    },
-  );
+  const restoreObserver = installWorkspaceObserver();
   try {
     const { container, unmount } = render(<App api={api} />);
     const getShadow = () =>
@@ -1990,6 +2004,173 @@ it("opens the full-window workspace on demand and switches views without stoppin
     expect(api.startLiveNotes).not.toHaveBeenCalled();
     unmount();
   } finally {
-    vi.unstubAllGlobals();
+    restoreObserver();
   }
 });
+
+it.each(["de", "en"] as const)(
+  "keeps new agent requests actionable inside the workspace (%s)",
+  async (locale) => {
+    await import("./workspace/WorkspaceBridge");
+    localStorage.setItem(
+      "handymeeting.rust.beta.preferences.v1",
+      JSON.stringify({ locale }),
+    );
+    localStorage.setItem(
+      "handymeeting.meeting-view.full-window.v1",
+      "workspace",
+    );
+    const t = locale === "de" ? de : en;
+    const active = { ...meeting, status: "recording" };
+    let current: AppState = { ...state(active), recording: true };
+    const api = fakeApi(active);
+    api.getAppState = vi.fn(async () => current);
+    api.getLiveNotes = vi
+      .fn()
+      .mockResolvedValue({ status: "off", running: false });
+    api.startLiveNotes = vi.fn();
+    api.setWorkspaceContext = vi.fn();
+    api.stopLiveNotes = vi.fn();
+    api.refreshLiveNotes = vi.fn();
+    api.setLiveNotesInterval = vi.fn();
+    api.localModelSetup = vi.fn();
+    const restoreObserver = installWorkspaceObserver();
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+    const mounted = render(<App api={api} />);
+    try {
+      const host = () =>
+        mounted.container.querySelector(".native-workspace-host")?.shadowRoot;
+      await waitFor(() =>
+        expect(host()?.querySelector('[role="tablist"]')).toBeTruthy(),
+      );
+      current = {
+        ...current,
+        agent: {
+          connected: true,
+          label: "Synthetic agent",
+          ownerId: "synthetic-owner",
+          revoked: false,
+          ownedSessionId: null,
+          expiresAtUnixMs: null,
+          pending: {
+            requestId: "synthetic-request",
+            title: "Synthetic requested capture",
+            includeMicrophone: false,
+            maxDurationSeconds: 60,
+            status: "pending",
+          },
+        },
+      };
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1500);
+      });
+      const shadow = within(host()!.querySelector(".prototype") as HTMLElement);
+      const review = shadow.getByRole("button", {
+        name: locale === "de" ? "Anfrage prüfen" : "Review request",
+      });
+      expect(review.closest('[role="alert"]')).toBeTruthy();
+      expect(api.agentDecideRecording).not.toHaveBeenCalled();
+      fireEvent.click(review);
+      expect(
+        mounted.container.querySelector(".native-workspace-host"),
+      ).toBeNull();
+      fireEvent.click(screen.getByRole("button", { name: t.agentDeny }));
+      await waitFor(() =>
+        expect(api.agentDecideRecording).toHaveBeenCalledWith(
+          "synthetic-request",
+          false,
+          undefined,
+        ),
+      );
+      expect(api.startMeeting).not.toHaveBeenCalled();
+      expect(api.stopMeeting).not.toHaveBeenCalled();
+      expect(api.startLiveNotes).not.toHaveBeenCalled();
+      expect(api.stopLiveNotes).not.toHaveBeenCalled();
+    } finally {
+      mounted.unmount();
+      vi.useRealTimers();
+      restoreObserver();
+    }
+  },
+);
+
+it.each(["de", "en"] as const)(
+  "keeps device loss notices dismissible inside the workspace (%s)",
+  async (locale) => {
+    await import("./workspace/WorkspaceBridge");
+    localStorage.setItem(
+      "handymeeting.rust.beta.preferences.v1",
+      JSON.stringify({ locale }),
+    );
+    localStorage.setItem(
+      "handymeeting.meeting-view.full-window.v1",
+      "workspace",
+    );
+    const t = locale === "de" ? de : en;
+    const active = { ...meeting, status: "recording" };
+    let current = state(meeting);
+    const api = fakeApi(meeting);
+    api.getAppState = vi.fn(async () => current);
+    api.getLiveNotes = vi
+      .fn()
+      .mockResolvedValue({ status: "off", running: false });
+    api.startLiveNotes = vi.fn();
+    api.setWorkspaceContext = vi.fn();
+    api.stopLiveNotes = vi.fn();
+    api.refreshLiveNotes = vi.fn();
+    api.setLiveNotesInterval = vi.fn();
+    api.localModelSetup = vi.fn();
+    const restoreObserver = installWorkspaceObserver();
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+    const mounted = render(<App api={api} />);
+    try {
+      const host = () =>
+        mounted.container.querySelector(".native-workspace-host")?.shadowRoot;
+      await waitFor(() =>
+        expect(host()?.querySelector('[role="tablist"]')).toBeTruthy(),
+      );
+      await waitFor(() => expect(api.listDevices).toHaveBeenCalled());
+      current = { ...state(active), recording: true };
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1500);
+      });
+      vi.mocked(api.listDevices).mockResolvedValue([]);
+      fireEvent.focus(window);
+      const shadow = within(host()!.querySelector(".prototype") as HTMLElement);
+      const notice = await shadow.findByText(
+        locale === "de"
+          ? /aus der Geräteliste verschwunden/
+          : /left the device list/,
+      );
+      expect(notice.closest('[role="alert"]')).toBeTruthy();
+      expect(notice.textContent).toContain(
+        locale === "de"
+          ? "bereits gespeicherter Ton bleibt erhalten"
+          : "audio saved so far is kept",
+      );
+      fireEvent.click(
+        within(notice.closest('[role="alert"]') as HTMLElement).getByRole(
+          "button",
+          { name: t.dismiss },
+        ),
+      );
+      await waitFor(() =>
+        expect(
+          shadow.queryByText(
+            locale === "de"
+              ? /aus der Geräteliste verschwunden/
+              : /left the device list/,
+          ),
+        ).toBeNull(),
+      );
+      expect(api.startMeeting).not.toHaveBeenCalled();
+      expect(api.stopMeeting).not.toHaveBeenCalled();
+      expect(api.startLiveNotes).not.toHaveBeenCalled();
+      expect(api.stopLiveNotes).not.toHaveBeenCalled();
+    } finally {
+      mounted.unmount();
+      vi.useRealTimers();
+      restoreObserver();
+    }
+  },
+);

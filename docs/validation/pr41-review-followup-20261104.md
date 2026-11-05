@@ -28,14 +28,14 @@ Der vollständige TEST_REPORT bleibt byteunverändert; er wurde für diese Nacha
 
 | Prüfung | Ergebnis und Bezug |
 | --- | --- |
-| Rust-Workspace / alle Targets | 549 frisch bestanden, darunter 153 Notizen- und 34 Providerprotokolltests; drei bestehende besondere Einstiege regulär ignoriert. Acht Persistenzvarianten prüfen Impulse/Aufgaben mit einer/sechs ursprünglichen Evidenzen und ursprünglicher/geänderter Textfassung; zwei zusätzliche Zahlen-/Budgetfälle prüfen erforderliche Belege und atomare Ablehnung bei tatsächlich unpassendem Umfang. Der Langsamtest bleibt historisch. |
+| Rust-Workspace / alle Targets | 551 frisch bestanden, darunter 155 Notizen- und 34 Providerprotokolltests; drei bestehende besondere Einstiege regulär ignoriert. Die bisherigen Kapazitäts-, Zahlen- und Wiederöffnungsfälle bleiben erhalten. Zwei neue Fälle prüfen Zahl und Verbindlichkeit bei unterschiedlicher Reihenfolge gültiger Fristbelege. |
 | Rustformat / Clippy | Auf diesem Korrekturstand frisch bestanden; gesperrte Abhängigkeiten und Warnungen als Fehler. |
-| Oberfläche | 380 Tests, TypeScript, Produktionsbuild und vollständiger Formatcheck unter src auf `255d878` bestanden. Alle Frontend-, Typ- und Abhängigkeitsbytes bleiben gegenüber diesem Stand unverändert, deshalb nicht erneut ausgeführt. Die beiden vollständigen Modellvorauswahlfälle und vier Pollfehlerregressionen sind erhalten. |
+| Oberfläche | 385 Tests, TypeScript, Produktionsbuild und vollständiger Formatcheck unter src frisch bestanden. Vier neue vollständige App-Fälle prüfen später eingehende Agentenanfragen und Geräteverluste in Deutsch/Englisch. Ein zusätzlicher tatsächlicher Bridge-/Shadow-DOM-Fall prüft, dass wechselnde globale Hinweise den gewählten Tab und die laufende Oberfläche erhalten. |
 | Projektfreigabe | `verify.ps1` vor jeder Bereitstellung: 47 PCM-, 35 Notizen-, 28 Vorlagen-, acht Agenten- und Monitorprüfungen bestanden. Der folgende Quellupload bleibt an einen abschließenden erfolgreichen Lauf gebunden. |
-| Echte lokale Referenzen Deutsch und Englisch | Nach der abschließenden Kapazitätskorrektur: Deutsch 106.8706213 s (0 reguläre Validierungswiederholungen), Englisch 111.7106681 s (0 Wiederholungen). Beide bestanden positive Aufgabe, unverbindliche Aussage, Impulserhalt, menschlichen Status nach Protokolländerung und bytegleiche Wiederöffnung; englische Aufgaben behalten das wörtliche „I’ll“. Unverändert ist eine vollständig validierte Wiederholung je Anfrage zulässig, null Wiederholungen sind keine Freigabeschwelle. DE 104,6295893 s und EN 162,0656661 s ohne Wiederholung auf `255d878` bleiben historische Nachweise. |
+| Echte lokale Referenzen Deutsch und Englisch | Nach den abschließenden Korrekturen: Deutsch 116.6886547 s (0 reguläre Validierungswiederholungen), Englisch 127.5065369 s (0 Wiederholungen). Beide bestanden positive Aufgabe, unverbindliche Aussage, Impulserhalt, menschlichen Status nach Protokolländerung und bytegleiche Wiederöffnung; englische Aufgaben behalten das wörtliche „I’ll“. Unverändert ist eine vollständig validierte Wiederholung je Anfrage zulässig; null Wiederholungen sind keine Freigabeschwelle. Die vorherigen Läufe auf `7fb1ad2` mit DE 106,8706213 s und EN 111,7106681 s bleiben historische Nachweise. |
 | Frühere lokale Referenzen | Deutsch 100,9989873 s und Englisch 125,0518623 s auf dem Elternstand `3d4d013`, jeweils ohne Validierungswiederholung. Die deutsche Zusage enthält tatsächlich „jedenfalls“. Diese Läufe werden nicht als erneut ausgeführt ausgegeben. |
-| Langsammodell / zwei Spuren | Auf dem früheren `aa63003` ausdrücklich ausgeführter besonderer Test, hier nicht erneut ausgeführt: 244,32 s Laufzeit, 210 s kontrollierte SSE-Antwortpause, nächster Refresh nach 210,0415725 s, maximal eine Modellanfrage, ein erhaltener Impuls. Samples je Spur 3758720/3758720, jeweils geteilt durch 16.000 Hz = 234,92/234,92 s. Beide dauerhaften PCM-Schreiber liefen nach dem Auswertungsstopp weiter. Worker-, Transport-, Audio-Schreiber- und Slow-Fixture-Dateien bleiben byteunverändert. Der danach korrigierte Import wird durch vier Persistenzfälle geprüft; die gemeinsame Zusagenprüfung ist ebenfalls nach diesem Langsamtest geändert worden. Dieser historische Lauf wird ausdrücklich nicht als erneute Prüfung dieser Änderungen ausgegeben. Frühere Läufe auf `1768125` und `3d4d013` bleiben erhalten. |
-| Browsergegenprüfung | Auf `f728081` sechs Abläufe bei 390×844 und 740×900 px mit tatsächlicher LiveWorkspace-Komponente und synthetischem Adapter: Statuswarnung verschwindet nach erfolgreichem Poll; Fehler einer manuellen Aktualisierung oder Bestätigung bleiben trotz Pollfehler und Erholung erhalten. Bestätigung genau einmal versandt, keine automatische Wiederholung, kein Aufnahme-/Modellstart, keine Konsolen-/Seitenfehler und kein horizontaler Überlauf. Frühere Sidebarprüfung auf `aa63003` bleibt historischer Beleg; sie wird nicht als jetzt wiederholt ausgegeben. Die hierbei geprüfte LiveWorkspace-Komponente ist seitdem byteunverändert; kein neuer Browserlauf für die App-Vorauswahl wird behauptet. Kein nativer IPC- oder Gerätezugriff. |
+| Langsammodell / zwei Spuren | Auf diesem Korrekturstand frisch ausdrücklich ausgeführter besonderer Test: 244,23 s Laufzeit, 210 s kontrollierte SSE-Antwortpause, nächster Refresh nach 210,0402066 s, maximal eine Modellanfrage, ein erhaltener Impuls. Samples je Spur 3749440/3749440, geteilt durch 16.000 Hz = 234,34/234,34 s. Beide dauerhaften PCM-Schreiber liefen nach dem Auswertungsstopp weiter. Tatsächlicher nativer Worker mit kontrollierter Antwort und generiertem PCM, keine Geräte/ASR oder Zweistundenprüfung. Frühere Läufe bleiben historische Belege. |
+| Browsergegenprüfung | Acht neue Abläufe mit tatsächlicher vollständiger App einschließlich Workspace/Shadow-DOM bei 390×844 dunkel und 740×900 px hell, jeweils Deutsch/Englisch: späte Agentenanfrage sichtbar, Prüfen erreichbar, bestehende Ablehnung versendet exakt einmal false; Geräteverlust während synthetischer Aufnahme sichtbar und schließbar. Keine Aufnahme-/Modellstarts oder -stopps, keine Konsolen-/Seitenfehler und kein horizontaler Überlauf. Bestehender Edge 156 / Playwright 1.57 mit synthetischem IPC-Adapter, kein nativer Geräte-/Agentenprozess oder echter Löschlauf. Sechs Pollfehlerabläufe auf `f728081` und frühere Sidebarprüfung bleiben historische Nachweise. |
 
 Die echten Referenzen verwendeten ausschließlich synthetischen Text und das vorhandene
 **google/gemma-4-e4b Q4_K_M** mit 6.326.936.720 Modellbytes, LM Studio **0.4.26.0**,
@@ -367,7 +367,7 @@ verschiedenen Zitaten angelegter Impuls konnte seine erste neue Statusbewertung 
 Die bis dahin korrigierte Wiederholungsfolge genügte dafür nicht. Drei echte Vorherfehler traten
 mit sechs ursprünglichen Belegen bei Impuls und Aufgabe sowie verteilten Zahlenbelegen auf.
 
-Die Übernahme wählt jetzt eine kleine zulässige Teilmenge der Belege der unveränderten Textfassung
+Die Übernahme auf `7fb1ad2` wählte eine kleine zulässige Teilmenge der Belege der unveränderten Textfassung
 innerhalb des gemeinsamen Budgets aus. Mindestens ein zugehöriger Originalbeleg bleibt dabei;
 alle eingereichten neuen Statuszitate werden unverändert behalten und eigenständig geprüft.
 Übernommene Zuständige und Fristen benötigen weiterhin ihre wörtlichen Nachweise. Höchstens
@@ -382,11 +382,61 @@ verlangt zwei getrennte alte Zahlenbelege plus neuen Statusbeleg; drei aktuelle 
 Benötigt der Text hingegen tatsächlich sechs unabhängige Zahlenbelege zusätzlich zum neuen Status,
 bleibt die gesamte Antwort unverändert abgewiesen: keine Erhöhung des Sechs-Belege-Limits.
 
-Alle 153 Notizen- und 549 Workspace-/All-Target-Rusttests bestehen. Oberfläche, Abhängigkeiten,
+Auf `7fb1ad2` bestanden 153 Notizen- und 549 Workspace-/All-Target-Rusttests. Oberfläche, Abhängigkeiten,
 Audio-, Transport-, Prompt- und Modellreferenz-Fixture-Dateien sind gegenüber `255d878` bytegleich.
 Die tatsächlichen lokalen Referenzen wurden nach der nativen Änderung trotzdem erneut ausgeführt.
 Auf `255d878` gab es keine neue vollständige CodeRabbit-Anforderung; der letzte vollständige Lauf
 gehört ausdrücklich `f728081`. Aktuelle saubere Reviews und CI müssen am neuen finalen Head enden.
+
+## Reihenfolge übernommener Metadatenbelege
+
+Eine zusätzliche lokale Gegenprüfung nach zwei sauberen Codex-Codeprüfungen auf `7fb1ad2`
+fand einen echten Reihenfolgefehler. Eine gültige Aufgabe enthielt bereits zwei Fristzitate:
+ein Zitat mit „15. Mai“ und das passende verbindliche Zitat mit „5. Mai“. Die vorherige
+greifende Auswahl übernahm nur das zuerst passende Teilwort-Zitat. Bei einer späteren
+Statusänderung wurde deshalb Zahl 5 nicht belegt, obwohl der richtige Originalbeleg vorhanden war.
+Entsprechend konnte ein zuerst angeführter unverbindlicher Fristsatz den richtigen verbindlichen
+Beleg verdecken. Zwei tatsächliche Vorherfehler sind erhalten; ihre umgekehrten Reihenfolgen
+bestanden bereits. Die Ausgangszustände sind durch den regulären Ablauf gültig angelegt.
+
+Die Auswahl berücksichtigt jetzt alle geeigneten alten Text- und aktuellen Metadatenbelege
+gemeinsam: höchstens zwölf Kandidaten, höchstens 4096 Kombinationen, früh beschnitten durch
+das unveränderte Sechs-Belege-Budget und bereits gefundene kleinere gültige Kombinationen.
+Jede Auswahl durchläuft dieselben vollständigen Quellen-, Zahlen-, Metadaten- und
+Verbindlichkeitsprüfungen. Alle eingereichten neuen Zitate und mindestens ein zugehöriger
+Originaltextbeleg bleiben erforderlich; vollständige historische Ereignisse bleiben erhalten.
+Echte nicht darstellbare Kombinationen werden weiterhin atomar abgewiesen.
+Nachher bestehen alle 155 Notizen- und 551 Rusttests sowie die erneut ausgeführten echten
+lokalen deutschen und englischen Referenzen. Die technische Prüfung beweist keine inhaltliche Deutung.
+
+## Globale Hinweise in der erweiterten Meetingansicht
+
+Der vollständige CodeRabbit-Lauf auf `7fb1ad2` fand einen gültigen Bedienungsfehler:
+Der frühe Rücksprung in die erweiterte Ansicht übersprang die bisherigen Agenten-,
+Geräte- und Löschhinweise. Nach Öffnen dieser Ansicht eingehende Agentenanfragen
+konnten deshalb unbemerkt ablaufen; reine Listen-Geräteverluste blieben unsichtbar.
+
+Ein kompakter Hinweis macht die Agentenanfrage jetzt sichtbar und führt zur bisherigen
+Prüfung/Freigabe/Ablehnung. Bestehende Gerätehinweise und Löschstatus werden mit denselben
+Komponenten und Aktionen auch im begrenzten, scrollbar bleibenden Hinweisbereich der
+erweiterten Ansicht angezeigt. Die App genehmigt nichts automatisch und startet oder stoppt
+dadurch weder Aufnahme noch Auswertung. Ohne Hinweise entsteht kein zusätzlicher Platzhalter.
+
+Vier vollständige App-Regressionen scheiterten vorher tatsächlich an fehlenden Hinweisen
+oder Aktionen und bestehen nachher. Ein zusätzlicher Bridge-Fall prüft den unveränderten
+aktiven Tab beim Einblenden, Wechseln und Entfernen eines synthetischen Löschstatus.
+Alle 385 UI-Tests, TypeScript/Build/Format und acht tatsächliche App-Browserabläufe bestehen.
+Frühere Fixture-, Typprüfungs- und private Favicon-Fehler bleiben als Zwischenstufen erhalten;
+sie sind keine weiteren Produktfehler. Kein echter Lösch-, Geräte- oder installierter Agententest.
+
+Der vollständige vorherige CodeRabbit-Lauf deckte alle 100 vorgesehenen Dateien ab,
+war wegen dieses Hinweismangels aber nicht sauber. Den zusätzlich behaupteten separaten
+„minor test cleanup“-Punkt nahm der Anbieter auf Rückfrage ausdrücklich als unbelegt zurück.
+Die zwei sauberen Codex-Codeprüfungen auf `7fb1ad2` bleiben historische Nachweise.
+Die Linux-CI desselben alten Heads scheiterte tatsächlich: beide virtuellen Tonspuren
+hatten 10.066 ms statt höchstens erlaubten 10.000 ms. Die darüber hinausgehende Ursache
+ist nicht bewiesen. Kein erneuter alter Lauf wurde angefordert; der neue Head benötigt
+neue erfolgreiche Ziel-CI. Dauergrenzen, PCM und Verifier bleiben unverändert.
 
 ## Reviewabdeckung und Veröffentlichung
 
@@ -405,7 +455,7 @@ Der vollständige Basis-bis-Head-Diff umfasst 102 Dateien, davon 100 nach den bi
 zwei Anbieterfilter-Ausnahmen für Lockdateien. Drei kleine neue Test-/Typdateien wurden fachlich
 gebündelt, ohne neue Filter oder Prüfregeländerungen. Zwei isolierte Markerfälle wurden in vier
 bestehende vollständige Interaktionsfälle übernommen; damals deshalb 368 statt zuvor 370 Tests.
-Die sechs Layoutregressionen und der Modulnamenfall ergaben zuletzt 375; vier Pollfehlerregressionen ergaben 379; der zusätzliche Batch-Fallback-Gegenfall erhöht die aktuelle Anzahl auf 380.
+Die sechs Layoutregressionen und der Modulnamenfall ergaben zuletzt 375; vier Pollfehlerregressionen ergaben 379; der zusätzliche Batch-Fallback-Gegenfall erhöhte die damalige Anzahl auf 380; die fünf zusätzlichen Hinweis-/Bridge-Fälle ergeben aktuell 385.
 Die ursprüngliche Fünf-Sekunden-Frist des verschobenen Vorschautests bleibt ausdrücklich erhalten.
 
 Vor Veröffentlichung werden Git-Root, Branch und bisheriger Remote-Head geprüft; normaler Fast-forward.

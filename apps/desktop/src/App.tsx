@@ -2033,6 +2033,50 @@ export default function App({ api = desktopApi }: { api?: DesktopApi }) {
     });
   }
 
+  const erasureStatus = erasureNotice ? (
+    <p role="status" className="notice">
+      {erasureNotice}
+    </p>
+  ) : undefined;
+  const deviceNotices = (
+    <DeviceNotices
+      losses={deviceLosses.filter((loss) => !loss.dismissed)}
+      locale={locale}
+      t={t}
+      onDismiss={(loss) =>
+        updateDeviceLosses(
+          deviceLossesRef.current.map((item) =>
+            item === loss ? { ...item, dismissed: true } : item,
+          ),
+        )
+      }
+    />
+  );
+  const pendingAgentRequest = app?.agent?.pending?.status === "pending";
+  const workspaceNotices =
+    pendingAgentRequest ||
+    erasureNotice ||
+    deviceLosses.some((loss) => !loss.dismissed) ? (
+      <>
+        {pendingAgentRequest && (
+          <div role="alert" className="notice warning workspace-agent-notice">
+            <span>
+              {locale === "de"
+                ? "Neue Aufnahmeanfrage eines Agenten."
+                : "New recording request from an agent."}
+            </span>
+            <button
+              type="button"
+              onClick={() => chooseClassicMeetingView(true)}
+            >
+              {locale === "de" ? "Anfrage prüfen" : "Review request"}
+            </button>
+          </div>
+        )}
+        {erasureStatus}
+        {deviceNotices}
+      </>
+    ) : undefined;
   const meetingWorkspaceAvailable = Boolean(
     (page === "meeting" || page === "detail") &&
       shownMeeting &&
@@ -2061,6 +2105,7 @@ export default function App({ api = desktopApi }: { api?: DesktopApi }) {
           api={api}
           meeting={shownMeeting}
           onBack={() => chooseClassicMeetingView(true)}
+          notices={workspaceNotices}
           selectedFile={
             searchSource?.meetingId === shownMeeting.id
               ? searchSource.file
@@ -2177,11 +2222,7 @@ export default function App({ api = desktopApi }: { api?: DesktopApi }) {
         }
       />
       <main ref={mainRef}>
-        {erasureNotice && (
-          <p role="status" className="notice">
-            {erasureNotice}
-          </p>
-        )}
+        {erasureStatus}
         {page === "history" && canEraseMeeting && (
           <PendingErasures
             api={api}
@@ -2337,18 +2378,7 @@ export default function App({ api = desktopApi }: { api?: DesktopApi }) {
             </button>
           </div>
         )}
-        <DeviceNotices
-          losses={deviceLosses.filter((loss) => !loss.dismissed)}
-          locale={locale}
-          t={t}
-          onDismiss={(loss) =>
-            updateDeviceLosses(
-              deviceLossesRef.current.map((item) =>
-                item === loss ? { ...item, dismissed: true } : item,
-              ),
-            )
-          }
-        />
+        {deviceNotices}
         {isStopping && (
           <div role="status" className="notice info">
             {t.stoppingDetail}

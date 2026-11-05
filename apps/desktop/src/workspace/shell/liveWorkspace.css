@@ -146,6 +146,49 @@
 .live-workspace .prototype-stage {
   padding: 0;
 }
+.workspace-native-notices {
+  flex-shrink: 0;
+  max-height: min(30dvh, 16rem);
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+.workspace-native-notices .notice {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  padding: 7px 12px;
+  background: var(--surface-alt);
+  color: var(--text);
+  border-bottom: 1px solid var(--line);
+  font-size: 12px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+.workspace-native-notices .notice > span {
+  flex: 1;
+  min-width: 0;
+}
+.workspace-native-notices .notice button {
+  flex-shrink: 0;
+}
+.workspace-native-notices .notice.warning {
+  background: var(--amber-bg);
+  color: var(--amber);
+}
+.workspace-native-notices .notice.error {
+  background: var(--red-bg);
+  color: var(--red);
+}
+.workspace-native-notices .workspace-agent-notice {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  flex-wrap: wrap;
+}
+.workspace-native-notices .workspace-agent-notice > span {
+  flex-basis: 12rem;
+}
 .live-workspace .meeting-app {
   border: 0;
   border-radius: 0;

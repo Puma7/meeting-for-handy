@@ -1,4 +1,10 @@
-import { useLayoutEffect, useMemo, useRef, useState } from "react";
+import {
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import type { DesktopApi, Meeting } from "../types";
 import { LiveWorkspace } from "./shell/LiveWorkspace.jsx";
 import { createPortal } from "react-dom";
@@ -89,6 +95,7 @@ export default function WorkspaceBridge({
   captureError?: string | null;
   actionError?: string | null;
   onDismissError?: () => void;
+  notices?: ReactNode;
   language?: "de" | "en";
 }) {
   const host = useRef<HTMLDivElement>(null);

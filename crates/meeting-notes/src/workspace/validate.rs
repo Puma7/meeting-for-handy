@@ -383,46 +383,50 @@ fn retained_update_evidence(
     } else {
         crate::validation::screen_facts
     };
+    let mut candidates = text_evidence.to_vec();
+    for evidence in &old.evidence {
+        let quote = evidence.quote.to_lowercase();
+        let supports_metadata = [
+            old.owner.as_ref().filter(|_| change.owner.is_none()),
+            old.due.as_ref().filter(|_| change.due.is_none()),
+        ]
+        .into_iter()
+        .flatten()
+        .any(|value| quote.contains(&value.to_lowercase()));
+        if supports_metadata
+            && !candidates.contains(evidence)
+            && request.transcript_sources.iter().any(|source| {
+                source.id == evidence.source_id && source.text.contains(&evidence.quote)
+            })
+        {
+            candidates.push(evidence.clone());
+        }
+    }
+    candidates.retain(|evidence| !change.evidence.contains(evidence));
+    ensure!(candidates.len() <= 12, "Ungültiger früherer Belegumfang.");
     let mut best: Option<Vec<crate::Evidence>> = None;
-    // At most 64 subsets, independent of meeting length. Do not drop a submitted quote
-    // or raise the source limit to make an otherwise invalid assessment fit.
-    for mask in 0..(1usize << text_evidence.len()) {
-        let mut retained = text_evidence
+    let remaining = 6usize.saturating_sub(change.evidence.len());
+    // At most 4096 subsets of six original text and six current metadata witnesses.
+    // Prune oversized/nonminimal subsets; never drop a submitted quote or raise the limit.
+    for mask in 0usize..(1usize << candidates.len()) {
+        let count = mask.count_ones() as usize;
+        if count > remaining || best.as_ref().is_some_and(|prior| count >= prior.len()) {
+            continue;
+        }
+        let retained = candidates
             .iter()
             .enumerate()
             .filter(|(i, _)| mask & (1 << i) != 0)
             .map(|(_, evidence)| evidence.clone())
             .collect::<Vec<_>>();
         if keep_text
-            && retained.is_empty()
-            && !change.evidence.iter().any(|e| text_evidence.contains(e))
-        {
-            continue;
-        }
-        for value in [
-            old.owner.as_ref().filter(|_| change.owner.is_none()),
-            old.due.as_ref().filter(|_| change.due.is_none()),
-        ]
-        .into_iter()
-        .flatten()
-        {
-            let value = value.to_lowercase();
-            if !change
+            && !change
                 .evidence
                 .iter()
                 .chain(&retained)
-                .any(|e| e.quote.to_lowercase().contains(&value))
-            {
-                if let Some(evidence) = old.evidence.iter().find(|e| {
-                    e.quote.to_lowercase().contains(&value)
-                        && request
-                            .transcript_sources
-                            .iter()
-                            .any(|s| s.id == e.source_id && s.text.contains(&e.quote))
-                }) {
-                    retained.push(evidence.clone());
-                }
-            }
+                .any(|e| text_evidence.contains(e))
+        {
+            continue;
         }
         let mut evidence = change.evidence.clone();
         for previous in &retained {

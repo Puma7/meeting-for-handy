@@ -14,6 +14,73 @@ import { LiveWorkspace } from "./shell/LiveWorkspace.jsx";
 import { fitColumn } from "./shell/fitOverview.mjs";
 import { workspaceText } from "./shell/workspaceLocale.jsx";
 
+it("forwards changing global notices without resetting the selected workspace tab", async () => {
+  const f = fixture();
+  const api = {
+    getLiveNotes: f.adapter.status,
+    startLiveNotes: f.adapter.start,
+    stopLiveNotes: f.adapter.stop,
+    refreshLiveNotes: f.adapter.refresh,
+    setLiveNotesInterval: f.adapter.interval,
+    setWorkspaceContext: vi.fn(),
+    localModelSetup: f.adapter.models,
+  } as unknown as DesktopApi;
+  const props = {
+    api,
+    meeting: f.meeting as unknown as Meeting,
+    endpoint: "http://127.0.0.1:1235/v1/",
+    model: "synthetic",
+    onBack: vi.fn(),
+  };
+  const mounted = render(<WorkspaceBridge {...props} />);
+  try {
+    const host = mounted.container.querySelector(".native-workspace-host")!;
+    await waitFor(() =>
+      expect(host.shadowRoot?.querySelector('[role="tablist"]')).toBeTruthy(),
+    );
+    const root = host.shadowRoot!.querySelector(".prototype") as HTMLElement;
+    const shadow = within(root);
+    fireEvent.click(shadow.getByRole("tab", { name: "Vorbereitung" }));
+    mounted.rerender(
+      <WorkspaceBridge
+        {...props}
+        notices={
+          <p role="status" className="notice">
+            Synthetic erasure remains incomplete; preserved remnants need
+            review.
+          </p>
+        }
+      />,
+    );
+    expect(
+      shadow
+        .getByText(
+          "Synthetic erasure remains incomplete; preserved remnants need review.",
+        )
+        .getAttribute("role"),
+    ).toBe("status");
+    expect(
+      shadow
+        .getByRole("tab", { name: "Vorbereitung" })
+        .getAttribute("aria-selected"),
+    ).toBe("true");
+    expect(host.shadowRoot!.querySelector(".prototype")).toBe(root);
+    mounted.rerender(<WorkspaceBridge {...props} />);
+    expect(
+      shadow.queryByText(/Synthetic erasure remains incomplete/),
+    ).toBeNull();
+    expect(
+      shadow
+        .getByRole("tab", { name: "Vorbereitung" })
+        .getAttribute("aria-selected"),
+    ).toBe("true");
+    expect(f.adapter.start).not.toHaveBeenCalled();
+    expect(f.adapter.stop).not.toHaveBeenCalled();
+  } finally {
+    mounted.unmount();
+  }
+});
+
 describe("Status polling error recovery", () => {
   it("clears a transient poll banner on the next successful status read", async () => {
     vi.useFakeTimers();

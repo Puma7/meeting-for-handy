@@ -1,5 +1,5 @@
 /// <reference types="vite/client" />
-import type { ReactElement } from "react";
+import type { ReactElement, ReactNode } from "react";
 export function LiveWorkspace(props: {
   adapter: unknown;
   meeting: unknown;
@@ -20,5 +20,6 @@ export function LiveWorkspace(props: {
   captureError?: string | null;
   actionError?: string | null;
   onDismissError?: () => void;
+  notices?: ReactNode;
   language?: "de" | "en";
 }): ReactElement;

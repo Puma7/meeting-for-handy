@@ -90,6 +90,7 @@ function WorkspaceContents({
   captureError,
   actionError,
   onDismissError,
+  notices,
   language = "de",
 }) {
   const t = useWorkspaceText();
@@ -843,6 +844,9 @@ function WorkspaceContents({
         <div className="meeting-app">
           <div className="app-interior">
             <div className="meeting-workspace">
+              {notices && (
+                <div className="workspace-native-notices">{notices}</div>
+              )}
               {captureError && (
                 <div className="state-banner warning" role="alert">
                   {captureError}
