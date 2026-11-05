@@ -1,6 +1,329 @@
 use super::*;
 
 #[test]
+fn resumed_model_uses_latest_durable_shared_inputs_instead_of_old_cache() {
+    use std::{
+        io::{Read, Write},
+        net::TcpListener,
+        thread,
+        time::{Duration, Instant},
+    };
+    let mut failures = Vec::new();
+    for withdraw in [false, true] {
+        let root = tempfile::tempdir().unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let endpoint = format!("http://{}/v1/", listener.local_addr().unwrap());
+        let connection = |model: &str| crate::Connection {
+            endpoint: endpoint.clone(),
+            model: model.into(),
+            mode: "local".into(),
+            cloud_consent: false,
+            api_key: String::new(),
+        };
+        let initial = WorkspaceContext {
+            agenda: vec![Agenda {
+                id: "e_shared".into(),
+                revision: 1,
+                text: "Old synthetic agenda".into(),
+            }],
+            shared_notes: vec![SharedNote {
+                id: "h_shared".into(),
+                revision: 1,
+                text: "Old synthetic protocol".into(),
+            }],
+            ..Default::default()
+        };
+        let first =
+            crate::live::LiveRunner::start(root.path(), "meeting", connection("model-a"), "en")
+                .unwrap()
+                .with_workspace(initial.clone())
+                .unwrap();
+        let first_id = first.run().id.clone();
+        let first_folder = first.workspace_folder().unwrap();
+        let first_bytes = std::fs::read(first_folder.join("context-00000001.json")).unwrap();
+        drop(first);
+        // Synthetic checkpoint time must not outrank a later human-context edit.
+        let mut checkpoint = WorkspaceState::default();
+        checkpoint
+            .apply_context(&context_store::read(&first_folder, &Default::default()).unwrap())
+            .unwrap();
+        checkpoint.revision = 1;
+        checkpoint.updated_at = Some("2099-01-01T00:00:00Z".into());
+        store::append(
+            &first_folder,
+            &store::Delta::between(&WorkspaceState::default(), &checkpoint, vec![], vec![]),
+        )
+        .unwrap();
+        let second =
+            crate::live::LiveRunner::start(root.path(), "meeting", connection("model-b"), "en")
+                .unwrap()
+                .with_workspace(initial.clone())
+                .unwrap();
+        let second_folder = second.workspace_folder().unwrap();
+        let mut edited = second.workspace_context().unwrap().lock().unwrap().clone();
+        if withdraw {
+            edited.agenda.clear();
+            edited.shared_notes.clear();
+        } else {
+            edited.agenda[0].text = "New synthetic agenda".into();
+            edited.agenda[0].revision += 1;
+            edited.shared_notes[0].text = "New synthetic protocol".into();
+            edited.shared_notes[0].revision += 1;
+        }
+        let (durable, _) = update_context(&second_folder, &edited).unwrap();
+        *second.workspace_context().unwrap().lock().unwrap() = durable.clone();
+        let second_bytes = std::fs::read(second_folder.join("context-00000002.json")).unwrap();
+        drop(second);
+        // A later confirmation in A does not release A's older shared text again.
+        let mut old_context = read_state(&first_folder).unwrap().context;
+        old_context.overrides.push(Override {
+            id: "e_shared".into(),
+            expected_revision: 1,
+            status: "discussed".into(),
+            saved: false,
+        });
+        update_context(&first_folder, &old_context).unwrap();
+        let server = thread::spawn(move || {
+            let end = Instant::now() + Duration::from_secs(8);
+            let mut requests = Vec::new();
+            while requests.len() < 2 {
+                assert!(Instant::now() < end, "synthetic inference did not finish");
+                let (mut stream, _) = match listener.accept() {
+                    Ok(v) => v,
+                    Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                        thread::sleep(Duration::from_millis(2));
+                        continue;
+                    }
+                    Err(e) => panic!("{e}"),
+                };
+                stream.set_nonblocking(false).unwrap();
+                stream
+                    .set_read_timeout(Some(Duration::from_secs(3)))
+                    .unwrap();
+                let mut bytes = Vec::new();
+                let mut buffer = [0; 8192];
+                let header = loop {
+                    let count = stream.read(&mut buffer).unwrap();
+                    assert!(count > 0 && bytes.len() < 500_000);
+                    bytes.extend_from_slice(&buffer[..count]);
+                    if let Some(at) = bytes.windows(4).position(|v| v == b"\r\n\r\n") {
+                        break at + 4;
+                    }
+                };
+                let size = String::from_utf8_lossy(&bytes[..header])
+                    .lines()
+                    .filter_map(|l| l.split_once(':'))
+                    .find(|(k, _)| k.eq_ignore_ascii_case("content-length"))
+                    .unwrap()
+                    .1
+                    .trim()
+                    .parse::<usize>()
+                    .unwrap();
+                while bytes.len() < header + size {
+                    let count = stream.read(&mut buffer).unwrap();
+                    assert!(count > 0);
+                    bytes.extend_from_slice(&buffer[..count]);
+                }
+                let body: serde_json::Value =
+                    serde_json::from_slice(&bytes[header..header + size]).unwrap();
+                let req: serde_json::Value =
+                    serde_json::from_str(body["messages"][1]["content"].as_str().unwrap()).unwrap();
+                let answer=json!({"contractVersion":CONTRACT_VERSION,"requestId":req["requestId"],"changes":[],"overviewRefs":[],"unresolvedContextIds":[],"moreChangesPossible":false}).to_string();
+                let payload = format!(
+                    "data: {}\n\ndata: {}\n\n",
+                    json!({"choices":[{"delta":{"content":answer},"finish_reason":null}]}),
+                    json!({"choices":[{"delta":{},"finish_reason":"stop"}]})
+                );
+                write!(stream,"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{payload}",payload.len()).unwrap();
+                requests.push(req);
+            }
+            requests
+        });
+        let mut resumed =
+            crate::live::LiveRunner::start(root.path(), "meeting", connection("model-a"), "en")
+                .unwrap()
+                .with_workspace(initial.clone())
+                .unwrap();
+        assert_eq!(resumed.run().id, first_id);
+        let current = resumed.workspace_context().unwrap().lock().unwrap().clone();
+        let pending = resumed.pending(&[LiveText {
+            key: "new-part".into(),
+            track: "system".into(),
+            start_ms: 0,
+            end_ms: 3000,
+            text: "We discussed the draft without choosing an owner.".into(),
+        }]);
+        let result = resumed.update(
+            &pending,
+            crate::live::Trigger::Manual,
+            &AnalysisControl::default(),
+        );
+        let requests = server.join().unwrap();
+        result.unwrap();
+        if current.agenda != durable.agenda || current.shared_notes != durable.shared_notes {
+            failures.push(format!("withdraw={withdraw}: resumed older shared inputs"));
+        }
+        for req in requests {
+            let sent = req.to_string();
+            if sent.contains("Old synthetic protocol") || sent.contains("Old synthetic agenda") {
+                failures.push(format!(
+                    "withdraw={withdraw}: stale input reached {} request",
+                    req["purpose"]
+                ));
+            }
+            if !withdraw
+                && (!sent.contains("New synthetic protocol")
+                    || (req["purpose"] == "reconcile" && !sent.contains("New synthetic agenda")))
+            {
+                failures.push(format!(
+                    "withdraw={withdraw}: current native input missing from {} request",
+                    req["purpose"]
+                ));
+            }
+        }
+        let expected = resumed.view().workspace.unwrap();
+        drop(resumed);
+        assert_eq!(
+            serde_json::to_vec(&read_state(&first_folder).unwrap()).unwrap(),
+            serde_json::to_vec(&expected).unwrap()
+        );
+        let again =
+            crate::live::LiveRunner::start(root.path(), "meeting", connection("model-a"), "en")
+                .unwrap()
+                .with_workspace(initial.clone())
+                .unwrap();
+        let restored = again.workspace_context().unwrap().lock().unwrap().clone();
+        if restored.agenda != durable.agenda || restored.shared_notes != durable.shared_notes {
+            failures.push(format!(
+                "withdraw={withdraw}: same-model restart revived stale inputs"
+            ));
+        }
+        drop(again);
+        let fresh =
+            crate::live::LiveRunner::start(root.path(), "meeting", connection("model-c"), "en")
+                .unwrap()
+                .with_workspace(initial.clone())
+                .unwrap();
+        let restored = fresh.workspace_context().unwrap().lock().unwrap().clone();
+        if restored.agenda != durable.agenda || restored.shared_notes != durable.shared_notes {
+            failures.push(format!(
+                "withdraw={withdraw}: fresh model trusted stale browser input"
+            ));
+        }
+        drop(fresh);
+        assert_eq!(
+            std::fs::read(first_folder.join("context-00000001.json")).unwrap(),
+            first_bytes
+        );
+        assert_eq!(
+            std::fs::read(second_folder.join("context-00000002.json")).unwrap(),
+            second_bytes
+        );
+    }
+    assert!(
+        failures.is_empty(),
+        "Shared-input resume failures: {failures:?}"
+    );
+}
+
+#[test]
+fn unreadable_shared_context_blocks_resume_without_falling_back_to_withdrawn_text() {
+    let root = tempfile::tempdir().unwrap();
+    let connection = |model: &str| crate::Connection {
+        endpoint: "http://127.0.0.1:1/v1/".into(),
+        model: model.into(),
+        mode: "local".into(),
+        cloud_consent: false,
+        api_key: String::new(),
+    };
+    for model in ["model-a", "model-b"] {
+        let runner =
+            crate::live::LiveRunner::start(root.path(), "meeting", connection(model), "en")
+                .unwrap()
+                .with_workspace(Default::default())
+                .unwrap();
+        let folder = runner.workspace_folder().unwrap();
+        drop(runner);
+        if model == "model-b" {
+            std::fs::write(
+                folder.join("context-00000001.json"),
+                b"{damaged synthetic context",
+            )
+            .unwrap();
+        }
+    }
+    let resumed =
+        crate::live::LiveRunner::start(root.path(), "meeting", connection("model-a"), "en")
+            .unwrap()
+            .with_workspace(Default::default());
+    assert!(
+        resumed.is_err(),
+        "Damaged native shared context was silently ignored"
+    );
+}
+
+#[test]
+fn conflicting_legacy_contexts_need_confirmation_instead_of_model_creation_order() {
+    let root = tempfile::tempdir().unwrap();
+    let connection = |model: &str| crate::Connection {
+        endpoint: "http://127.0.0.1:1/v1/".into(),
+        model: model.into(),
+        mode: "local".into(),
+        cloud_consent: false,
+        api_key: String::new(),
+    };
+    let mut original_files = Vec::new();
+    for (model, text) in [
+        ("model-a", "Synthetic original sharing"),
+        ("model-b", "Synthetic different sharing"),
+    ] {
+        let live = crate::live::LiveRunner::start(root.path(), "meeting", connection(model), "en")
+            .unwrap()
+            .with_workspace(Default::default())
+            .unwrap();
+        let folder = live.workspace_folder().unwrap();
+        let mut context = live.workspace_context().unwrap().lock().unwrap().clone();
+        context.shared_notes = vec![SharedNote {
+            id: "h_note".into(),
+            revision: 1,
+            text: text.into(),
+        }];
+        update_context(&folder, &context).unwrap();
+        drop(live);
+        for entry in std::fs::read_dir(&folder).unwrap() {
+            let path = entry.unwrap().path();
+            if path
+                .file_name()
+                .unwrap()
+                .to_str()
+                .unwrap()
+                .starts_with("context-")
+                && path.extension().is_some_and(|v| v == "json")
+            {
+                let mut json: serde_json::Value =
+                    serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+                json.as_object_mut().unwrap().remove("createdAt");
+                let bytes = serde_json::to_vec(&json).unwrap();
+                std::fs::write(&path, &bytes).unwrap();
+                original_files.push((path, bytes));
+            }
+        }
+    }
+    let resumed =
+        crate::live::LiveRunner::start(root.path(), "meeting", connection("model-a"), "en")
+            .unwrap()
+            .with_workspace(Default::default());
+    assert!(
+        resumed.is_err(),
+        "Model creation order guessed authority between conflicting untimestamped contexts"
+    );
+    for (path, bytes) in original_files {
+        assert_eq!(std::fs::read(path).unwrap(), bytes);
+    }
+}
+
+#[test]
 fn edited_protocol_retains_human_confirmed_state_before_and_after_reopen() {
     let dir = tempfile::tempdir().unwrap();
     let mut runner = WorkspaceRunner::open(dir.path()).unwrap();

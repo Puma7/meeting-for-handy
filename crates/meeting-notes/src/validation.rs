@@ -397,10 +397,32 @@ pub(crate) const GERMAN_TASK_PLEDGES: &[&str] = &[
     "beauftragt",
 ];
 
-/// Adjacent auxiliaries make "erstellt" a completed-state participle, not an active pledge.
+/// Auxiliaries that can make "erstellt" a completed-state participle.
 const COMPLETED_CREATION_AUXILIARIES: &[&str] = &[
     "wurde", "wurden", "ist", "sind", "war", "waren", "hat", "haben", "hatte", "hatten",
 ];
+
+/// Read completion within the current clause, including intervening modifiers.
+/// A clause boundary or coordination stops the backward screen before another assertion.
+fn completed_creation_before(text: &str) -> bool {
+    let clause = text
+        .rsplit([',', ';', '.', '!', '?', '\n', ':'])
+        .next()
+        .unwrap_or(text);
+    for word in clause
+        .split(|c: char| !c.is_alphabetic())
+        .filter(|word| !word.is_empty())
+        .rev()
+    {
+        if ["und", "oder", "aber", "doch", "sondern", "jedoch"].contains(&word) {
+            return false;
+        }
+        if COMPLETED_CREATION_AUXILIARIES.contains(&word) {
+            return true;
+        }
+    }
+    false
+}
 
 /// Locate a supported assertion at whole-word boundaries, retaining required continuations.
 pub(crate) fn task_pledge_end(text: &str, markers: &[&str]) -> Option<usize> {
@@ -424,13 +446,7 @@ pub(crate) fn task_pledge_end(text: &str, markers: &[&str]) -> Option<usize> {
             {
                 continue;
             }
-            let previous = text[..start]
-                .split(|c: char| !c.is_alphabetic())
-                .filter(|word| !word.is_empty())
-                .next_back();
-            if marker == "erstellt"
-                && previous.is_some_and(|word| COMPLETED_CREATION_AUXILIARIES.contains(&word))
-            {
+            if marker == "erstellt" && completed_creation_before(&text[..start]) {
                 continue;
             }
             let count = text[..end]
@@ -546,13 +562,11 @@ pub(crate) fn has_new_task_commitment(quote: &str) -> bool {
 fn new_task_commitment(quote: &str) -> Commitment {
     let text = quote.to_lowercase().replace('’', "'");
     let assertion = commitment_assertion_text(quote);
-    let words: Vec<_> = assertion
-        .split(|c: char| !c.is_alphabetic())
-        .filter(|word| !word.is_empty())
-        .collect();
-    let completed_creation = words
-        .windows(2)
-        .any(|pair| COMPLETED_CREATION_AUXILIARIES.contains(&pair[0]) && pair[1] == "erstellt");
+    let completed_creation = commitment_word_spans(&assertion)
+        .iter()
+        .any(|(start, word)| {
+            *word == "erstellt" && completed_creation_before(&assertion[..*start])
+        });
     let explicit_pledge = task_pledge_end(&assertion, GERMAN_TASK_PLEDGES).is_some()
         || task_pledge_end(&assertion, ENGLISH_TASK_PLEDGES).is_some();
     if task_condition_present(&text)
@@ -602,6 +616,8 @@ pub(crate) fn commitment_refused(quote: &str) -> bool {
                     "never",
                     "nobody",
                     "noone",
+                    "none",
+                    "neither",
                     "cannot",
                 ]
                 .contains(&word)
@@ -804,6 +820,13 @@ mod generation_tests {
             ("Robin will not check if the report is ready.", false),
             ("Robin will check the report if approval arrives.", false),
             ("No one will check the report.", false),
+            ("None of us will send the report.", false),
+            ("Neither Robin nor Casey will send the report.", false),
+            (
+                "I will check that none of us has published the report.",
+                true,
+            ),
+            ("I will check whether neither copy is public.", true),
             ("No employee will send the report.", false),
             ("Today no participant will prepare the report.", false),
             ("Not a problem, no employee will send the report.", false),
@@ -820,6 +843,15 @@ mod generation_tests {
             ("I will send the report no later than Friday.", true),
             ("Das Protokoll wurde erstellt.", false),
             ("Der Bericht ist erstellt.", false),
+            ("Das Protokoll wurde bereits erstellt.", false),
+            ("Der Bericht war heute schon vollständig erstellt.", false),
+            ("Das Protokoll ist bereits erstellt, wie besprochen.", false),
+            ("Robin ist bereit und erstellt den Bericht.", true),
+            ("Robin war krank, erstellt jetzt den Bericht.", true),
+            (
+                "Ich übernehme die Prüfung, ob das Protokoll bereits erstellt ist.",
+                true,
+            ),
             ("Der Bericht wurde erstellt .", false),
             ("Das Protokoll ist erstellt, wie besprochen.", false),
             ("Robin erstellt, wie vereinbart, den Bericht.", true),

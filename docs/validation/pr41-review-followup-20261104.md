@@ -1,7 +1,7 @@
 # PR 41: Validierungsstand
 
 Stand: 5. November 2026. Version: **1.1.0-beta.1**, unverändert.
-Diese Fassung ergänzt die gemeinsame Aufgabenprüfung für negierte Prüfgegenstände,
+Diese Fassung ergänzt die sichere Wiederaufnahme beim Modellwechsel und die gemeinsame Aufgabenprüfung für negierte Prüfgegenstände,
 negative Aufgabenträger und bereits erledigte Erstellung.
 Native Validierung und die zugehörigen Rustregressionen sind aktualisiert. Frontend, Prompts,
 Transport, Audio/ASR, Modellreservierungen, Abhängigkeiten, Konfiguration und kompletter
@@ -49,11 +49,11 @@ werden nicht als erneut ausgeführt ausgegeben. `verify.ps1` ist vor Quellupload
 
 | Prüfung | Tatsächliches Ergebnis |
 | --- | --- |
-| Rust-Workspace, alle Targets | Nach der abschließenden Zusagenprüfung frisch 555 bestanden, darunter 156 Notizen- und 37 Providerprotokolltests. Drei bestehende besondere Einstiege regulär ignoriert. Frühere Zwischenläufe vor den zusätzlichen Affirmations-, Sprecher- und Erledigt-Gegenproben sind kein endgültiger Nachweis. |
+| Rust-Workspace, alle Targets | Nach der abschließenden Zusagen-/Kontextprüfung frisch 558 bestanden, darunter 159 Notizen- und 37 Providerprotokolltests. Drei bestehende besondere Einstiege regulär ignoriert. Frühere Zwischenläufe vor den zusätzlichen Affirmations-, Sprecher- und Erledigt-Gegenproben sind kein endgültiger Nachweis. |
 | Rustformat und Clippy | Auf diesem nativen Korrekturstand frisch bestanden; gesperrte Abhängigkeiten, Warnungen als Fehler. |
 | Oberfläche | 395 Tests, TypeScript, Produktionsbuild und vollständige Frontendformatprüfung auf `aa72dbd` bestanden. Sämtliche Frontend-Produktions-, Typ- und Testbytes sind seitdem unverändert; lokal nicht wiederholt. 391 und 385 sind frühere Zwischenstände. |
 | Projektprüfung | Vorherige veröffentlichte Stände bestanden 47 PCM-, 35 Notizen-, 28 Vorlagen-, acht Agenten- und Monitorprüfungen. Für diese native Korrektur nach dem letzten Dokumentedit erneut vor Upload erforderlich. |
-| Echte lokale Referenzen | Nach der abschließenden nativen Korrektur frisch: Deutsch 99.8768426 s (0 reguläre Validierungswiederholungen), Englisch 120.4560198 s (0 Wiederholungen). Positive Aufgabe, unverbindliche Aussage, Impulserhalt, menschlicher Status nach Protokolländerung und bytegleiche Wiederöffnung bestanden. Wörtliches englisches „I’ll“ bleibt erhalten. Eine vollständig validierte Wiederholung je Anfrage bleibt zulässig; null Wiederholungen sind keine Freigabeschwelle. Frühere DE-/EN-Referenzen vor den abschließenden Aufgabenträger- und Erledigt-Korrekturen sind nicht dieser finale Nachweis. |
+| Echte lokale Referenzen | Nach der abschließenden nativen Korrektur frisch: Deutsch 101.3137551 s (0 reguläre Validierungswiederholungen), Englisch 114.7423001 s (0 Wiederholungen). Positive Aufgabe, unverbindliche Aussage, Impulserhalt, menschlicher Status nach Protokolländerung und bytegleiche Wiederöffnung bestanden. Wörtliches englisches „I’ll“ bleibt erhalten. Eine vollständig validierte Wiederholung je Anfrage bleibt zulässig; null Wiederholungen sind keine Freigabeschwelle. Frühere DE-/EN-Referenzen vor der abschließenden Aufgaben- und Freigabechronologie sind nicht dieser finale Nachweis. |
 | Paketregression | 21 Prüfungen auf `91f0985`; Paketdateien seitdem unverändert. Tatsächlich erzeugter synthetischer ZIP prüft Streaming- oder Batchhinweis, Launcher, Fingerprint und Nichtüberschreibung. Kein lokales Produktpaket oder Installer daraus bereitgestellt. |
 | Kontrolliertes Langsammodell | Auf `35d53e8`: 244.33 s Gesamtlauf, 210 s SSE-Antwortpause, nächster Refresh nach 210.0421383 s, maximal eine Modellanfrage, ein erhaltener Impuls. 3737920 Samples je Spur / 16000 Hz = 233.62 s je Spur. Beide PCM-Schreiber liefen nach Auswertungsstopp weiter. Hier nicht erneut ausgeführt. |
 | Sidebar im Browser | 24 Abläufe auf `35d53e8`: 390/740/1280 Pixel × Deutsch/Englisch × hell/dunkel × ausgeklappt/eingeklappt. Geöffnete Rechnerdetails innerhalb des Fensters, kein horizontaler Überlauf, keine Seiten-/Konsolenfehler oder fremden Anfragen; eigener Server beendet. Betroffene Komponenten und Prüferbytes unverändert, hier nicht wiederholt. |
@@ -156,6 +156,87 @@ bestehenden Aufgabe laufen weiterhin über ihre bisherigen Verträge; sie werden
 Aufgabe neu klassifiziert. Der erste große Zwischenlauf vor der zusätzlichen Erledigt-Korrektur
 ist nicht der endgültige Rustnachweis. Nach beiden Korrekturen wurden Rust, Clippy, Format und
 beide echten lokalen synthetischen Referenzen frisch ausgeführt.
+
+## Zusätzliche Quantoren- und Zwischenwortgegenprüfung
+
+Die eigene Gegenprüfung auf `cfa2683` fand weitere Varianten derselben Mechanismen.
+„None of us will send …“ und „Neither Robin nor Casey will send …“ durften keine
+Aufgaben anlegen. Zudem waren „wurde bereits erstellt“ und der kommafortgesetzte Zustand
+„ist bereits erstellt, wie besprochen“ noch nicht vollständig gesperrt.
+Die tatsächliche klassische API reproduzierte vier falsche Annahmen, der tatsächliche
+Runner drei; er blockierte die satzfinale wurde-bereits-Variante bereits.
+Diese unterschiedlichen Vorherergebnisse bleiben getrennt dokumentiert.
+
+None/neither werden jetzt im bereits abgegrenzten Übernahmeausdruck geprüft.
+Ein festes „I will check that none …“ oder „I will check whether neither …“ bleibt gültig.
+Marker-Zulassung und klassische Generierung verwenden dieselbe Hilfsverberkennung für
+abgeschlossene Erstellung, auch mit Zwischenwörtern. Die Rückwärtssuche endet an einer
+Satzteilgrenze oder Koordination. Aktive Zusagen nach einer solchen Grenze und abgeschlossene
+Zustände im versprochenen Prüfgegenstand bleiben erhalten. Zusätzliche Gegenfälle decken
+mehrere Zwischenwörter und „Robin ist bereit und erstellt …“/„Robin war krank, erstellt …“ ab.
+Das ist eine begrenzte Sprachheuristik und kein vollständiger syntaktischer Nachweis.
+
+Die API-/Runnergegenfälle bestehen mit wörtlichen Originalbelegen und bytegleicher Wiederöffnung.
+Alle bisherigen Fälle, historischen Leser und Statuswechsel bleiben erhalten.
+Nach der letzten nativen Änderung wurden alle Rusttests, Clippy, Format und beide tatsächlichen
+lokalen synthetischen Modellreferenzen frisch ausgeführt. Keine ältere Referenz oder CI wird
+diesem Korrekturstand zugerechnet; die unveränderten Frontendbytes behalten ihren ausdrücklich
+historisch bezeichneten 395-Test-Nachweis.
+
+## Aktueller nativer Kontext beim Modellwechsel
+
+Der nächste [Codex-Befund auf cfa2683](https://github.com/Puma7/meeting-for-handy/pull/41#discussion_r4479890221)
+war gültig: Bei A → B → A behielt der wiederverwendete A-Lauf seine älteren freigegebenen
+Notizen und Agendapunkte. Die tatsächliche Vorherregression reproduzierte Bearbeitung und
+Widerruf unter B, ältere Eingaben bei A und deren erneute Übertragung in facts/reconcile.
+Auch der erneute A-Neustart und ein frischer C-Lauf konnten den älteren Browserstand übernehmen.
+Eine zweite Vorherregression zeigte die stille Fortsetzung trotz beschädigtem nativem Kontext.
+
+Die Initialisierung wählt nun tatsächliche dauerhafte Änderungen freigegebener Eingaben,
+unabhängig von Modell-Ausgabezeitstempeln und bloßen manuellen Bestätigungen. Ein künstlicher
+späterer Modellzeitstempel in der Regression ist keine menschliche Freigabe. Ältere Journale
+ohne vergleichbare Freigabezeitstempel begründen keine geratene Reihenfolge. Unlesbare oder
+gleichzeitige widersprüchliche Kontextstände blockieren, statt einen älteren freigegebenen Text
+zu erraten.
+Der Browsercache kann vorhandene native Freigaben nicht ersetzen.
+
+Agenda und freigegebene Notizen werden als neue lokale Kontextrevision übernommen.
+Die Override-Linie des Ziellaufs bleibt erhalten; menschliche Bestätigungen werden weiterhin
+getrennt nach ihrem bisherigen Vertrag vererbt. Originale und frühere Kontextdateien bleiben
+byteunverändert. Die kontrollierten lokalen HTTP-Gegenfälle prüfen, dass ältere Notizen/Agendapunkte
+beide Phasen nicht erreichen. Aktuelle Notizen erreichen beide Phasen; aktuelle Agendapunkte
+werden in der dafür vorgesehenen reconcile-Phase geprüft. Die facts-Phase erhält weiterhin
+ihren eingeschränkten Kontext. Dies ändert weder Phasenauftrag noch Schutzgrenzen.
+
+Wiederöffnung ist bytegleich, derselbe Lauf und ein neuer Modelllauf behalten die neuen
+Freigaben beziehungsweise den Widerruf. Alle 159 Notizenprüfungen bestehen. Diese Prüfung
+belegt den lokalen serialisierten Start-/Wiederaufnahmepfad, keine atomare Koordination
+beliebiger fremder Programme. Eine Zwischenreferenz vor dieser Kontextkorrektur scheiterte
+an einem verworfenen Modellvorschlag als Beschluss; sie bleibt erhalten und zählt nicht als
+finaler Referenznachweis. Die oben genannten finalen Referenzen stammen erst nach allen
+Aufgaben- und Kontextkorrekturen; die unveränderte begrenzte Antwortwiederholung bleibt aktiv.
+
+## Abgrenzung von Bestätigung und Freigabechronologie
+
+Eine verstärkte tatsächliche Vorhergegenprobe ergänzte eine spätere manuelle Bestätigung in A,
+nachdem B Notizen und Agenda geändert beziehungsweise widerrufen hatte. Die erste lokale
+Zwischenkorrektur konnte deshalb erneut A auswählen und die älteren Inhalte in facts/reconcile
+senden. Diese Fehlversuche bleiben erhalten. Die Chronologie liest jetzt die letzte tatsächliche
+Agenda-/Notizänderung aus dem unveränderten nativen Journal; reine Override-Änderungen sind
+keine erneute Textfreigabe. Quelle und Zeitstempel müssen denselben gelesenen Kontextstand
+bezeichnen; eine zwischenzeitliche Abweichung blockiert.
+
+Eine weitere Vorherregression bewies, dass Laufanlagezeiten keine widersprüchlichen alten
+Freigaben ohne Zeitstempel ordnen dürfen. Solche Stände werden nun als unbekannte Reihenfolge
+behandelt. Unbekannte Stände sind nur ohne abweichende freigegebene Inhalte kombinierbar.
+Widersprüche verlangen eine ausdrückliche Prüfung statt automatischer Wiederverwendung.
+Die Regression erhält alle ursprünglichen Dateien bytegleich. Journalformat und bestehende
+Leser werden nicht rückwirkend umgeschrieben; es wird kein Zeitstempel erfunden.
+
+Die verstärkte A-B-A-/C-HTTP-Regressionsprüfung und die Altstand-Gegenprobe bestehen.
+Frühere 557-Test-Zwischenläufe, frühere lokale Referenzpaare und die erste Projektprüfung sind
+historische Belege. Die oben benannten 558 Rusttests, 159 Notizenfälle und tatsächlichen
+Modellreferenzen gehören erst zum abschließenden Stand der Freigabechronologie.
 
 ## Reviewkorrekturen
 

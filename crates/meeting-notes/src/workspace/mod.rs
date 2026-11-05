@@ -20,6 +20,13 @@ use std::{
 
 pub const CONTRACT_VERSION: &str = "meeting-update-1";
 pub const PROMPT_VERSION: &str = "handymeeting-workspace-9";
+/// Read shared-input chronology without treating model output or confirmations as new releases.
+pub(crate) fn shared_context_timestamp(
+    folder: &Path,
+    context: &WorkspaceContext,
+) -> Result<Option<chrono::DateTime<chrono::FixedOffset>>> {
+    context_store::shared_timestamp(folder, context)
+}
 const PROMPT: &str = include_str!("system.de.txt");
 const MAX_REQUEST_CHARS: usize = 24_000;
 pub(crate) const WORKSPACE_CONTEXT_LENGTH: u64 = 8192;
@@ -282,6 +289,23 @@ impl WorkspaceRunner {
         if self.state.revision == 0 && current.revision == 0 {
             *current = context_store::update(&self.folder, &context)?.0;
         }
+        Ok(())
+    }
+
+    /// Append current native shared inputs without importing another run's override lineage.
+    pub(crate) fn restore_shared_context(&mut self, native: &WorkspaceContext) -> Result<()> {
+        native.validate()?;
+        let mut current = self
+            .context
+            .lock()
+            .map_err(|_| anyhow::anyhow!("Meetingkontext ist gesperrt."))?;
+        if current.agenda == native.agenda && current.shared_notes == native.shared_notes {
+            return Ok(());
+        }
+        let mut next = current.clone();
+        next.agenda.clone_from(&native.agenda);
+        next.shared_notes.clone_from(&native.shared_notes);
+        *current = context_store::update(&self.folder, &next)?.0;
         Ok(())
     }
 

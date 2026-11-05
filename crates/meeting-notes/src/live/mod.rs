@@ -149,14 +149,27 @@ impl LiveRunner {
             self.run().mode == "local",
             "Automatische Kachelauswertung benötigt ein lokales Modell."
         );
+        let root = self.folder.parent().context("Live root missing")?;
+        let shared = read_latest_shared_context(root, &self.state.run.meeting_id)?;
         let previous = read_latest_workspace_excluding(
-            self.folder.parent().context("Live root missing")?,
+            root,
             &self.state.run.meeting_id,
             Some(self.state.run.id.as_str()),
         )?;
         let mut workspace =
             crate::workspace::WorkspaceRunner::open(&self.folder.join("workspace-v9"))?;
-        workspace.set_context(context)?;
+        let initial =
+            shared
+                .as_ref()
+                .map_or(context, |native| crate::workspace::WorkspaceContext {
+                    agenda: native.agenda.clone(),
+                    shared_notes: native.shared_notes.clone(),
+                    ..Default::default()
+                });
+        workspace.set_context(initial)?;
+        if let Some(native) = shared {
+            workspace.restore_shared_context(&native)?;
+        }
         if let Some(state) = previous.and_then(|view| view.workspace) {
             workspace.inherit_manual(&state)?;
         }
@@ -573,6 +586,54 @@ fn read_workspace_if_present(folder: &Path) -> Result<Option<crate::workspace::W
 /// Selects the latest readable workspace by activity without letting a classic run hide it.
 pub fn read_latest_workspace(root: &Path, meeting_id: &str) -> Result<Option<LiveView>> {
     read_latest_workspace_excluding(root, meeting_id, None)
+}
+
+/// Select durable shared-input authority independently of model-output timestamps.
+/// Unreadable or equally recent conflicting contexts block instead of reviving older sharing.
+fn read_latest_shared_context(
+    root: &Path,
+    meeting_id: &str,
+) -> Result<Option<crate::workspace::WorkspaceContext>> {
+    let (runs, damaged) = list_runs(root)?;
+    anyhow::ensure!(damaged == 0, "Ein gespeicherter Auswertungslauf ist beschädigt. Meetingkontext prüfen; vorhandene Dateien bleiben erhalten.");
+    let mut newest: Option<(
+        chrono::DateTime<chrono::FixedOffset>,
+        crate::workspace::WorkspaceContext,
+    )> = None;
+    let mut undated = Vec::new();
+    for run in runs
+        .into_iter()
+        .filter(|run| run.run.meeting_id == meeting_id)
+    {
+        let folder = root.join(&run.run.id).join("workspace-v9");
+        let Some(state) = read_workspace_if_present(&folder).context("Gespeicherter Meetingkontext ist nicht sicher lesbar. Vorhandene Dateien bleiben erhalten.")? else {
+            continue;
+        };
+        if state.context.revision == 0 {
+            continue;
+        }
+        let Some(at) = crate::workspace::shared_context_timestamp(&folder, &state.context)? else {
+            undated.push(state.context);
+            continue;
+        };
+        if let Some((prior, context)) = &newest {
+            if at == *prior {
+                anyhow::ensure!(context.agenda == state.context.agenda && context.shared_notes == state.context.shared_notes,
+                    "Gleichzeitige gespeicherte Meetingkontexte widersprechen sich. Gewünschten Stand ausdrücklich prüfen.");
+            }
+        }
+        if newest.as_ref().is_none_or(|(prior, _)| at > *prior) {
+            newest = Some((at, state.context));
+        }
+    }
+    let authority = newest
+        .map(|(_, context)| context)
+        .or_else(|| undated.first().cloned());
+    if let Some(current) = &authority {
+        anyhow::ensure!(undated.iter().all(|old| old.agenda == current.agenda && old.shared_notes == current.shared_notes),
+            "Die Reihenfolge älterer freigegebener Eingaben ist unbekannt. Gewünschten Meetingkontext ausdrücklich prüfen; vorhandene Dateien bleiben erhalten.");
+    }
+    Ok(authority)
 }
 fn read_latest_workspace_excluding(
     root: &Path,

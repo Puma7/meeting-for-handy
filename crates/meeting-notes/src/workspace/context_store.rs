@@ -32,6 +32,30 @@ pub(crate) fn lock(folder: &Path) -> Result<File> {
 pub(crate) fn read(folder: &Path, fallback: &WorkspaceContext) -> Result<WorkspaceContext> {
     replay(folder, fallback, |_, _| Ok(()))
 }
+
+/// Date the latest actual shared-input change, excluding override-only activity.
+/// An untimestamped final change stays unknown; run creation is not sharing authority.
+pub(crate) fn shared_timestamp(
+    folder: &Path,
+    expected: &WorkspaceContext,
+) -> Result<Option<chrono::DateTime<chrono::FixedOffset>>> {
+    let mut previous = None;
+    let mut stamp = None;
+    let current = replay(folder, expected, |context, at| {
+        if previous.as_ref().is_none_or(|(agenda, notes)| {
+            agenda != &context.agenda || notes != &context.shared_notes
+        }) {
+            stamp = at;
+        }
+        previous = Some((context.agenda.clone(), context.shared_notes.clone()));
+        Ok(())
+    })?;
+    ensure!(
+        current == *expected,
+        "Der native Meetingkontext wurde inzwischen geändert. Erneut versuchen."
+    );
+    Ok(stamp)
+}
 /// Reconstruct every context-only transition after the model checkpoint, including withdrawn agenda entries and their human history.
 pub(crate) fn project(folder: &Path, state: &mut WorkspaceState) -> Result<WorkspaceContext> {
     let base = state.context.clone();
