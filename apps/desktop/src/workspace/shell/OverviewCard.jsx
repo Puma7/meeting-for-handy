@@ -38,13 +38,22 @@ export function OverviewCard({
   const t = useWorkspaceText();
   const pointer = useRef(null),
     menu = useRef(null),
+    openAtPress = useRef(null),
     clickOrigin = useRef(null);
   const [menuPosition, setMenuPosition] = useState({ left: 10, top: 10 });
   /** Toggle card actions while retaining the triggering button for focus restoration. */
   function toggleMenu(event) {
     const popup = menu.current;
-    if (popup.matches(":popover-open")) {
-      popup.hidePopover();
+    // Auto popovers may light-dismiss after pointerdown but before click.
+    // Keyboard activation uses the current state, including after an abandoned press.
+    const pointerActivation =
+      event.detail > 0 || event.nativeEvent?.pointerType;
+    const wasOpen = pointerActivation
+      ? (openAtPress.current ?? popup.matches(":popover-open"))
+      : popup.matches(":popover-open");
+    openAtPress.current = null;
+    if (wasOpen) {
+      if (popup.matches(":popover-open")) popup.hidePopover();
       return;
     }
     popup.showPopover();
@@ -114,6 +123,12 @@ export function OverviewCard({
               label={`${t(moduleName(card.id))} ${t("anordnen")}`}
               aria-haspopup="true"
               aria-controls={`placement-${card.id}`}
+              onPointerDown={() => {
+                openAtPress.current = menu.current.matches(":popover-open");
+              }}
+              onPointerCancel={() => {
+                openAtPress.current = null;
+              }}
               onClick={toggleMenu}
             >
               <MoreHorizontal size={15} />

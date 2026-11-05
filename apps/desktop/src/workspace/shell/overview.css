@@ -695,6 +695,9 @@
   overflow: hidden;
   text-overflow: ellipsis;
 }
+.theme-dark .drop-insertion span {
+  color: #122444;
+}
 .column-targeted {
   background: color-mix(in srgb, var(--accent) 4%, transparent);
 }

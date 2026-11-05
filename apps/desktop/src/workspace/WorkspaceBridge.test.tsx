@@ -692,6 +692,84 @@ function fixture() {
   return { adapter, meeting, status };
 }
 describe("Native workspace boundary", () => {
+  it("keeps the card menu closed after native pointer light-dismiss and preserves keyboard toggles", async () => {
+    const f = fixture();
+    const opened = new WeakSet<Element>();
+    const show = Object.getOwnPropertyDescriptor(
+      HTMLElement.prototype,
+      "showPopover",
+    );
+    const hide = Object.getOwnPropertyDescriptor(
+      HTMLElement.prototype,
+      "hidePopover",
+    );
+    const matches = Element.prototype.matches;
+    const matcher = vi
+      .spyOn(Element.prototype, "matches")
+      .mockImplementation(function (this: Element, selector: string) {
+        return selector === ":popover-open"
+          ? opened.has(this)
+          : matches.call(this, selector);
+      });
+    Object.defineProperty(HTMLElement.prototype, "showPopover", {
+      configurable: true,
+      value: function (this: HTMLElement) {
+        opened.add(this);
+      },
+    });
+    Object.defineProperty(HTMLElement.prototype, "hidePopover", {
+      configurable: true,
+      value: function (this: HTMLElement) {
+        opened.delete(this);
+      },
+    });
+    try {
+      render(
+        <LiveWorkspace
+          adapter={f.adapter}
+          meeting={f.meeting}
+          onBack={() => {}}
+        />,
+      );
+      fireEvent.click(await screen.findByRole("button", { name: "Anordnen" }));
+      const trigger = screen.getByRole("button", {
+        name: "Transkript anordnen",
+      });
+      const popup = document.getElementById("placement-transcript")!;
+      fireEvent.click(trigger, { detail: 0 });
+      expect(opened.has(popup)).toBe(true);
+      fireEvent.pointerDown(trigger, { pointerType: "mouse" });
+      // Real Edge discharges the auto popover between pointerdown and click.
+      opened.delete(popup);
+      fireEvent.click(trigger, { detail: 1 });
+      expect(opened.has(popup)).toBe(false);
+      fireEvent.pointerDown(trigger, { pointerType: "mouse" });
+      fireEvent.pointerCancel(trigger);
+      fireEvent.click(trigger, { detail: 0 });
+      expect(opened.has(popup)).toBe(true);
+      fireEvent.click(trigger, { detail: 0 });
+      expect(opened.has(popup)).toBe(false);
+      fireEvent.pointerDown(trigger, { pointerType: "touch" });
+      fireEvent.click(trigger, { detail: 1 });
+      expect(opened.has(popup)).toBe(true);
+      fireEvent.pointerDown(trigger, { pointerType: "touch" });
+      opened.delete(popup);
+      fireEvent.click(trigger, { detail: 1 });
+      expect(opened.has(popup)).toBe(false);
+    } finally {
+      matcher.mockRestore();
+      if (show)
+        Object.defineProperty(HTMLElement.prototype, "showPopover", show);
+      else
+        delete (HTMLElement.prototype as unknown as Record<string, unknown>)
+          .showPopover;
+      if (hide)
+        Object.defineProperty(HTMLElement.prototype, "hidePopover", hide);
+      else
+        delete (HTMLElement.prototype as unknown as Record<string, unknown>)
+          .hidePopover;
+    }
+  });
   it("restores native shared notes without replacing private text or submitting a stale browser cache", async () => {
     const f = fixture();
     localStorage.setItem(

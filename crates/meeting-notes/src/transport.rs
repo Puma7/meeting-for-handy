@@ -223,16 +223,21 @@ impl TextClient {
             "Unbekannter lokaler Modellvorgang."
         );
         let path = format!("../{path}");
+        let inference = path == "../api/chat";
         self.request_at(self.base.join(&path)?, &path, body, control, timeout)
             .map_err(|error| if crate::is_cancelled(&error) { error } else {
                 // Report only a fixed scalar category, never provider bodies, paths,
                 // credentials or model text from an underlying error chain.
                 let http_code=error.to_string().strip_prefix("KI-Dienst meldet HTTP ").and_then(|s|s.split('.').next()?.parse::<u16>().ok()).filter(|s|(100..600).contains(s));
                 let category = if let Some(e)=error.downcast_ref::<reqwest::Error>() {
-                    if e.is_timeout(){"Zeitlimit der Verwaltungsanfrage"}else if e.is_connect(){"Verbindung fehlgeschlagen"}else if e.is_body(){"Antwortübertragung unterbrochen"}else{"Netzwerkfehler"}
-                }else if let Some(failure)=error.downcast_ref::<TransportFailure>(){failure.category()}else if error.downcast_ref::<serde_json::Error>().is_some(){"Ungültige JSON-Verwaltungsantwort"}else{"Verwaltungsantwort abgelehnt"};
+                    if e.is_timeout(){if inference {"Zeitlimit der Auswertung"} else {"Zeitlimit der Verwaltungsanfrage"}}else if e.is_connect(){"Verbindung fehlgeschlagen"}else if e.is_body(){"Antwortübertragung unterbrochen"}else{"Netzwerkfehler"}
+                }else if let Some(failure)=error.downcast_ref::<TransportFailure>(){failure.category()}else if error.downcast_ref::<serde_json::Error>().is_some(){if inference {"Ungültige JSON-Modellantwort"} else {"Ungültige JSON-Verwaltungsantwort"}}else if inference {"Modellantwort abgelehnt"}else{"Verwaltungsantwort abgelehnt"};
                 let code=http_code.map(|code|format!(" · HTTP {code}")).unwrap_or_default();
-                anyhow::anyhow!("Lokale Modellverwaltung fehlgeschlagen ({category}{code}). Dienst, Modell und native API-Unterstützung prüfen; Audio und gespeicherte Ergebnisse bleiben erhalten.")
+                if inference {
+                    anyhow::anyhow!("Lokale Auswertung fehlgeschlagen ({category}{code}). Dienst und Modell prüfen; Audio und gespeicherte Ergebnisse bleiben erhalten.")
+                } else {
+                    anyhow::anyhow!("Lokale Modellverwaltung fehlgeschlagen ({category}{code}). Dienst, Modell und native API-Unterstützung prüfen; Audio und gespeicherte Ergebnisse bleiben erhalten.")
+                }
             })
     }
     /// Sends a bounded JSON request on the validated route, with cancellation and redacted failures.
@@ -869,6 +874,135 @@ mod tests {
         net::TcpListener,
         thread,
     };
+
+    #[test]
+    fn classic_native_inference_failures_are_distinct_and_redacted() {
+        let mut mismatches = Vec::new();
+        for inference in [false, true] {
+            for response in ["http", "json", "timeout"] {
+                let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+                let address = listener.local_addr().unwrap();
+                let server = thread::spawn(move || {
+                    listener.set_nonblocking(true).unwrap();
+                    let deadline = std::time::Instant::now() + Duration::from_secs(3);
+                    let mut stream = loop {
+                        assert!(
+                            std::time::Instant::now() < deadline,
+                            "owned synthetic request was not made"
+                        );
+                        match listener.accept() {
+                            Ok((s, _)) => break s,
+                            Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                                thread::sleep(Duration::from_millis(2))
+                            }
+                            Err(e) => panic!("{e}"),
+                        }
+                    };
+                    stream.set_nonblocking(false).unwrap();
+                    stream
+                        .set_read_timeout(Some(Duration::from_secs(3)))
+                        .unwrap();
+                    stream
+                        .set_write_timeout(Some(Duration::from_secs(3)))
+                        .unwrap();
+                    let mut data = Vec::new();
+                    let mut buffer = [0; 8192];
+                    let end = loop {
+                        let n = stream.read(&mut buffer).unwrap();
+                        assert!(n > 0 && data.len() < 500000);
+                        data.extend_from_slice(&buffer[..n]);
+                        if let Some(i) = data.windows(4).position(|b| b == b"\r\n\r\n") {
+                            break i + 4;
+                        }
+                    };
+                    let size = String::from_utf8_lossy(&data[..end])
+                        .lines()
+                        .filter_map(|l| l.split_once(':'))
+                        .find(|(k, _)| k.eq_ignore_ascii_case("content-length"))
+                        .map_or(0, |(_, v)| v.trim().parse::<usize>().unwrap());
+                    assert!(size < 500000);
+                    while data.len() < end + size {
+                        let n = stream.read(&mut buffer).unwrap();
+                        assert!(n > 0);
+                        data.extend_from_slice(&buffer[..n]);
+                    }
+                    let request = String::from_utf8_lossy(&data).into_owned();
+                    if response == "timeout" {
+                        thread::sleep(Duration::from_millis(150));
+                        return request;
+                    }
+                    let body = "SECRET_PROVIDER_BODY C:\\private\\meeting.txt";
+                    let status = if response == "http" {
+                        "500 Internal Server Error"
+                    } else {
+                        "200 OK"
+                    };
+                    write!(stream,"HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",body.len()).unwrap();
+                    request
+                });
+                let client = TextClient::new(&Connection {
+                    endpoint: format!("http://{address}/v1/"),
+                    model: "SECRET_MODEL".into(),
+                    mode: "local".into(),
+                    cloud_consent: false,
+                    api_key: "SECRET_CREDENTIAL".into(),
+                })
+                .unwrap();
+                let body = serde_json::json!({"model":"SECRET_MODEL","messages":[{"role":"user","content":"SECRET_TRANSCRIPT"}]});
+                let path = if inference {
+                    "api/chat"
+                } else {
+                    "api/v1/models/load"
+                };
+                let failure = client
+                    .model_request(
+                        path,
+                        Some(&body),
+                        &AnalysisControl::default(),
+                        if response == "timeout" {
+                            Duration::from_millis(50)
+                        } else {
+                            Duration::from_secs(2)
+                        },
+                    )
+                    .unwrap_err()
+                    .to_string();
+                let request = server.join().unwrap();
+                assert!(request.starts_with(&format!("POST /{path} HTTP/1.1")));
+                let expected = if inference {
+                    "Lokale Auswertung fehlgeschlagen"
+                } else {
+                    "Lokale Modellverwaltung fehlgeschlagen"
+                };
+                if !failure.starts_with(expected) || (inference && failure.contains("Verwaltungs"))
+                {
+                    mismatches.push(format!(
+                        "inference={inference} response={response}: {failure}"
+                    ));
+                }
+                if response == "http" {
+                    assert!(failure.contains("HTTP 500"));
+                }
+                for private in [
+                    "SECRET_PROVIDER_BODY",
+                    "SECRET_MODEL",
+                    "SECRET_CREDENTIAL",
+                    "SECRET_TRANSCRIPT",
+                    "127.0.0.1",
+                    "C:\\private",
+                ] {
+                    assert!(
+                        !failure.contains(private),
+                        "private fixture data leaked: {private}"
+                    );
+                }
+            }
+        }
+        assert!(
+            mismatches.is_empty(),
+            "Wrong operation diagnostics: {mismatches:?}"
+        );
+    }
 
     /// Synthetic one-request model list on an exact local address only.
     fn serve_models_once(listener: TcpListener) -> thread::JoinHandle<String> {
