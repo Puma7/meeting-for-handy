@@ -294,6 +294,13 @@ const AFFIRMING_NEGATIONS: &[&str] = &[
     "kein problem",
     "keine sorge",
     "not a problem",
+    "don't worry",
+    "do not worry",
+    "don't forget",
+    "can't wait",
+    "cannot wait",
+    "don't mind",
+    "doesn't matter",
     "not forget",
     "won't forget",
 ];
@@ -328,28 +335,30 @@ fn without_affirming_negations(text: &str) -> String {
 pub(crate) fn commitment_refused(quote: &str) -> bool {
     let text = quote.to_lowercase();
     let without_affirmation = without_affirming_negations(&text);
-    without_affirmation
-        .split(|c: char| !c.is_alphabetic())
-        .any(|word| {
-            [
-                "nicht",
-                "nie",
-                "niemals",
-                "keineswegs",
-                "kein",
-                "keine",
-                "keinen",
-                "keinem",
-                "keiner",
-                "keines",
-                "niemand",
-                "not",
-                "never",
-                "nobody",
-                "noone",
-            ]
-            .contains(&word)
-        })
+    without_affirmation.contains("n't")
+        || without_affirmation
+            .split(|c: char| !c.is_alphabetic())
+            .any(|word| {
+                [
+                    "nicht",
+                    "nie",
+                    "niemals",
+                    "keineswegs",
+                    "kein",
+                    "keine",
+                    "keinen",
+                    "keinem",
+                    "keiner",
+                    "keines",
+                    "niemand",
+                    "not",
+                    "never",
+                    "nobody",
+                    "noone",
+                    "cannot",
+                ]
+                .contains(&word)
+            })
 }
 
 /// Conservative commitment reading of one literal quote. Hedges and refusals reject the task;
@@ -497,6 +506,18 @@ mod generation_tests {
             "Ich übernehme keine Sorgepflicht für den Bericht.",
             "I won’t email the report.",
             "Not a problem, I won’t email the report.",
+            "I don't promise to email the report.",
+            "I don’t promise to email the report.",
+            "I can't take the report.",
+            "I can’t take the report.",
+            "I cannot write the report.",
+            "Don't worry, I can't take the report.",
+            "We can't promise that we will send the report.",
+            "We can’t promise that we will send the report.",
+            "I can't wait, but I won't email the report.",
+            "I cannot wait, but I cannot write the report.",
+            "I don't mind, but I won't email the report.",
+            "It doesn't matter, I cannot write the report.",
         ] {
             let checked = check(quote, "Bericht übernehmen", Kind::Tasks);
             assert!(checked.items.is_empty(), "{quote}");
@@ -540,6 +561,13 @@ mod generation_tests {
             "Not a problem, I will email the report.",
             "Kein Problem: Ich werde den Bericht nicht vergessen.",
             "I won’t forget to email the report.",
+            "Don't worry, I will email the report.",
+            "Do not worry, I will email the report.",
+            "Don't forget, I will email the report.",
+            "I can't wait, I will email the report.",
+            "I cannot wait, I will email the report.",
+            "I don't mind, I will email the report.",
+            "It doesn't matter, I will email the report.",
         ] {
             assert_eq!(
                 check(quote, "Bericht übernehmen", Kind::Tasks).items.len(),

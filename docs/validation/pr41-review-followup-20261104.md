@@ -28,14 +28,14 @@ Der vollständige TEST_REPORT bleibt byteunverändert; er wurde für diese Nacha
 
 | Prüfung | Ergebnis und Bezug |
 | --- | --- |
-| Rust-Workspace / alle Targets | 545 frisch bestanden, darunter 149 Notizen- und 34 Providerprotokolltests; drei bestehende besondere Einstiege regulär ignoriert. Status-, Zusagen-/Ablehnungs- und neue Mehrfacheintrags-Wiederöffnungsregressionen sind enthalten. Der unten getrennt ausgewiesene Langsamtest stammt vom vorherigen Stand. |
+| Rust-Workspace / alle Targets | 546 frisch bestanden, darunter 150 Notizen- und 34 Providerprotokolltests; drei bestehende besondere Einstiege regulär ignoriert. Neue Zusagen-/Ablehnungsfälle und die vollständige HTTP-/SSE-Phasen- und Wiederöffnungsregression sind enthalten. Der unten getrennt ausgewiesene Langsamtest bleibt historisch. |
 | Rustformat / Clippy | Auf diesem Korrekturstand frisch bestanden; gesperrte Abhängigkeiten und Warnungen als Fehler. |
-| Oberfläche | 375 Tests, TypeScript, Produktionsbuild und vollständiger Formatcheck unter src auf `aa63003` bestanden. Alle Frontend-/Typ-/Abhängigkeitsbytes sind gegenüber diesem Stand unverändert, nicht lokal erneut geprüft. Die dortige letzte gemischte Zeile einer Typdeklaration wurde nur von CRLF zu LF vereinheitlicht; Deklarationstoken unverändert. |
+| Oberfläche | 379 Tests, TypeScript, Produktionsbuild und vollständiger Formatcheck unter src auf diesem Korrekturstand frisch bestanden. Die vier zusätzlichen echten Vorher-/Nachherfälle prüfen Statusfehler, Erholung sowie den Erhalt fehlgeschlagener manueller Aktualisierung und Bestätigung. |
 | Projektfreigabe | `verify.ps1` vor jeder Bereitstellung: 47 PCM-, 35 Notizen-, 28 Vorlagen-, acht Agenten- und Monitorprüfungen bestanden. Der folgende Quellupload bleibt an einen abschließenden erfolgreichen Lauf gebunden. |
-| Echte lokale Referenzen Deutsch und Englisch | Auf dem aktuellen Apostroph-Korrekturstand: Deutsch 110,635574 s und Englisch 124,6478209 s, beide ohne Validierungswiederholung. Beide Läufe bestanden positive Aufgabe, unverbindliche Aussage, Impulserhalt, menschlichen Status nach Protokolländerung und bytegleiche Wiederöffnung. Der vorherige `b197aaa` bestand DE 97,4512424 s und EN 109,821368 s ohne Wiederholung; `5c7d6ab` bestand DE 126,1410333 s mit einer regulär zulässigen vollständig validierten Wiederholung und EN 106,4012813 s ohne Wiederholung. Alle früheren Läufe bleiben historische Nachweise. Die vorhandene Wiederholungsregel wurde nicht verändert; null Wiederholungen sind keine Freigabeschwelle. |
+| Echte lokale Referenzen Deutsch und Englisch | Auf dem finalen gemeinsamen Korrekturstand: Deutsch 99.6440722 s (0 reguläre Validierungswiederholungen), Englisch 124.4921306 s (0 Wiederholungen). Beide Läufe bestanden positive Aufgabe, unverbindliche Aussage, Impulserhalt, menschlichen Status nach Protokolländerung und bytegleiche Wiederöffnung. Die englische Aufgabe enthält jetzt tatsächlich „I’ll“ mit typografischem Apostroph im Modell-Evidenzzitat. Frühere 27-Vorproben vor der gemeinsamen Ablehnungskorrektur bleiben historische Teilstände. Die unveränderte Wiederholungsregel erlaubt eine vollständig validierte Wiederholung je Anfrage; null Wiederholungen sind keine Freigabeschwelle. |
 | Frühere lokale Referenzen | Deutsch 100,9989873 s und Englisch 125,0518623 s auf dem Elternstand `3d4d013`, jeweils ohne Validierungswiederholung. Die deutsche Zusage enthält tatsächlich „jedenfalls“. Diese Läufe werden nicht als erneut ausgeführt ausgegeben. |
 | Langsammodell / zwei Spuren | Auf dem früheren `aa63003` ausdrücklich ausgeführter besonderer Test, hier nicht erneut ausgeführt: 244,32 s Laufzeit, 210 s kontrollierte SSE-Antwortpause, nächster Refresh nach 210,0415725 s, maximal eine Modellanfrage, ein erhaltener Impuls. Samples je Spur 3758720/3758720, jeweils geteilt durch 16.000 Hz = 234,92/234,92 s. Beide dauerhaften PCM-Schreiber liefen nach dem Auswertungsstopp weiter. Worker-, Transport-, Audio-Schreiber- und Slow-Fixture-Dateien bleiben byteunverändert. Der danach korrigierte Import wird durch vier Persistenzfälle geprüft; die gemeinsame Zusagenprüfung ist ebenfalls nach diesem Langsamtest geändert worden. Dieser historische Lauf wird ausdrücklich nicht als erneute Prüfung dieser Änderungen ausgegeben. Frühere Läufe auf `1768125` und `3d4d013` bleiben erhalten. |
-| Browsergegenprüfung | Auf `aa63003` mit tatsächlichen Sidebar-/RecordingStatus-Komponenten und synthetischen Werten bei 390/740/1280 px: vorher aufgeklappt nur 50 px Sprachauswahl in schmalen Fenstern, nachher 161 px und vollständig lesbarer Text. Aufnahmestatus sichtbar, kein horizontaler Überlauf, Ein-/Ausklappen und Rechnerdetails erreichbar, keine Seitenfehler. Frontendbytes bleiben unverändert, nicht wiederholt. Kein nativer IPC- oder Gerätezugriff. |
+| Browsergegenprüfung | Auf diesem Stand sechs Abläufe bei 390×844 und 740×900 px mit tatsächlicher LiveWorkspace-Komponente und synthetischem Adapter: Statuswarnung verschwindet nach erfolgreichem Poll; Fehler einer manuellen Aktualisierung oder Bestätigung bleiben trotz Pollfehler und Erholung erhalten. Bestätigung genau einmal versandt, keine automatische Wiederholung, kein Aufnahme-/Modellstart, keine Konsolen-/Seitenfehler und kein horizontaler Überlauf. Frühere Sidebarprüfung auf `aa63003` bleibt historischer Beleg; sie wird nicht als jetzt wiederholt ausgegeben. Kein nativer IPC- oder Gerätezugriff. |
 
 Die echten Referenzen verwendeten ausschließlich synthetischen Text und das vorhandene
 **google/gemma-4-e4b Q4_K_M** mit 6.326.936.720 Modellbytes, LM Studio **0.4.26.0**,
@@ -269,6 +269,48 @@ Die zwei sauberen Codex-Runden auf `b197aaa` bleiben historische Nachweise. Eine
 CodeRabbit-Runde war dort noch nicht angefordert; Reviews müssen auf dem letzten Korrekturstand
 erneut tatsächlich abschließen.
 
+## Typografische englische Zusagen und weitere Ablehnungen
+
+Die Codex-Prüfung auf `be47b8b` zeigte einen echten vorgelagerten Zulassungsfehler:
+„I’ll email the report“ erreichte die Aufgabenphase nicht; der Abschnitt galt danach bereits
+als verarbeitet. Nur der temporäre Zulassungstext vereinheitlicht jetzt den Apostroph.
+Ein vollständiger öffentlicher Worker-/HTTP-/SSE-Test mit acht Varianten prüft I/we,
+gerade/typografische Apostrophe und vier ausdrückliche Ablehnungen. Vorher scheiterte tatsächlich
+die Phasenfolge am ersten typografischen I’ll-Fall; nachher bleiben Quote, Quellen und gespeicherter
+Zustand beim erneuten Öffnen exakt erhalten. Die echte englische Modellreferenz prüft zusätzlich
+das wörtliche I’ll-Zitat in jedem Auswertungsfenster, ohne die gespeicherte Evidenz zu normalisieren.
+
+Die vollständige CodeRabbit-Prüfung desselben Stands fand zwei weitere echte Fehler:
+„I don’t promise“/„I can’t take“/„I cannot write“ konnten klassische Aufgaben werden;
+„We can’t promise that we will send“ passierte auch die Workspace-Zulassung.
+Die gemeinsame Ablehnungsprüfung berücksichtigt nun verbleibende n't-Kontraktionen und cannot.
+Klare Zusagen nach festen Redewendungen wie „Don't worry“, „I can't wait, I will…“ oder
+„It doesn't matter, I will…“ bleiben erhalten; eine unabhängige spätere Ablehnung blockiert weiter.
+Die beiden öffentlichen Testgruppen enthalten jetzt jeweils 41 Workspace-/klassische Fälle.
+24 abgewiesene klassische Varianten werden außerdem als ältere synthetische Checkpoints
+streng bytegleich gelesen: keine nachträgliche Filterung bestehender Auswertungen.
+
+Zwei neue positive Gegenfälle entdeckten vor Veröffentlichung, dass die zunächst zu breite
+Kontraktionsprüfung auch klare Zusagen nach „I can't wait“ abwies. Die endgültige Fassung
+behebt dies mit ganzen festen Redewendungen und gepaarten unabhängigen Ablehnungen.
+Ein zusätzlich fehlgeschlagener Zwischenlauf beruhte auf einem neuen positiven Testtext ohne
+die verlangte ausdrückliche Zusage; der Kontrolltext wurde entsprechend korrigiert.
+Dieser Fixturefehler wird nicht als weiterer Produktfehler oder sauberer Abschluss ausgegeben.
+
+Der zweite CodeRabbit-Befund betraf vorübergehende Statusfehler in der Oberfläche:
+Sie blieben nach Erholung sichtbar und konnten einen wichtigen Fehler einer menschlichen Aktion
+überschreiben. Der Pollstatus hat jetzt einen eigenen Fehlerzustand. Ein erfolgreicher Poll löscht
+nur diesen; fehlgeschlagene Änderungen und Bestätigungen bleiben sichtbar und werden nicht
+automatisch erneut versandt. Vier echte Vorherfehler sind danach behoben, zusätzlich durch sechs
+Browserabläufe am tatsächlichen UI-Code bestätigt. Aufnahmeablauf und Intervall bleiben unverändert.
+
+Die vollständige `be47b8b`-Runde deckte alle 100 vorgesehenen Dateien ab und war wegen dieser
+zwei CodeRabbit-Befunde nicht sauber. Den zusätzlichen vagen Satz über angeblich nötige
+Test-/Hilfstextbereinigung nahm CodeRabbit nach konkreter Rückfrage ausdrücklich zurück;
+es wurde dafür kein weiterer belegter Fehler benannt. Alle Risiko-/Zusatz-/outside-diff-Texte
+und Antworten wurden gelesen. Die drei Korrekturen benötigen neue Reviews und CI auf demselben
+veröffentlichten Stand; frühere saubere Codex-Runden und grüne CI bleiben historische Belege.
+
 ## Reviewabdeckung und Veröffentlichung
 
 Alle 16 ursprünglichen Sourcery-Anmerkungen und sämtliche bisherigen CodeRabbit-/Codex-Befunde
@@ -286,7 +328,7 @@ Der vollständige Basis-bis-Head-Diff umfasst 102 Dateien, davon 100 nach den bi
 zwei Anbieterfilter-Ausnahmen für Lockdateien. Drei kleine neue Test-/Typdateien wurden fachlich
 gebündelt, ohne neue Filter oder Prüfregeländerungen. Zwei isolierte Markerfälle wurden in vier
 bestehende vollständige Interaktionsfälle übernommen; damals deshalb 368 statt zuvor 370 Tests.
-Die sechs Layoutregressionen ergaben zuletzt 374; der neue Modulnamenfall erhöht die aktuelle Anzahl auf 375.
+Die sechs Layoutregressionen und der Modulnamenfall ergaben zuletzt 375; vier Pollfehlerregressionen erhöhen die aktuelle Anzahl auf 379.
 Die ursprüngliche Fünf-Sekunden-Frist des verschobenen Vorschautests bleibt ausdrücklich erhalten.
 
 Vor Veröffentlichung werden Git-Root, Branch und bisheriger Remote-Head geprüft; normaler Fast-forward.

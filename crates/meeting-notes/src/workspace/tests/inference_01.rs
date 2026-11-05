@@ -1,6 +1,149 @@
 use super::*;
 
 #[test]
+fn contracted_promises_reach_the_tasks_phase_with_literal_reopen_state() {
+    use std::{
+        io::{Read, Write},
+        net::TcpListener,
+        thread,
+        time::{Duration, Instant},
+    };
+    for (quote, allowed) in [
+        ("I'll email the report tomorrow.", true),
+        ("We'll send the report tomorrow.", true),
+        ("I’ll email the report tomorrow.", true),
+        ("We’ll send the report tomorrow.", true),
+        ("I'll not email the report tomorrow.", false),
+        ("We'll not send the report tomorrow.", false),
+        ("I’ll not email the report tomorrow.", false),
+        ("We’ll not send the report tomorrow.", false),
+    ] {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let endpoint = format!("http://{}/v1/", listener.local_addr().unwrap());
+        let original = quote.to_owned();
+        let server = thread::spawn(move || {
+            let end = Instant::now() + Duration::from_secs(5);
+            let mut phases = Vec::new();
+            while Instant::now() < end {
+                let (mut stream, _) = match listener.accept() {
+                    Ok(value) => value,
+                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                        thread::sleep(Duration::from_millis(2));
+                        continue;
+                    }
+                    Err(error) => panic!("{error}"),
+                };
+                stream.set_nonblocking(false).unwrap();
+                stream
+                    .set_read_timeout(Some(Duration::from_secs(2)))
+                    .unwrap();
+                let mut bytes = Vec::new();
+                let mut buffer = [0; 8192];
+                let header = loop {
+                    let count = stream.read(&mut buffer).unwrap();
+                    assert!(count > 0 && bytes.len() < 1_000_000);
+                    bytes.extend_from_slice(&buffer[..count]);
+                    if let Some(at) = bytes.windows(4).position(|part| part == b"\r\n\r\n") {
+                        break at + 4;
+                    }
+                };
+                let size = String::from_utf8_lossy(&bytes[..header])
+                    .lines()
+                    .filter_map(|line| line.split_once(':'))
+                    .find(|(key, _)| key.eq_ignore_ascii_case("content-length"))
+                    .unwrap()
+                    .1
+                    .trim()
+                    .parse::<usize>()
+                    .unwrap();
+                assert!(size < 1_000_000);
+                while bytes.len() < header + size {
+                    let count = stream.read(&mut buffer).unwrap();
+                    assert!(count > 0);
+                    bytes.extend_from_slice(&buffer[..count]);
+                }
+                let body: serde_json::Value =
+                    serde_json::from_slice(&bytes[header..header + size]).unwrap();
+                let req: serde_json::Value =
+                    serde_json::from_str(body["messages"][1]["content"].as_str().unwrap()).unwrap();
+                assert_eq!(req["transcriptSources"][0]["text"], original);
+                let phase = req["purpose"].as_str().unwrap().to_owned();
+                phases.push(phase.clone());
+                let changes = if phase == "tasks" {
+                    json!([{"proposalId":"p_promise","kind":"task","targetId":null,
+                        "targetRevision":null,"text":if original.contains("send") { "Send the report" } else { "Email the report" },"status":"open",
+                        "attention":"current","owner":null,"due":null,
+                        "evidence":[{"sourceId":req["transcriptSources"][0]["id"],
+                            "quote":original}],"relatedEntityIds":[]}])
+                } else {
+                    json!([])
+                };
+                let answer = json!({"contractVersion":CONTRACT_VERSION,
+                    "requestId":req["requestId"],"changes":changes,"overviewRefs":[],
+                    "unresolvedContextIds":[],"moreChangesPossible":false})
+                .to_string();
+                let payload = format!(
+                    "data: {}\n\ndata: {}\n\n",
+                    json!({"choices":[{"delta":{"content":answer},"finish_reason":null}]}),
+                    json!({"choices":[{"delta":{},"finish_reason":"stop"}]})
+                );
+                write!(stream,"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{payload}",payload.len()).unwrap();
+                if phase == "reconcile" {
+                    break;
+                }
+            }
+            phases
+        });
+        let folder = tempfile::tempdir().unwrap();
+        let mut runner = WorkspaceRunner::open(folder.path()).unwrap();
+        runner.set_context(Default::default()).unwrap();
+        let client = TextClient::new(&crate::Connection {
+            endpoint,
+            model: "synthetic".into(),
+            mode: "local".into(),
+            cloud_consent: false,
+            api_key: String::new(),
+        })
+        .unwrap();
+        let texts = vec![LiveText {
+            key: "promise".into(),
+            track: "system".into(),
+            start_ms: 0,
+            end_ms: 3000,
+            text: quote.into(),
+        }];
+        let pending = runner.pending(&texts);
+        let result = runner.update(&client, &pending, &AnalysisControl::default(), "en");
+        let phases = server.join().unwrap();
+        result.unwrap_or_else(|error| panic!("{quote}: {error}"));
+        assert_eq!(
+            phases,
+            if allowed {
+                vec!["tasks", "facts", "reconcile"]
+            } else {
+                vec!["facts", "reconcile"]
+            },
+            "{quote}"
+        );
+        assert_eq!(runner.state.entities.len(), usize::from(allowed), "{quote}");
+        if allowed {
+            assert_eq!(runner.state.entities[0].evidence[0].quote, quote);
+        }
+        assert_eq!(runner.state.originals[0].text, quote);
+        assert!(runner.pending(&texts).is_empty());
+        let before = serde_json::to_vec(&runner.state).unwrap();
+        drop(runner);
+        let reopened = WorkspaceRunner::open(folder.path()).unwrap();
+        assert_eq!(
+            serde_json::to_vec(&reopened.state).unwrap(),
+            before,
+            "{quote}"
+        );
+    }
+}
+
+#[test]
 fn invalid_model_answer_gets_one_fully_validated_retry_and_never_a_partial_save() {
     use std::{
         io::{Read, Write},

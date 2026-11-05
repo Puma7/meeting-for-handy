@@ -655,7 +655,8 @@ pub(super) fn missing_pledge(quote: &str) -> bool {
 }
 /// Require a positive obligation in the literal quote; a wish or missing approval is insufficient.
 pub(super) fn task_quote_allowed(quote: &str) -> bool {
-    let text = quote.to_lowercase();
+    // Normalize temporary admission text only; original quotes and IDs stay literal.
+    let text = quote.to_lowercase().replace('’', "'");
     !missing_pledge(quote)
         && !crate::validation::commitment_refused(quote)
         && !text.contains('?')

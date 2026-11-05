@@ -184,6 +184,10 @@ fn explicit_english_promises_pass_the_task_quote_gate() {
     for quote in [
         "I promise to email the report tomorrow.",
         "We commit to sending the report tomorrow.",
+        "I'll email the report tomorrow.",
+        "We'll send the report tomorrow.",
+        "I’ll email the report tomorrow.",
+        "We’ll send the report tomorrow.",
     ] {
         assert!(quote_options(quote)
             .iter()
@@ -193,6 +197,10 @@ fn explicit_english_promises_pass_the_task_quote_gate() {
         "I do not promise to email the report tomorrow.",
         "I promise to send the report if the budget is approved.",
         "Do I promise to email the report tomorrow?",
+        "I'll not email the report tomorrow.",
+        "We'll not send the report tomorrow.",
+        "I’ll not email the report tomorrow.",
+        "We’ll not send the report tomorrow.",
     ] {
         assert!(!quote_options(quote)
             .iter()
@@ -336,6 +344,25 @@ fn explicit_task_refusals_cannot_publish_new_work_but_affirmations_remain_valid(
         ("Ich übernehme keine Sorgepflicht für den Bericht.", false),
         ("I won’t email the report.", false),
         ("Not a problem, I won’t email the report.", false),
+        ("I don't promise to email the report.", false),
+        ("I don’t promise to email the report.", false),
+        ("I can't take the report.", false),
+        ("I can’t take the report.", false),
+        ("I cannot write the report.", false),
+        ("Don't worry, I can't take the report.", false),
+        ("We can't promise that we will send the report.", false),
+        ("We can’t promise that we will send the report.", false),
+        ("Don't worry, I will email the report.", true),
+        ("Do not worry, I will email the report.", true),
+        ("Don't forget, I will email the report.", true),
+        ("I can't wait, I will email the report.", true),
+        ("I cannot wait, I will email the report.", true),
+        ("I don't mind, I will email the report.", true),
+        ("It doesn't matter, I will email the report.", true),
+        ("I can't wait, but I won't email the report.", false),
+        ("I cannot wait, but I cannot write the report.", false),
+        ("I don't mind, but I won't email the report.", false),
+        ("It doesn't matter, I cannot write the report.", false),
     ] {
         let (mut state, mut request, mut answer) = setup();
         let before = serde_json::to_vec(&state).unwrap();

@@ -214,6 +214,7 @@ function WorkspaceContents({
   const [status, setStatus] = useState(null),
     [error, setError] = useState(null),
     [busy, setBusy] = useState(false);
+  const [pollError, setPollError] = useState(null);
   const [viewportHeight, setViewportHeight] = useState(window.innerHeight),
     [panelViews, setPanelViews] = useState({});
   const current = useRef(state),
@@ -239,8 +240,16 @@ function WorkspaceContents({
     if (polling.current) return;
     polling.current = true;
     try {
-      const next = await adapter.status(meeting.id);
+      let next;
+      try {
+        next = await adapter.status(meeting.id);
+      } catch (e) {
+        if (alive.current)
+          setPollError(e instanceof Error ? e.message : String(e));
+        return;
+      }
       if (!alive.current) return;
+      setPollError(null);
       const runId = next.view?.runId ?? null;
       const native = runId ? next.workspaceContext : null;
       const sameRun = runId === contextRun.current;
@@ -839,9 +848,9 @@ function WorkspaceContents({
                   {captureError}
                 </div>
               )}
-              {(error || status?.error) && (
+              {(error || pollError || status?.error) && (
                 <div className="state-banner warning" role="status">
-                  {error || status?.error}
+                  {error || pollError || status?.error}
                 </div>
               )}
               {storageBlocked && (

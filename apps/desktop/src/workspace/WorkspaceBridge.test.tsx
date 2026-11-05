@@ -14,6 +14,141 @@ import { LiveWorkspace } from "./shell/LiveWorkspace.jsx";
 import { fitColumn } from "./shell/fitOverview.mjs";
 import { workspaceText } from "./shell/workspaceLocale.jsx";
 
+describe("Status polling error recovery", () => {
+  it("clears a transient poll banner on the next successful status read", async () => {
+    vi.useFakeTimers();
+    const f = fixture();
+    f.adapter.status.mockRejectedValueOnce(
+      new Error("Synthetic poll unavailable"),
+    );
+    const mounted = render(
+      <LiveWorkspace
+        adapter={f.adapter}
+        meeting={f.meeting}
+        onBack={() => {}}
+      />,
+    );
+    try {
+      await act(async () => {});
+      expect(screen.getByText(/Synthetic poll unavailable/)).toBeTruthy();
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(2000);
+      });
+      expect(screen.queryByText(/Synthetic poll unavailable/)).toBeNull();
+      expect(f.adapter.stop).not.toHaveBeenCalled();
+      expect(f.adapter.start).not.toHaveBeenCalled();
+    } finally {
+      mounted.unmount();
+      vi.useRealTimers();
+    }
+  });
+  it("shows a poll Error message without its JavaScript Error prefix", async () => {
+    vi.useFakeTimers();
+    const f = fixture();
+    f.adapter.status.mockRejectedValueOnce(
+      new Error("Synthetic poll unavailable"),
+    );
+    const mounted = render(
+      <LiveWorkspace
+        adapter={f.adapter}
+        meeting={f.meeting}
+        onBack={() => {}}
+      />,
+    );
+    try {
+      await act(async () => {});
+      expect(screen.getByText("Synthetic poll unavailable")).toBeTruthy();
+      expect(
+        screen.queryByText("Error: Synthetic poll unavailable"),
+      ).toBeNull();
+    } finally {
+      mounted.unmount();
+      vi.useRealTimers();
+    }
+  });
+  it("keeps a failed manual action visible through poll failure and recovery", async () => {
+    vi.useFakeTimers();
+    const f = fixture();
+    const read = f.adapter.status.getMockImplementation()!;
+    let unavailable = false;
+    f.adapter.status.mockImplementation(async () => {
+      if (unavailable) throw new Error("Synthetic poll unavailable");
+      return read();
+    });
+    f.adapter.refresh.mockRejectedValueOnce(
+      new Error("Synthetic refresh refused"),
+    );
+    const mounted = render(
+      <LiveWorkspace
+        adapter={f.adapter}
+        meeting={f.meeting}
+        onBack={() => {}}
+      />,
+    );
+    try {
+      await act(async () => {});
+      unavailable = true;
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(2000);
+      });
+      fireEvent.click(screen.getByRole("button", { name: "Aktualisieren" }));
+      await act(async () => {});
+      expect(screen.getByText(/Synthetic refresh refused/)).toBeTruthy();
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(2000);
+      });
+      expect(screen.getByText(/Synthetic refresh refused/)).toBeTruthy();
+      unavailable = false;
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(2000);
+      });
+      expect(screen.getByText(/Synthetic refresh refused/)).toBeTruthy();
+      expect(f.adapter.refresh).toHaveBeenCalledTimes(1);
+      expect(f.adapter.stop).not.toHaveBeenCalled();
+    } finally {
+      mounted.unmount();
+      vi.useRealTimers();
+    }
+  });
+  it("keeps a failed human override visible without silently retrying it", async () => {
+    vi.useFakeTimers();
+    const f = fixture();
+    f.adapter.context.mockRejectedValueOnce(
+      new Error("Synthetic override refused"),
+    );
+    const mounted = render(
+      <LiveWorkspace
+        adapter={f.adapter}
+        meeting={f.meeting}
+        onBack={() => {}}
+      />,
+    );
+    try {
+      await act(async () => {});
+      fireEvent.click(screen.getByRole("tab", { name: "Impulse" }));
+      fireEvent.click(screen.getByRole("button", { name: "Besprochen" }));
+      await act(async () => {});
+      expect(screen.getByText(/Synthetic override refused/)).toBeTruthy();
+      f.adapter.status.mockRejectedValueOnce(
+        new Error("Synthetic poll unavailable"),
+      );
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(2000);
+      });
+      expect(screen.getByText(/Synthetic override refused/)).toBeTruthy();
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(2000);
+      });
+      expect(screen.getByText(/Synthetic override refused/)).toBeTruthy();
+      expect(f.adapter.context).toHaveBeenCalledTimes(1);
+      expect(f.adapter.stop).not.toHaveBeenCalled();
+    } finally {
+      mounted.unmount();
+      vi.useRealTimers();
+    }
+  });
+});
+
 it("localizes every built-in module and its conversation-history controls", () => {
   for (const label of [
     "Transkript",

@@ -61,7 +61,7 @@ fn main() -> Result<()> {
     let start = Instant::now();
     let lines = if english {
         [
-            "Robin says: I promise to email the report tomorrow. Who can approve the budget? There is no commitment on the budget. Maybe we could renew the website in December. That is not a commitment.",
+            "Robin says: I’ll email the report tomorrow. Who can approve the budget? There is no commitment on the budget. Maybe we could renew the website in December. That is not a commitment.",
             "We decide to start the pilot on November 12. The draft is approved. There is still no decision on the budget.",
         ]
     } else {
@@ -110,6 +110,16 @@ fn main() -> Result<()> {
             state.entities.iter().filter(|e| e.kind == "task").count() == 1,
             "Synthetic missing pledge became an extra task"
         );
+        if english {
+            ensure!(
+                state.entities.iter().any(|entity| entity.kind == "task"
+                    && entity
+                        .evidence
+                        .iter()
+                        .any(|evidence| evidence.quote.contains("I’ll"))),
+                "English contracted promise lost its literal typographic apostrophe"
+            );
+        }
         let ids = state
             .entities
             .iter()
