@@ -753,6 +753,70 @@ pub(super) fn withdrawal_quote_allowed(quote: &str) -> bool {
     })
 }
 
+/// Reject percentage witnesses unless their explicit value is exactly 100,
+/// including decimal zeros. Ambiguous ranges, fractions and word values stay open.
+fn incomplete_percentage(text: &str) -> bool {
+    let mut words = Vec::new();
+    let mut start = None;
+    for (at, ch) in text
+        .char_indices()
+        .chain(std::iter::once((text.len(), ' ')))
+    {
+        if ch.is_alphabetic() {
+            start.get_or_insert(at);
+        } else if let Some(from) = start.take() {
+            words.push((from, at, &text[from..at]));
+        }
+    }
+    let mut units = text
+        .match_indices('%')
+        .map(|(at, _)| at)
+        .collect::<Vec<_>>();
+    for (i, (at, _, word)) in words.iter().enumerate() {
+        if ["prozent", "prozente", "percent"].contains(word)
+            || (*word == "per" && words.get(i + 1).is_some_and(|w| w.2 == "cent"))
+        {
+            units.push(*at);
+        }
+    }
+    units.into_iter().any(|at| {
+        let prefix = text[..at].trim_end();
+        let number_at = prefix
+            .char_indices()
+            .rev()
+            .take_while(|(_, c)| c.is_ascii_digit() || ['.', ','].contains(c))
+            .last()
+            .map_or(prefix.len(), |(at, _)| at);
+        let mut decimal = prefix[number_at..].split(['.', ',']);
+        // Compare decimal digits exactly; floating rounding must not turn
+        // 99.9999999999999999999 percent into a completed task.
+        if decimal.next().unwrap().trim_start_matches('0') != "100"
+            || decimal
+                .next()
+                .is_some_and(|d| d.is_empty() || !d.chars().all(|c| c == '0'))
+            || decimal.next().is_some()
+        {
+            return true;
+        }
+        let before = prefix[..number_at].trim_end();
+        if before.ends_with(['-', '–', '—', '/']) {
+            return true;
+        }
+        words
+            .iter()
+            .rev()
+            .find(|w| w.1 == before.len())
+            .is_some_and(|w| {
+                ["to", "bis", "and", "und", "of", "von"].contains(&w.2)
+                    && text[..w.0]
+                        .trim_end()
+                        .chars()
+                        .next_back()
+                        .is_some_and(|c| c.is_ascii_digit())
+            })
+    })
+}
+
 /// Explicit past or completed-state wording, with negation and uncertainty rejected.
 pub(super) fn completion_quote_allowed(quote: &str) -> bool {
     // Expand only complete affirmative first-person contractions for screening.
@@ -775,6 +839,7 @@ pub(super) fn completion_quote_allowed(quote: &str) -> bool {
             .any(|word| ["habe", "haben", "ist"].contains(word));
     if quote.contains('?')
         || german_partial
+        || incomplete_percentage(&lower)
         || words.iter().any(|word| {
             UNCERTAIN_TERMINAL_WORDS.contains(word)
                 || ADDITIONAL_UNCERTAIN_TERMINAL_WORDS.contains(word)

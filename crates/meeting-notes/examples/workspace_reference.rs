@@ -66,7 +66,7 @@ fn main() -> Result<()> {
         ]
     } else {
         [
-            "Robin sagt: Ich schreibe jedenfalls den Bericht bis Freitag. Zum Budget habe ich noch keine Zusage. Vielleicht könnten wir die Webseite im Dezember erneuern. Das ist keine Zusage.",
+            "Robin sagt: Ich schreibe jedenfalls den Bericht bis Freitag. Wer kann das Budget freigeben? Zum Budget habe ich noch keine Zusage. Vielleicht könnten wir die Webseite im Dezember erneuern. Das ist keine Zusage.",
             "Wir entscheiden uns für den Pilotstart am 12. November. Die Freigabe für den Entwurf ist erteilt. Zum Budget wurde noch keine neue Entscheidung getroffen.",
         ]
     };
