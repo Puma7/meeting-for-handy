@@ -867,14 +867,35 @@ fn incomplete_quantity(text: &str) -> bool {
         }
     }
     units.into_iter().any(|(at, end)| {
+        // A hyphen can join a number to a word unit in an object name,
+        // e.g. "the 50-percent-discount report".
+        let prefix = text[..at].trim_end().trim_end_matches('-').trim_end();
+        let number_at = prefix
+            .char_indices()
+            .rev()
+            .take_while(|(_, c)| c.is_ascii_digit() || ['.', ','].contains(c))
+            .last()
+            .map_or(prefix.len(), |(at, _)| at);
+        let before = prefix[..number_at].trim_end();
         let suffix = text[end..].trim_start_matches(|c: char| c.is_whitespace() || c == '-');
         let next = suffix
             .split(|c: char| !c.is_alphabetic())
             .next()
             .unwrap_or("");
-        // "50% discount report" names an object; "50% of the report" or
-        // "zu 50 Prozent abgeschlossen" describes its progress.
+        // Only an explicit object introduction plus a following descriptor
+        // exempts a percentage. An unknown following word alone may be an
+        // adverb ("50% today"), never evidence of an object name.
         if !next.is_empty()
+            && words
+                .iter()
+                .rev()
+                .find(|w| w.1 == before.len())
+                .is_some_and(|w| {
+                    [
+                        "the", "a", "an", "der", "die", "das", "den", "dem", "des", "zur", "zum",
+                    ]
+                    .contains(&w.2)
+                })
             && ![
                 "of",
                 "von",
@@ -899,19 +920,11 @@ fn incomplete_quantity(text: &str) -> bool {
         {
             return false;
         }
-        let prefix = text[..at].trim_end();
-        let number_at = prefix
-            .char_indices()
-            .rev()
-            .take_while(|(_, c)| c.is_ascii_digit() || ['.', ','].contains(c))
-            .last()
-            .map_or(prefix.len(), |(at, _)| at);
         // Compare decimal digits exactly; floating rounding must not turn
         // 99.9999999999999999999 percent into a completed task.
         if completion_number(&prefix[number_at..]) != Some(("100", "")) {
             return true;
         }
-        let before = prefix[..number_at].trim_end();
         if before.ends_with(['-', '–', '—', '/']) {
             return true;
         }

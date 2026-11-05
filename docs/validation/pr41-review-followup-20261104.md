@@ -1,6 +1,6 @@
 # PR 41: Lokale Validierung vor Veröffentlichung
 
-Stand: 5. November 2026. Version **1.1.0-beta.1**, unverändert.
+Stand: 6. November 2026. Version **1.1.0-beta.1**, unverändert.
 
 Diese Nacharbeit unterscheidet Teilfortschritt von Prozentwerten im Namen
 einer vollständig erledigten Aufgabe. Explizite Teilmengen schließen eine
@@ -8,7 +8,7 @@ Aufgabe nicht automatisch. Beide Referenzsprachen enthalten seit dem Vorgänger
 eine ausdrückliche Budgetfrage, wenn der Test einen Gesprächsimpuls verlangt.
 Die ursprünglichen Zusagen und unverbindlichen Aussagen bleiben erhalten.
 
-Die [bisherige ausführliche Fassung](https://github.com/Puma7/meeting-for-handy/blob/94b3ee6ad282dcb1208244f4dd53e9b57df67ba1/docs/validation/pr41-review-followup-20261104.md)
+Die [bisherige ausführliche Fassung](https://github.com/Puma7/meeting-for-handy/blob/9da4d6d91af9d561a5ea2ff2b3fda04f471ff559/docs/validation/pr41-review-followup-20261104.md)
 und deren Detailhistorie bleiben unveränderlich in Git.
 Private Rohbelege, alte Checkpoints und fehlgeschlagene Läufe bleiben erhalten.
 Der vollständige TEST_REPORT bleibt gegenüber dem PR-Basisstand byteunverändert.
@@ -47,8 +47,18 @@ Diese ausdrücklichen Teilmengen bleiben jetzt offen. Vollständige 2-von-2-
 und Drei-Drittel-Angaben, Datumsangaben, ordinales third und half-year bleiben zulässig.
 Ziffernverhältnisse werden ohne Fließkommarundung verglichen.
 
-Die vorhandene dauerhafte Regression erhielt im Vorgänger 21 Fälle und
-in dieser Nacharbeit weitere **25 Fälle**; kein bestehender Fall wurde entfernt.
+Die vorhandene dauerhafte Regression erhielt zuvor 21 Prozentfälle und
+25 weitere Fälle für Teilmengen und Berichtstitel; kein bestehender Fall wurde entfernt.
+
+Ein [weiterer Codex-Befund](https://github.com/Puma7/meeting-for-handy/pull/41#discussion_r4487111857)
+reproduzierte noch falsche Abschlüsse bei „zu 50 Prozent heute abgeschlossen“
+und „I have completed 50% today.“. Sechs Vorherfälle mit Zeit-, anderen Adverbien
+oder einer Präpositionalgruppe wurden tatsächlich als vollständig angenommen.
+Eine unbekannte Nachfolge allein beweist jetzt keinen Gegenstandsnamen. Die
+Ausnahme verlangt eine ausdrückliche Gegenstandseinleitung und einen folgenden
+Bezeichner; eine Fortschrittsangabe bleibt auch vor Adverbien ein Teilfortschritt.
+Acht weitere dauerhafte Fälle prüfen diese sechs Ablehnungen und zwei zulässige
+100-Prozent-Abschlüsse mit Adverbien. Alle Rabattbericht-Gegenbeispiele bleiben erhalten.
 Die Zahl der Testfunktionen bleibt unverändert.
 Abgelehnte Antworten verändern weder Aufgabe noch Zitate oder alten Checkpoint
 und schreiben keine zweite Revision.
@@ -83,8 +93,8 @@ alte Fehlläufe werden dadurch nicht als bestanden umgedeutet.
 | --- | --- |
 | Rust-Workspace, alle Targets | Frisch **567 bestanden**, darunter **168 Notizenfälle** und **37 Providerprotokollfälle**; drei bestehende besondere Einstiege regulär ignoriert. |
 | Rustformat und Clippy | Frisch bestanden, gesperrte Abhängigkeiten und Warnungen als Fehler. |
-| Deutsch, tatsächliches lokales Modell | Frisch **164.4825003 s**; reguläre vollständig validierte Wiederholungen: **2**. |
-| Englisch, tatsächliches lokales Modell | Frisch **110.0172312 s**; reguläre vollständig validierte Wiederholungen: **0**. |
+| Deutsch, tatsächliches lokales Modell | Frisch **118.0736323 s**; reguläre vollständig validierte Wiederholungen: **0**. |
+| Englisch, tatsächliches lokales Modell | Frisch **123.1522437 s**; reguläre vollständig validierte Wiederholungen: **0**. |
 | Frontend | **414 Tests in 21 Dateien**, TypeScript, Produktionsbuild und Format auf den hier bytegleichen Komponenten von 8d0ba21 bestanden; hier nicht erneut ausgeführt. |
 | Projektprüfung | Nach dem letzten Dokumentedit vor Upload erneut verify.ps1 erforderlich: 47 PCM-, 35 Notizen-, 28 Vorlagen-, acht Agenten- und Monitorprüfungen. |
 
@@ -97,8 +107,8 @@ Verwendet wurden ausschließlich synthetischer Text und das vorhandene
 **google/gemma-4-e4b Q4_K_M**, 6.326.936.720 Modellbytes.
 LM Studio **0.4.26+4**, Windows 11 Pro **26200**, Intel **i7-13700**,
 rund **64 GiB** sichtbarer physischer Speicher.
-Die Umgebungsdaten wurden im unmittelbar vorherigen Durchlauf lesend geprüft;
-die ausgewählte Modellinstanz wurde vor dieser Referenz erneut lesend geprüft.
+Rechnerdaten, installierte LM-Studio-Version und ausgewählte Modellinstanz
+wurden für diese Referenz frisch lesend geprüft.
 Die Zeitmessung des Referenzhelfers umfasst Modellverarbeitung, dauerhaften
 Abschluss und Wiederöffnung. Während der Inferenz liefen keine anderen eigenen
 Prüfungen. Keine Downloads, Cloud oder Nutzermeetings.
@@ -107,11 +117,21 @@ Modell-Dateigröße ist keine RAM-Messung.
 
 ## Erhaltene Fehlläufe und Nachweisgrenzen
 
-Der erste deutsche Versuch dieser Nacharbeit brach im ersten Fenster mit der
-Meldung zum Antwortlimit ab. Es entstand keine Ergebnisrevision; der ursprüngliche
+Der erste deutsche Versuch dieser Nacharbeit hielt im zweiten Fenster wegen
+einer Zahl ohne passenden Originalbeleg in einer Impulsänderung an
+(NumberNotQuoted). Erster Checkpoint, menschlich besprochener Impuls und
+Protokolländerung blieben erhalten; keine zweite Ergebnisrevision entstand.
+Die konkrete abgelehnte Zahl, ihr Zitat und die Modellantwort wurden nicht
+separat gespeichert, die weitergehende Ursache ist unbekannt. Das oben genannte
+weitere Paar verwendet unveränderten Code, Modell, Korpus und Kriterien.
+Der Fehllauf bleibt ausdrücklich erhalten und zählt nicht als bestanden.
+
+Ein früherer deutscher Versuch des Vorgängerstands brach im ersten Fenster
+mit der Meldung zum Antwortlimit ab. Es entstand keine Ergebnisrevision; der ursprüngliche
 Agendakontext blieb erhalten. Die genaue Phase und abgelehnte Modellantwort wurden
-nicht separat gespeichert, die weitergehende Ursache ist unbekannt. Das oben
-genannte weitere Paar lief mit identischem Code, Modell, Korpus und Kriterien.
+nicht separat gespeichert, die weitergehende Ursache ist unbekannt. Ein damals
+separates weiteres Paar bestand mit identischem Code, Modell, Korpus und Kriterien;
+dieser historische Erfolg wird den frischen Messungen hier nicht zugeordnet.
 Auch dieser Fehllauf bleibt erhalten und zählt nicht als bestandene Referenz.
 
 - Ein früher englischer Versuch des Vorgängers hielt im zweiten Fenster
@@ -187,7 +207,7 @@ Die zwei sauberen Codex-Codeprüfungen auf 5896b2b waren historische Einzelnachw
 Der folgende vollständige CodeRabbit-Lauf fand die inzwischen korrigierte
 doppelte Workspace-Projektion. Nachfolgende Codex-Läufe fanden Wortmarker
 auf 90becdd, quantitative Teilfortschritte auf dfe5d65 und die zu breite
-Prozentprüfung auf 94b3ee6.
+Prozentprüfung auf 94b3ee6 sowie die nachgestellten Adverbien auf 9da4d6d.
 Diese Runden waren keine sauberen Abschlüsse.
 
 Die Projektionskorrektur wurde von CodeRabbit
@@ -235,7 +255,7 @@ sowie bestehende Speicher- und Verwaltungsschranken bleiben erhalten.
 
 Statische Produktprompts, Vertragsdateien, Belegbudget, Fristen, UI, Transport,
 Aufnahme-/ASR-Logik, Modellreservierungen, Abhängigkeiten, Schutz-/Reviewerregeln,
-Version und vollständiger TEST_REPORT bleiben gegenüber 94b3ee6 unverändert.
+Version und vollständiger TEST_REPORT bleiben gegenüber 9da4d6d unverändert.
 Auch der deutsche und englische synthetische Referenztext bleiben hier byteunverändert.
 
 Physische Aufnahme-, Berechtigungs-, Geräteverlust- und zweistündige Gerätetests

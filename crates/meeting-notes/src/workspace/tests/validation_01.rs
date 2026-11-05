@@ -310,6 +310,26 @@ fn contracted_perfect_completion_retains_literal_quotes_after_reopen() {
         ("I have completed 2/2 parts of the report.", true),
         ("I have completed three thirds of the report.", true),
         ("Ich habe drei Drittel des Berichts abgeschlossen.", true),
+        ("I have completed 100% today.", true),
+        (
+            "Ich habe den Bericht zu 100 Prozent heute abgeschlossen.",
+            true,
+        ),
+        ("I have completed 50% today.", false),
+        ("I have completed 50% really quickly.", false),
+        ("I have completed the report 50% yesterday.", false),
+        (
+            "Ich habe den Bericht zu 50 Prozent heute abgeschlossen.",
+            false,
+        ),
+        (
+            "Ich habe den Bericht zu 50 Prozent schon abgeschlossen.",
+            false,
+        ),
+        (
+            "Ich habe den Bericht zu 50 Prozent mit kurzem Review abgeschlossen.",
+            false,
+        ),
         ("I have completed half of the report.", false),
         ("Ich habe den Bericht zur Hälfte abgeschlossen.", false),
         ("Ich habe den Bericht zur Haelfte abgeschlossen.", false),
