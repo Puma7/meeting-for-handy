@@ -82,6 +82,7 @@ export function Panel({
 
 /** Expose an original-evidence action with a readable source label. */
 export function SourceButton({ id, onOpen, text = false }) {
+  const t = useWorkspaceText();
   const row = transcript.find((item) => item.id === id);
   if (!row) return null;
   return (
@@ -91,7 +92,7 @@ export function SourceButton({ id, onOpen, text = false }) {
       onClick={() => onOpen(id)}
       title={`${id}: ${row.text}`}
     >
-      {text ? "Beleg" : id}
+      {text ? t("Beleg") : id}
       <ArrowUpRight size={11} aria-hidden="true" />
     </button>
   );

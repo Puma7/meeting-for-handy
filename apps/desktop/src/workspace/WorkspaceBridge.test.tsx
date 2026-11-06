@@ -1272,30 +1272,44 @@ it("keeps transcript available and does not repeat original text in the timeline
   expect(f.adapter.start).not.toHaveBeenCalled();
 });
 
-it("uses the original source range to focus the matching transcript after opening a model citation", async () => {
-  const f = fixture();
-  render(
-    <LiveWorkspace adapter={f.adapter} meeting={f.meeting} onBack={() => {}} />,
-  );
-  fireEvent.click(screen.getByRole("tab", { name: "Impulse" }));
-  fireEvent.click(
-    await screen.findByRole("button", {
-      name: /Die Freigabe bleibt noch offen/,
-    }),
-  );
-  fireEvent.click(
-    within(screen.getByRole("dialog")).getByRole("button", {
-      name: "Im Transkript ansehen",
-    }),
-  );
-  const transcript = screen.getByRole("tabpanel", { name: "Transkript" });
-  expect(
-    within(transcript)
-      .getByText("Die Freigabe bleibt noch offen.")
-      .closest("article")
-      ?.classList.contains("source-focused"),
-  ).toBe(true);
-});
+it.each(["complete", "streaming"])(
+  "uses the authoritative %s source text to focus the transcript after opening a model citation",
+  async (partStatus) => {
+    const f = fixture();
+    const literal = f.meeting.parts[0].text;
+    Object.assign(f.meeting.parts[0], {
+      status: partStatus,
+      text: partStatus === "complete" ? literal : "Synthetic uncommitted tail.",
+      committedText:
+        partStatus === "complete" ? "Synthetic earlier checkpoint." : literal,
+    });
+    render(
+      <LiveWorkspace
+        adapter={f.adapter}
+        meeting={f.meeting}
+        onBack={() => {}}
+      />,
+    );
+    fireEvent.click(screen.getByRole("tab", { name: "Impulse" }));
+    fireEvent.click(
+      await screen.findByRole("button", {
+        name: /Die Freigabe bleibt noch offen/,
+      }),
+    );
+    fireEvent.click(
+      within(screen.getByRole("dialog")).getByRole("button", {
+        name: "Im Transkript ansehen",
+      }),
+    );
+    const transcript = screen.getByRole("tabpanel", { name: "Transkript" });
+    expect(
+      within(transcript)
+        .getByText("Die Freigabe bleibt noch offen.")
+        .closest("article")
+        ?.classList.contains("source-focused"),
+    ).toBe(true);
+  },
+);
 
 it("requests WAV bytes only on demand and revokes them when the source closes", async () => {
   const f = fixture();

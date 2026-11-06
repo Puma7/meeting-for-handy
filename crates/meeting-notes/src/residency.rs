@@ -50,10 +50,6 @@ enum Loaded {
     LmStudio {
         instance: String,
     },
-    /// Explicit workspace use of an already loaded instance; never load or unload it.
-    LmStudioBorrowed {
-        instance: String,
-    },
 }
 
 /// One logical user's reservation. Arc clones retain an in-flight user's ownership.
@@ -168,8 +164,8 @@ impl ModelLease {
     pub fn prepare(&self, control: &AnalysisControl) -> Result<()> {
         self.prepare_inner(control, None)
     }
-    /// Use the fixed workspace context for Ollama and our first LM Studio load;
-    /// an already loaded LM Studio instance retains its existing configuration.
+    /// Use the fixed workspace context for Ollama and our first owned LM Studio
+    /// load; pre-existing selected LM Studio instances remain unavailable to us.
     pub fn prepare_workspace(&self, control: &AnalysisControl) -> Result<()> {
         self.prepare_inner(control, Some(crate::workspace::WORKSPACE_CONTEXT_LENGTH))
     }
@@ -182,18 +178,6 @@ impl ModelLease {
             .map_err(|_| anyhow::anyhow!("Lokales Modell ist gesperrt."))?;
         control.check()?;
         ensure!(!state.lm_load_uncertain, "Die vorherige Modellladung wurde nicht eindeutig bestätigt. Keine weitere Instanz wird geladen. In LM Studio den Ladezustand prüfen; erst nach abgeschlossenem oder abgebrochenem Laden und manueller Bereinigung eigener Instanzen die Anwendung neu starten. Fremde Modelle nicht entladen.");
-        if let Some(Loaded::LmStudioBorrowed { instance }) = &state.loaded {
-            // A borrowed ID must still be loaded before each inference. A vanished ID
-            // is never passed to a JIT-loading endpoint as if ownership had survived.
-            let before = state.client.model_request(
-                "api/v1/models",
-                None,
-                control,
-                Duration::from_secs(10),
-            )?;
-            ensure!(before["models"].as_array().is_some_and(|models| models.iter().filter(|m|m["type"]=="llm").filter_map(|m|m["loaded_instances"].as_array()).flatten().any(|i|i["id"].as_str()==Some(instance))), "Die mitbenutzte Modellinstanz ist nicht mehr geladen. In LM Studio prüfen; es wird keine neue Kopie automatisch geladen.");
-            return Ok(());
-        }
         if let (
             Some(Loaded::Ollama {
                 context_length: current,
@@ -318,16 +302,6 @@ impl ModelLease {
                 let selected_instances = model["loaded_instances"].as_array().context(
                     "Lokale Instanzliste fehlt; keine zusätzliche Modellkopie wird geladen.",
                 )?;
-                if context_length.is_some() && selected_instances.len() == 1 {
-                    let instance = selected_instances[0]["id"]
-                        .as_str()
-                        .context("Geladene Modellinstanz fehlt.")?;
-                    valid_model_name(instance)?;
-                    state.loaded = Some(Loaded::LmStudioBorrowed {
-                        instance: instance.into(),
-                    });
-                    return Ok(());
-                }
                 ensure!(selected_instances.is_empty(), "Dieses Modell ist in LM Studio bereits geladen. Es wird weder eine weitere Kopie geladen noch die fremde Instanz übernommen oder entladen. Für eine eigene Reservierung zuerst den Ladezustand in LM Studio prüfen.");
                 let existing: Vec<&str> = models
                     .iter()
@@ -418,9 +392,7 @@ impl ModelLease {
             .context("Lokales Modell wurde noch nicht geladen.")?
         {
             Loaded::Ollama { context_length, .. } => (state.client.model.clone(), *context_length),
-            Loaded::LmStudio { instance } | Loaded::LmStudioBorrowed { instance } => {
-                (instance.clone(), None)
-            }
+            Loaded::LmStudio { instance } => (instance.clone(), None),
         };
         ensure!(!state.refresh_failed, "Die lokale Modellreservierung konnte nicht erneuert werden. Modelldienst prüfen und Auswertung fortsetzen.");
         Ok((
@@ -496,7 +468,6 @@ impl Slot {
             return;
         };
         let expected_instance = match &loaded {
-            Loaded::LmStudioBorrowed { .. } => return,
             Loaded::LmStudio { instance } => Some(instance.clone()),
             _ => None,
         };
@@ -510,7 +481,6 @@ impl Slot {
                 self.cleanup_failed.store(false, Ordering::Release);
                 return;
             }
-            Loaded::LmStudioBorrowed { .. } => return,
             Loaded::LmStudio { instance } => state.client.model_request(
                 "api/v1/models/unload",
                 Some(&json!({"instance_id":instance})),

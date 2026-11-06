@@ -695,3 +695,202 @@ fn oversized_legacy_shared_context_remains_readable_and_can_be_shortened() {
     assert_eq!(std::fs::read(path).unwrap(), bytes);
     assert_eq!(read_state(dir.path()).unwrap().context, saved.context);
 }
+#[test]
+fn withdrawal_requires_explicit_current_intent_and_rejection_preserves_both_kinds() {
+    let invalid = [
+        "The team can cancel the report.",
+        "Our team must cancel the report.",
+        "The team may cancel the report.",
+        "ANNA CAN CANCEL THE REPORT.",
+        "Das Team kann widerrufen.",
+        "Das Team muss widerrufen.",
+        "Das Team darf widerrufen.",
+        "Das Team möchte widerrufen.",
+        "The team may have cancelled the report.",
+        "We can have cancelled the report.",
+        "Anna must have withdrawn the decision.",
+        "Anna plans to cancel the report.",
+        "ANNA PLANS TO CANCEL THE REPORT.",
+        "WE WANT IT CANCELLED.",
+        "Das Team plant, den Beschluss zu widerrufen.",
+        "We plan to cancel the report.",
+        "We have planned to cancel the report.",
+        "Ich habe vorgeschlagen, dass der Beschluss zurückgenommen wird.",
+        "Wir müssen den Beschluss widerrufen.",
+        "We plan to have cancelled the report.",
+        "Wir haben vor den Beschluss widerrufen zu haben.",
+        "Wir nehmen den Beschluss nicht zurück.",
+        "Wir widerrufen das nicht.",
+        "Darauf kommen wir morgen zurück.",
+        "Wir kommen auf den Bericht zurück.",
+        "Der Beschluss ist nicht zurückgenommen.",
+        "Wir nehmen den Beschluss nicht mehr zurück.",
+        "Wir wissen nicht mehr, was der Beschluss war.",
+        "Wir brauchen den Beschluss nicht mehr zurückzunehmen.",
+        "Vielleicht nehmen wir den Beschluss zurück.",
+        "Wenn nötig nehmen wir den Beschluss zurück.",
+        "Wir würden den Beschluss zurücknehmen.",
+        "Wir ziehen den Beschluss zurück?",
+        "Das Widerrufsformular ist angekommen.",
+        "We do not withdraw the decision.",
+        "We didn't cancel the report.",
+        "We don’t cancel the report.",
+        "We never cancelled the report.",
+        "We might cancel the report.",
+        "If needed, we withdraw the decision.",
+        "The report is uncancelled.",
+        "We discuss the cancellation policy.",
+        "Nobody cancelled the report.",
+        "Noone withdrew the decision.",
+        "Wir haben die Zusage keineswegs widerrufen.",
+        "Wir haben nichts zurückgenommen.",
+        "We withdrew nothing.",
+        "We have withdrawn none of the decisions.",
+        "We withdrew neither decision.",
+        "Wir widerrufen nichts.",
+        "We revoked none of the decisions.",
+    ];
+    let valid = [
+        "May cancelled the report.",
+        "Anna cancelled the report.",
+        "Anna withdrew the decision.",
+        "Robin widerruft die Zusage.",
+        "The team cancelled the report.",
+        "Das zuständige Team widerruft die Zusage.",
+        "Anna just cancelled the report.",
+        "Anna Marie cancelled the report.",
+        "We’ve withdrawn the decision.",
+        "I've cancelled the report.",
+        "Wir haben den Beschluss, wie besprochen, zurückgenommen.",
+        "We have, as agreed, cancelled the report.",
+        "Wir nehmen den Beschluss zurück.",
+        "Wir ziehen die Zusage zurück.",
+        "Der Beschluss wurde zurückgenommen.",
+        "Ich widerrufe die Zusage.",
+        "Wir widerrufen den Beschluss.",
+        "Wir brauchen den Bericht nicht mehr.",
+        "Wir nehmen den Beschluss jedenfalls zurück.",
+        "We withdraw the decision.",
+        "The decision has been withdrawn.",
+        "We cancelled the report.",
+        "We withdrew the decision nonetheless.",
+        "Ich habe den Beschluss zurückgenommen.",
+        "We have withdrawn the decision.",
+    ];
+    let mut accepted_invalid = Vec::new();
+    let mut rejected_valid = Vec::new();
+    for kind in ["task", "decision"] {
+        let (mut state, mut request, mut answer) = setup();
+        if kind == "decision" {
+            request.purpose = "facts".into();
+            request.transcript_sources[0].text = "Wir beschließen den Pilotstart.".into();
+            answer["changes"][0]["kind"] = json!("decision");
+            answer["changes"][0]["text"] = json!("Pilotstart beschlossen");
+            answer["changes"][0]["status"] = json!("recorded");
+            answer["changes"][0]["evidence"][0]["quote"] = json!("Wir beschließen den Pilotstart.");
+        }
+        answer["changes"][0]["due"] = json!(null);
+        let seed_events = validate::apply(&mut state, &request, &answer.to_string()).unwrap();
+        state.revision = 1;
+        state.originals = request.transcript_sources.clone();
+        let bytes = serde_json::to_vec(&state).unwrap();
+        for (quote, allowed) in invalid
+            .iter()
+            .map(|q| (*q, false))
+            .chain(valid.iter().map(|q| (*q, true)))
+        {
+            let directory = tempfile::tempdir().unwrap();
+            let (_writer, empty) = store::load(directory.path()).unwrap();
+            store::append(
+                directory.path(),
+                &store::Delta::between(
+                    &empty,
+                    &state,
+                    request.transcript_sources.clone(),
+                    seed_events.clone(),
+                ),
+            )
+            .unwrap();
+            let checkpoint =
+                std::fs::read(directory.path().join("revision-00000001.json")).unwrap();
+            let source = Source {
+                id: "s_status".into(),
+                source: "system".into(),
+                start_ms: 3000,
+                end_ms: 6000,
+                text: quote.into(),
+            };
+            let mut sources = request.transcript_sources.clone();
+            sources.push(source.clone());
+            let mut status = Request::new(
+                "r_status".into(),
+                &Default::default(),
+                &state,
+                state.entities.clone(),
+                std::slice::from_ref(&source),
+                sources,
+            );
+            status.purpose = if kind == "task" { "tasks" } else { "facts" }.into();
+            let mut change = answer.clone();
+            change["requestId"] = json!("r_status");
+            change["changes"][0]["targetId"] = json!(state.entities[0].id);
+            change["changes"][0]["targetRevision"] = json!(state.entities[0].revision);
+            change["changes"][0]["text"] = json!(null);
+            change["changes"][0]["status"] = json!("withdrawn");
+            change["changes"][0]["evidence"] = json!([{"sourceId":"s_status","quote":quote}]);
+            let mut next = state.clone();
+            let result = validate::apply(&mut next, &status, &change.to_string());
+            if allowed && result.is_err() {
+                rejected_valid.push(format!("{kind}: {quote}: {}", result.unwrap_err()));
+                assert_eq!(serde_json::to_vec(&next).unwrap(), bytes, "{quote}");
+                assert!(!directory.path().join("revision-00000002.json").exists());
+                assert_eq!(
+                    read_state(directory.path()).unwrap().entities,
+                    state.entities
+                );
+            } else if allowed {
+                let events = result.unwrap_or_else(|e| panic!("{kind}: {quote}: {e}"));
+                assert_eq!(next.entities[0].status, "withdrawn");
+                assert_eq!(next.entities[0].text, state.entities[0].text);
+                assert!(state.entities[0]
+                    .evidence
+                    .iter()
+                    .all(|e| next.entities[0].evidence.contains(e)));
+                next.revision = 2;
+                store::append(
+                    directory.path(),
+                    &store::Delta::between(&state, &next, vec![source], events),
+                )
+                .unwrap();
+                let reopened = read_state(directory.path()).unwrap();
+                assert_eq!(reopened.entities, next.entities);
+                assert!(reopened.originals.iter().any(|s| s.text == quote));
+                assert_eq!(
+                    serde_json::to_vec(&reopened).unwrap(),
+                    serde_json::to_vec(&read_state(directory.path()).unwrap()).unwrap()
+                );
+            } else if result.is_ok() {
+                accepted_invalid.push(format!("{kind}: {quote}"));
+            } else {
+                assert_eq!(serde_json::to_vec(&next).unwrap(), bytes, "{quote}");
+                assert!(!directory.path().join("revision-00000002.json").exists());
+                assert_eq!(
+                    read_state(directory.path()).unwrap().entities,
+                    state.entities
+                );
+            }
+            assert_eq!(
+                std::fs::read(directory.path().join("revision-00000001.json")).unwrap(),
+                checkpoint
+            );
+        }
+    }
+    assert!(
+        rejected_valid.is_empty(),
+        "Valid withdrawal rejected: {rejected_valid:?}"
+    );
+    assert!(
+        accepted_invalid.is_empty(),
+        "Invalid withdrawal accepted: {accepted_invalid:?}"
+    );
+}

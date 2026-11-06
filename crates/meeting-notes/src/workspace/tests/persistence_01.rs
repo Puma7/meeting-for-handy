@@ -502,3 +502,289 @@ fn six_initial_quotes_select_required_number_witnesses_without_raising_the_budge
         }
     }
 }
+#[test]
+fn promised_task_is_open_and_repeated_result_is_deduplicated() {
+    let (mut state, req, answer) = setup();
+    validate::apply(&mut state, &req, &answer.to_string()).unwrap();
+    assert_eq!(state.entities[0].status, "open");
+    let id = state.entities[0].id.clone();
+    validate::apply(&mut state, &req, &answer.to_string()).unwrap();
+    assert_eq!(state.entities.len(), 1);
+    assert_eq!(state.events.len(), 1);
+    assert_eq!(state.entities[0].id, id);
+}
+#[test]
+fn absent_impulses_survive_later_empty_update() {
+    let (mut state, mut req, mut answer) = setup();
+    req.purpose = "reconcile".into();
+    answer["changes"][0]["kind"] = json!("impulse");
+    answer["changes"][0]["text"] = json!("Wer gibt den Entwurf frei?");
+    answer["changes"][0]["due"] = json!(null);
+    answer["overviewRefs"] = json!([]);
+    validate::apply(&mut state, &req, &answer.to_string()).unwrap();
+    let id = state.entities[0].id.clone();
+    answer["changes"] = json!([]);
+    validate::apply(&mut state, &req, &answer.to_string()).unwrap();
+    assert_eq!(state.entities[0].id, id);
+    assert_eq!(state.entities[0].status, "open");
+}
+#[test]
+fn invalid_second_change_rolls_back_the_whole_bundle() {
+    let (mut state, req, mut answer) = setup();
+    let mut bad = answer["changes"][0].clone();
+    bad["proposalId"] = json!("p_two");
+    bad["evidence"][0]["quote"] = json!("Ein frei erfundenes Originalzitat.");
+    answer["changes"].as_array_mut().unwrap().push(bad);
+    assert!(validate::apply(&mut state, &req, &answer.to_string()).is_err());
+    assert!(state.entities.is_empty());
+    assert!(state.events.is_empty());
+}
+#[test]
+fn incomplete_and_foreign_answers_do_not_advance_state() {
+    for key in ["moreChangesPossible", "requestId"] {
+        let (mut state, req, mut answer) = setup();
+        answer[key] = if key == "requestId" {
+            json!("r_other")
+        } else {
+            json!(true)
+        };
+        assert!(validate::apply(&mut state, &req, &answer.to_string()).is_err());
+        assert_eq!(state.revision, 0);
+    }
+}
+#[test]
+fn promise_does_not_complete_existing_task() {
+    let (mut state, mut req, mut answer) = setup();
+    validate::apply(&mut state, &req, &answer.to_string()).unwrap();
+    req.state = state.entities.clone();
+    answer["changes"][0]["targetId"] = json!(state.entities[0].id);
+    answer["changes"][0]["targetRevision"] = json!(1);
+    answer["changes"][0]["status"] = json!("completed");
+    answer["changes"][0]["text"] = json!(null);
+    assert!(validate::apply(&mut state, &req, &answer.to_string()).is_err());
+    assert_eq!(state.entities[0].status, "open");
+}
+#[test]
+fn manual_lock_prevents_model_override() {
+    let (mut state, mut req, mut answer) = setup();
+    validate::apply(&mut state, &req, &answer.to_string()).unwrap();
+    state.entities[0].human_locked = true;
+    req.state = state.entities.clone();
+    answer["changes"][0]["targetId"] = json!(state.entities[0].id);
+    answer["changes"][0]["targetRevision"] = json!(1);
+    assert!(validate::apply(&mut state, &req, &answer.to_string()).is_err());
+    assert!(state.entities[0].human_locked);
+}
+#[test]
+fn duplicate_json_keys_are_rejected() {
+    let (mut state, req, answer) = setup();
+    let raw = answer.to_string().replacen(
+        "\"requestId\":\"r_test\"",
+        "\"requestId\":\"r_test\",\"requestId\":\"r_test\"",
+        1,
+    );
+    assert!(validate::apply(&mut state, &req, &raw).is_err());
+}
+#[test]
+fn nonbinding_source_is_not_a_task() {
+    let (mut state, mut req, mut answer) = setup();
+    let quote = "Vielleicht könnten wir den Bericht am Freitag verschicken.";
+    req.transcript_sources[0].text = quote.into();
+    answer["changes"][0]["text"] = json!("Bericht verschicken");
+    answer["changes"][0]["due"] = json!(null);
+    answer["changes"][0]["evidence"][0]["quote"] = json!(quote);
+    assert!(validate::apply(&mut state, &req, &answer.to_string()).is_err());
+    assert!(state.entities.is_empty());
+}
+
+#[test]
+fn a_revoked_and_restored_shared_input_still_rejects_inflight_inference() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut runner = WorkspaceRunner::open(dir.path()).unwrap();
+    runner
+        .set_context(WorkspaceContext {
+            shared_notes: vec![SharedNote {
+                id: "h_note".into(),
+                revision: 1,
+                text: "Released text".into(),
+            }],
+            ..Default::default()
+        })
+        .unwrap();
+    let expected = runner.context.lock().unwrap().clone();
+    let mut revoked = expected.clone();
+    revoked.shared_notes.clear();
+    let (mut restored, _) = update_context(dir.path(), &revoked).unwrap();
+    restored.shared_notes = expected.shared_notes.clone();
+    let (current, _) = update_context(dir.path(), &restored).unwrap();
+    *runner.context.lock().unwrap() = current.clone();
+    assert!(runner
+        .commit(
+            runner.state.clone(),
+            vec![],
+            vec![],
+            &AnalysisControl::default(),
+            &expected
+        )
+        .is_err());
+    assert!(!dir.path().join("revision-00000001.json").exists());
+    assert_eq!(read_state(dir.path()).unwrap().context, current);
+}
+
+#[test]
+fn a_status_update_retains_literal_owner_and_due_evidence() {
+    let (mut state, mut req, mut answer) = setup();
+    answer["changes"][0]["due"] = json!("Morgen");
+    validate::apply(&mut state, &req, &answer.to_string()).unwrap();
+    req.state = state.entities.clone();
+    req.transcript_sources.push(Source {
+        id: "s_done".into(),
+        source: "system".into(),
+        start_ms: 3000,
+        end_ms: 6000,
+        text: "Der Entwurf ist erledigt.".into(),
+    });
+    let mut changed = answer;
+    changed["changes"][0]["targetId"] = json!(state.entities[0].id);
+    changed["changes"][0]["targetRevision"] = json!(1);
+    changed["changes"][0]["text"] = json!(null);
+    changed["changes"][0]["status"] = json!("completed");
+    changed["changes"][0]["due"] = json!(null);
+    changed["changes"][0]["evidence"] =
+        json!([{"sourceId":"s_done","quote":"Der Entwurf ist erledigt."}]);
+    validate::apply(&mut state, &req, &changed.to_string()).unwrap();
+    assert_eq!(state.entities[0].due.as_deref(), Some("Morgen"));
+    assert_eq!(state.entities[0].evidence.len(), 2);
+}
+
+#[test]
+fn status_updates_select_valid_inherited_due_witnesses_independently_of_quote_order() {
+    assert_valid_inherited_due_witness_order(false);
+}
+
+#[test]
+fn status_updates_select_binding_inherited_due_witnesses_independently_of_quote_order() {
+    assert_valid_inherited_due_witness_order(true);
+}
+
+fn assert_valid_inherited_due_witness_order(hedged: bool) {
+    for misleading_first in [false, true] {
+        let (mut state, mut req, mut answer) = setup();
+        req.transcript_sources[0].text = "Robin: Ich übernehme den Bericht.".into();
+        answer["changes"][0]["text"] = json!("Bericht liefern");
+        answer["changes"][0]["owner"] = json!("Robin");
+        answer["changes"][0]["due"] = json!(null);
+        answer["changes"][0]["evidence"][0]["quote"] = json!(req.transcript_sources[0].text);
+        validate::apply(&mut state, &req, &answer.to_string()).unwrap();
+        for (id, misleading) in [("s_a", misleading_first), ("s_b", !misleading_first)] {
+            let text = if misleading && hedged {
+                "Ich werde den Bericht vielleicht bis zum 5. Mai liefern.".to_owned()
+            } else {
+                format!(
+                    "Ich werde am {}. Mai den Bericht liefern.",
+                    if misleading { 15 } else { 5 }
+                )
+            };
+            req.transcript_sources.push(Source {
+                id: id.into(),
+                source: "system".into(),
+                start_ms: 3000,
+                end_ms: 6000,
+                text,
+            });
+        }
+        req.state = state.entities.clone();
+        let change = &mut answer["changes"][0];
+        change["targetId"] = json!(state.entities[0].id);
+        change["targetRevision"] = json!(1);
+        change["text"] = json!(null);
+        change["owner"] = json!(null);
+        change["due"] = json!("5. Mai");
+        change["evidence"] = json!(req.transcript_sources[1..]
+            .iter()
+            .map(|s| json!({"sourceId":s.id,"quote":s.text}))
+            .collect::<Vec<_>>());
+        validate::apply(&mut state, &req, &answer.to_string()).unwrap();
+        assert_eq!(state.entities[0].due.as_deref(), Some("5. Mai"));
+        let history = serde_json::to_vec(&state.events).unwrap();
+        req.state = state.entities.clone();
+        req.transcript_sources.push(Source {
+            id: "s_done".into(),
+            source: "system".into(),
+            start_ms: 6000,
+            end_ms: 9000,
+            text: "Der Bericht ist erledigt.".into(),
+        });
+        let change = &mut answer["changes"][0];
+        change["targetRevision"] = json!(2);
+        change["status"] = json!("completed");
+        change["due"] = json!(null);
+        change["evidence"] = json!([{"sourceId":"s_done","quote":"Der Bericht ist erledigt."}]);
+        let result = validate::apply(&mut state, &req, &answer.to_string());
+        assert!(
+            result.is_ok(),
+            "misleading-first={misleading_first}: {result:?}"
+        );
+        assert_eq!(state.entities[0].status, "completed");
+        assert_eq!(state.entities[0].due.as_deref(), Some("5. Mai"));
+        assert_eq!(state.entities[0].owner.as_deref(), Some("Robin"));
+        assert!(state.entities[0]
+            .evidence
+            .iter()
+            .any(|e| e.quote == "Ich werde am 5. Mai den Bericht liefern."));
+        assert_eq!(serde_json::to_vec(&state.events[..2]).unwrap(), history);
+    }
+}
+
+#[test]
+fn missing_pledge_is_not_a_task_and_a_wrong_phase_cannot_publish_it() {
+    let (mut state, mut req, mut answer) = setup();
+    req.transcript_sources[0].text = "Zum Budget fehlt noch eine Zusage.".into();
+    answer["changes"][0]["text"] = json!("Budgetzusage einholen");
+    answer["changes"][0]["due"] = json!(null);
+    answer["changes"][0]["evidence"][0]["quote"] = json!(req.transcript_sources[0].text);
+    assert!(
+        validate::apply(&mut state, &req, &answer.to_string()).is_err(),
+        "A missing pledge was published as an assigned task"
+    );
+    assert!(state.entities.is_empty());
+}
+#[test]
+fn reconcile_cannot_smuggle_a_task_into_the_impulse_phase() {
+    let (mut state, mut req, answer) = setup();
+    req.purpose = "reconcile".into();
+    assert!(
+        validate::apply(&mut state, &req, &answer.to_string()).is_err(),
+        "Wrong phase published an otherwise valid task"
+    );
+    assert!(state.entities.is_empty());
+}
+
+#[test]
+fn explicit_english_promises_pass_the_task_quote_gate() {
+    for quote in [
+        "I promise to email the report tomorrow.",
+        "We commit to sending the report tomorrow.",
+        "I'll email the report tomorrow.",
+        "We'll send the report tomorrow.",
+        "I’ll email the report tomorrow.",
+        "We’ll send the report tomorrow.",
+    ] {
+        assert!(quote_options(quote)
+            .iter()
+            .any(|quote| validate::task_quote_allowed(quote)));
+    }
+    for quote in [
+        "I do not promise to email the report tomorrow.",
+        "I promise to send the report if the budget is approved.",
+        "Do I promise to email the report tomorrow?",
+        "I'll not email the report tomorrow.",
+        "We'll not send the report tomorrow.",
+        "I’ll not email the report tomorrow.",
+        "We’ll not send the report tomorrow.",
+    ] {
+        assert!(!quote_options(quote)
+            .iter()
+            .any(|quote| validate::task_quote_allowed(quote)));
+    }
+}

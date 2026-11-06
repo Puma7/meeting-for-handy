@@ -1470,34 +1470,43 @@ fn failed_background_renewal_blocks_text_until_explicit_retry_succeeds() {
         .any(|(path, body)| path == "/api/generate" && body["keep_alive"] == 0));
 }
 
-/// Explicit workspace borrowing never loads/unloads a foreign selected instance,
-/// and disappearance is detected before an inference could trigger a JIT load.
+/// Workspace and classic clients reject a pre-existing selected-key instance
+/// before text, load, unload or takeover; only read-only inventory is allowed.
 #[test]
-fn workspace_borrow_rechecks_loaded_instance_and_never_manages_it() {
-    let loaded = Arc::new(AtomicBool::new(true));
-    let flag = loaded.clone();
+fn workspace_and_classic_refuse_preexisting_instances_before_inference() {
     let server = Server::new(move |path, _| {
-        assert_eq!(path, "/api/v1/models");
-        (
-            200,
-            json!({"models":[{"type":"llm","key":"synthetic","loaded_instances":if flag.load(Ordering::Acquire){json!([{"id":"existing-selected"}])}else{json!([])}}]}),
-        )
+        if path == "/api/v1/models" {
+            (
+                200,
+                json!({"models":[{"type":"llm","key":"synthetic","loaded_instances":[{"id":"existing-selected"}]},{"type":"llm","key":"foreign-key","loaded_instances":[{"id":"foreign-other"}]}]}),
+            )
+        } else {
+            (
+                500,
+                json!({"error":"Synthetic unexpected mutation or inference"}),
+            )
+        }
     });
     let pool = LocalModelPool::default();
-    let lease = pool
-        .reserve(&server.connection(), LocalProvider::LmStudio)
+    let connection = server.connection();
+    let lease = pool.reserve(&connection, LocalProvider::LmStudio).unwrap();
+    let workspace = lease.prepare_workspace(&AnalysisControl::default());
+    let classic = lease.prepare(&AnalysisControl::default());
+    let client = TextClient::new(&connection)
+        .unwrap()
+        .with_residency(Arc::clone(&lease))
         .unwrap();
-    lease
-        .prepare_workspace(&AnalysisControl::default())
-        .unwrap();
-    lease
-        .prepare_workspace(&AnalysisControl::default())
-        .unwrap();
-    loaded.store(false, Ordering::Release);
-    assert!(lease
-        .prepare_workspace(&AnalysisControl::default())
-        .is_err());
+    let inference = generate(&client);
+    drop(client);
     drop(lease);
+    let seen = server.seen();
+    assert!(
+        workspace.is_err() && classic.is_err() && inference.is_err(),
+        "Foreign selected instance accepted: workspace={}, classic={}, inference={}; wire={seen:?}",
+        workspace.is_ok(),
+        classic.is_ok(),
+        inference.is_ok()
+    );
     assert_eq!(server.seen().len(), 3);
     assert!(server.seen().iter().all(|(p, _)| p == "/api/v1/models"));
 }

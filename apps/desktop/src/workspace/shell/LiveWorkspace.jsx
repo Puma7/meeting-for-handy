@@ -671,7 +671,10 @@ function WorkspaceContents({
             part.source === source.source &&
             Math.floor(part.startSample / 16) <= source.startMs &&
             (part.startSample + part.sampleCount) / 16 >= source.endMs &&
-            (part.committedText ?? part.text ?? "").includes(source.text),
+            (
+              (part.status === "complete" ? part.text : part.committedText) ??
+              ""
+            ).includes(source.text),
         )
       : [];
   const classicRunning = Boolean(status?.running && !status.workspaceContext);

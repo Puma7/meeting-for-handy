@@ -1509,7 +1509,7 @@ mod tests {
         for _ in 0..30 {
             mic.append(&loud).unwrap();
         }
-        let (entered, events) = sync_channel(0);
+        let (entered, events) = sync_channel(1);
         let (release, gate) = sync_channel(0);
         let stop = AtomicBool::new(false);
         struct StopOnDrop<'a>(&'a AtomicBool);
@@ -1528,8 +1528,18 @@ mod tests {
                         entered
                             .send(part.source.clone())
                             .map_err(|e| e.to_string())?;
-                        gate.recv_timeout(Duration::from_secs(5))
-                            .map_err(|e| e.to_string())?;
+                        // This controller-owned latch deliberately holds the
+                        // fake recognizer while capture writes proceed. It is
+                        // not an inference deadline. StopOnDrop cancels the
+                        // wait if the controller fails before releasing it.
+                        loop {
+                            match gate.recv_timeout(Duration::from_millis(100)) {
+                                Ok(()) => break,
+                                Err(mpsc::RecvTimeoutError::Timeout)
+                                    if !worker_stop.load(Ordering::Acquire) => {}
+                                Err(error) => return Err(error.to_string()),
+                            }
+                        }
                     }
                     let (text, overlap_words) = match (part.source.as_str(), previous.is_some()) {
                         ("system", false) => ("Send the report today.", 0),
@@ -1547,6 +1557,10 @@ mod tests {
             });
             let limit = Duration::from_secs(5);
             assert_eq!(events.recv_timeout(limit).unwrap(), "system");
+            // The controller can be busy longer than the fixture's former
+            // five-second gate. This is deliberate synthetic delay, not an
+            // inference deadline or a physical capture performance assertion.
+            thread::sleep(Duration::from_secs(6));
             // Writes progress even while the recognizer cannot complete its first section.
             system.append(&loud).unwrap();
             mic.append(&loud).unwrap();

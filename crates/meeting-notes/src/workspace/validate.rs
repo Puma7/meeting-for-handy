@@ -704,7 +704,25 @@ fn infinitive_after(words: &[&str], predicate: usize, clause_end: usize) -> bool
     }
 }
 
-fn infinitive_auxiliary_before(words: &[&str], start: usize, predicate: usize) -> bool {
+const MODAL_PREDICATE_WORDS: &[&str] = &[
+    "can", "could", "may", "might", "must", "shall", "should", "will", "would", "kann", "können",
+    "könnte", "könnten", "muss", "müssen", "müsste", "müssten", "darf", "dürfen", "dürfte",
+    "dürften", "soll", "sollen", "sollte", "sollten", "wollen", "möchte", "möchten",
+];
+
+fn modal_before(words: &[&str], start: usize, predicate: usize) -> bool {
+    // The initial token can be a name ("May cancelled"); an auxiliary follows
+    // its subject. The clause scope excludes a separate confirmed that-clause.
+    words[start..predicate]
+        .iter()
+        .skip(1)
+        .any(|word| MODAL_PREDICATE_WORDS.contains(word))
+}
+
+fn unasserted_auxiliary_before(words: &[&str], start: usize, predicate: usize) -> bool {
+    if modal_before(words, start, predicate) {
+        return true;
+    }
     (start..predicate).any(|index| {
         if !["to", "zu"].contains(&words[index]) {
             return false;
@@ -723,6 +741,9 @@ fn finite_subject_before(
     start: usize,
     predicate: usize,
 ) -> bool {
+    if modal_before(words, start, predicate) {
+        return false;
+    }
     let mut subject = predicate;
     while subject > start
         && (AFFIRMATIVE_PREDICATE_ADVERBS.contains(&words[subject - 1])
@@ -836,7 +857,7 @@ pub(super) fn recorded_decision_quote_allowed(quote: &str) -> bool {
                 || words[start..index]
                     .iter()
                     .any(|word| ["have", "has", "had", "is", "are", "was", "were"].contains(word));
-            return (asserted && !infinitive_auxiliary_before(&words, start, index))
+            return (asserted && !unasserted_auxiliary_before(&words, start, index))
                 .then_some(index + 1);
         }
         if *word != "we" {
@@ -962,7 +983,7 @@ pub(super) fn withdrawal_quote_allowed(quote: &str) -> bool {
         let subordinate = subordinate_start(&words, clause.start, index);
         let start = subordinate.unwrap_or(clause.start);
         if infinitive_after(&words, index, clause.end)
-            || infinitive_auxiliary_before(&words, start, index)
+            || unasserted_auxiliary_before(&words, start, index)
         {
             return false;
         }

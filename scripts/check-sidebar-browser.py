@@ -11,7 +11,7 @@ import argparse
 from datetime import datetime, timezone
 import hashlib
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
-from importlib.metadata import version
+from importlib.metadata import PackageNotFoundError, version
 import json
 from pathlib import Path
 import re
@@ -25,7 +25,10 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--browser", choices=["msedge", "chrome", "chromium"], default="msedge")
     args = parser.parse_args()
-    installed = version("playwright")
+    try:
+        installed = version("playwright")
+    except PackageNotFoundError as error:
+        raise RuntimeError("Use existing Playwright 1.57.0; no installation is performed.") from error
     if installed != "1.57.0":
         raise RuntimeError("Use existing Playwright 1.57.0; no installation is performed.")
     from playwright.sync_api import sync_playwright, expect
