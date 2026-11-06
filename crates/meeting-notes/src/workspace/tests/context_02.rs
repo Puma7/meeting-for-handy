@@ -698,6 +698,18 @@ fn oversized_legacy_shared_context_remains_readable_and_can_be_shortened() {
 #[test]
 fn withdrawal_requires_explicit_current_intent_and_rejection_preserves_both_kinds() {
     let invalid = [
+        "We must check that the decision has been withdrawn.",
+        "We must check that we have cancelled the report.",
+        "The team must confirm that the decision has been revoked.",
+        "We had to check that the report has been cancelled.",
+        "We have to verify that the report has been cancelled.",
+        "We need to confirm that the decision has been withdrawn.",
+        "Please check that the decision has been withdrawn.",
+        "Check that the decision has been withdrawn.",
+        "Verify that we have cancelled the report.",
+        "Wir mussten prüfen, dass wir den Beschluss zurückgenommen haben.",
+        "Das Team muss bestätigen, dass der Beschluss zurückgenommen wurde.",
+        "Bitte bestätigen, dass wir den Beschluss zurückgenommen haben.",
         "Das Team musste widerrufen.",
         "Wir hatten den Beschluss widerrufen wollen.",
         "Wir haben den Beschluss widerrufen müssen.",
@@ -765,6 +777,10 @@ fn withdrawal_requires_explicit_current_intent_and_rejection_preserves_both_kind
         "We revoked none of the decisions.",
     ];
     let valid = [
+        "We have checked that the decision has been withdrawn.",
+        "We must check, but the decision has been withdrawn.",
+        "We must check. The decision has been withdrawn.",
+        "Wir haben bestätigt, dass wir den Beschluss zurückgenommen haben.",
         "We hoped, but the decision has been withdrawn.",
         "Wir hofften, aber der Beschluss wurde zurückgenommen.",
         "May cancelled the report.",

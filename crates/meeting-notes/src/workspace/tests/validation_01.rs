@@ -4,6 +4,34 @@ use super::*;
 fn perfect_decisions_validate_literal_sources_and_durable_reopen() {
     let mut mismatches = Vec::new();
     for (quote, allowed) in [
+        ("We must check that we decided to start the pilot.", false),
+        (
+            "The team must verify that we have decided to start the pilot.",
+            false,
+        ),
+        ("We need to check that we agreed to start the pilot.", false),
+        (
+            "Please confirm that we have decided to start the pilot.",
+            false,
+        ),
+        ("Check that we have decided to start the pilot.", false),
+        (
+            "Wir mussten prüfen, dass wir den Pilotstart beschlossen haben.",
+            false,
+        ),
+        (
+            "We have checked that we have decided to start the pilot.",
+            true,
+        ),
+        (
+            "We must check, but we have decided to start the pilot.",
+            true,
+        ),
+        ("We must check. We have decided to start the pilot.", true),
+        (
+            "We have confirmed that May agreed to start the pilot.",
+            true,
+        ),
         ("We hope that we have decided to start the pilot.", false),
         ("We hope that we agreed to start the pilot.", false),
         (
@@ -194,6 +222,26 @@ fn perfect_decisions_validate_literal_sources_and_durable_reopen() {
 #[test]
 fn contracted_perfect_completion_retains_literal_quotes_after_reopen() {
     let cases = [
+        ("We must check that the report is complete.", false),
+        ("We must check that the report has been approved.", false),
+        ("The team had to confirm that the report is done.", false),
+        ("We need to confirm that the report is done.", false),
+        ("We have to check that the report is complete.", false),
+        ("Please check that the report is complete.", false),
+        ("Check that the report is complete.", false),
+        ("Verify that the report is done.", false),
+        (
+            "Wir müssen prüfen, dass ich den Bericht abgeschlossen habe.",
+            false,
+        ),
+        ("Wir mussten prüfen, der Bericht ist erledigt.", false),
+        ("Bitte bestätigen, der Bericht ist erledigt.", false),
+        ("We have checked that the report is complete.", true),
+        ("We did verify that the report is done.", true),
+        ("We must check, but the report is complete.", true),
+        ("We must check. The report is complete.", true),
+        ("The May report is complete.", true),
+        ("We have confirmed that May's report is complete.", true),
         ("We hope the report is complete.", false),
         ("We hope that the report is done.", false),
         ("We are hoping the report is complete.", false),

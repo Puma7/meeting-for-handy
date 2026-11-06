@@ -11,32 +11,29 @@ Private Rohbelege und Nutzermeetings werden nicht veröffentlicht.
 
 ## Aktuelle Korrektur und Regressionen
 
-Die [Codex-Runde auf f7fc62c](https://github.com/Puma7/meeting-for-handy/pull/41#pullrequestreview-5796558538)
-fand zwei echte Fehler. Vergangene Modalformen wie Das Team musste widerrufen
-konnten eine Rücknahme auslösen. Außerdem galten Zustandsphrasen in Hoffnungen
-wie We hope the report is complete fälschlich als Abschluss.
+Die [Codex-Runde auf f175d7f](https://github.com/Puma7/meeting-for-handy/pull/41#pullrequestreview-5796980202)
+fand einen weiteren echten Fehler: We must check that the report is complete
+konnte einen Abschluss bestätigen; derselbe Prüfauftrag konnte einen Beschluss
+zurücknehmen. Die lokale Modalprüfung begann erst hinter that und verlor damit
+den noch auszuführenden übergeordneten Auftrag.
 
-Die gemeinsame Prüfung berücksichtigt jetzt deutsche vergangene Modalformen
-und modale Ersatzinfinitive. Für Abschluss, Rücknahme und Beschluss bleibt die
-übergeordnete Aussage über Kommas und dass/that hinweg im Prüfbereich.
-Hoffnungen, Wünsche, Erwartungen und Annahmen bestätigen keinen Abschluss.
-Ein eigenständiger bejahter Folgesatz und tatsächlich bestätigte Ergebnisse
-bleiben zulässig. Namen wie Hope und May sowie substantivische Themenbezeichnungen
-werden nicht pauschal ausgeschlossen. Originalzitate bleiben unverändert.
+Die gemeinsame Prüfung verfolgt jetzt auch die Modalität des übergeordneten
+Satzes über that/dass und Kommas hinweg. Sie berücksichtigt verpflichtende
+Infinitive mit have/need to und ausdrückliche höfliche oder imperative Prüfaufträge.
+Der konkrete Prüfauftrag allein bestätigt weder Abschluss noch Rücknahme oder
+Beschluss. Ein unabhängig bestätigter Folgesatz, ein tatsächlich abgeschlossener
+Prüfvorgang und May als Name oder Themenbezeichnung bleiben zulässig.
 
-Die drei bestehenden dauerhaften Regressionen enthalten **46 zusätzliche
-Literale und 62 Szenarien**. Vorher wurden vier unverbindliche Beschlüsse,
-13 unverbindliche Abschlüsse und je 14 falsche Rücknahmen für Aufgaben und
-Beschlüsse angenommen: **45 tatsächliche Fehlannahmen**. Nachher bestehen alle
-Szenarien einschließlich positiver Gegenfälle, Checkpoints und bytegleicher
-mehrfacher Wiederöffnung. Ablehnungen verändern keinen bestätigten Stand und
-erzeugen keine neue Revision. Keine neue Testfunktion oder Filterausnahme.
-
-Eine erste private Nachherprüfung wies zwei berechtigte Gegenfälle zurück:
-The proposed plan is agreed to und Ich habe den Bericht vorgeschlagen und
-verschickt. Beide Ursachen wurden korrigiert; der Fehlversuch bleibt erhalten.
-Die abschließende vollständige Prüfung besteht. Die Konstruktionserkennung ist
-konservativ und begrenzt; sie beweist weder vollständige Grammatik noch Wahrheit.
+Die drei vorhandenen dauerhaften Regressionen enthalten **43 zusätzliche
+Literale und 59 Szenarien**. Vorher wurden sechs Beschlüsse, elf Abschlüsse und
+je zwölf Aufgaben-/Beschlussrücknahmen fälschlich angenommen: **41 tatsächliche
+Fehlannahmen**. Nachher bestehen alle neuen und bisherigen Fälle einschließlich
+positiver Gegenfälle. Ablehnung verändert keinen bestätigten Stand und erzeugt
+keine neue Revision. Originalzitate, Checkpointbytes und mehrfache Wiederöffnung
+bleiben erhalten. Keine neue Testfunktion oder Filterausnahme.
+Die Konstruktionserkennung ist begrenzt und konservativ; sie beweist weder
+vollständige Grammatik noch Wahrheit. Die früheren Hoffnungs-, Modalform-,
+Infinitiv-, Mengen-, Verneinungs- und Nichtstun-Regressionen bleiben bestehen.
 
 ## Tatsächlich geprüft
 
@@ -47,8 +44,8 @@ konservativ und begrenzt; sie beweist weder vollständige Grammatik noch Wahrhei
 | Frontend | Bytegleich zu f7fc62c; dessen **417 Tests in 21 Dateien**, TypeScript, Build und Format wurden hierfür nicht erneut ausgeführt. |
 | Browser | Bytegleich zur tatsächlichen vorherigen **16er-Matrix**, nicht erneut ausgeführt. |
 | Projektprüfung | Frisch verify.ps1: 47 PCM-, 35 Notizen-, 28 Vorlagen-, acht Agenten- und Monitorprüfungen bestanden. |
-| Deutsch, echtes lokales Modell | **145.4250875 s**, **0** reguläre Validierungswiederholungen. |
-| Englisch, echtes lokales Modell | **158.1551989 s**, **0** reguläre Validierungswiederholungen. |
+| Deutsch, echtes lokales Modell | **159.9218233 s**, **0** reguläre Validierungswiederholungen. |
+| Englisch, echtes lokales Modell | **122.5649442 s**, **0** reguläre Validierungswiederholungen. |
 
 Beide Modellreferenzen nutzen den unveränderten synthetischen Gesprächskorpus.
 Englisch einschließlich I’ll und der ursprüngliche englische Referenzpatch
@@ -89,12 +86,15 @@ Alle **16 ursprünglichen Sourcery-Anmerkungen** wurden einzeln geprüft,
 beantwortet und geschlossen. Alle **75 bisherigen CodeRabbit-Threads** hatten
 eine Einzelantwort und waren geschlossen. Neue gültige Befunde werden erst
 nach tatsächlicher Veröffentlichung der geprüften Korrektur beantwortet.
+Die frühere Linux-CI auf f7fc62c scheiterte bei virtuellen Spuren mit 10091/10094 ms
+über der unveränderten 10000-ms-Grenze; Startunterbrechungen waren gemeldet.
+Ursache des Überlaufs unbekannt, Fehllauf erhalten, keine Grenze geändert.
 Für den endgültigen Head bleiben zwei frische saubere Codex-Codeprüfungen,
 eine vollständige saubere CodeRabbit-Runde und seine eigene grüne CI nötig.
 Spätere tatsächliche Links werden separat im PR dokumentiert. Alte oder leere
 Security-Flags sind kein aktueller formaler Securitynachweis.
 
-Die [unveränderliche vorige Fassung mit allen Detailnachweisen](https://github.com/Puma7/meeting-for-handy/blob/f7fc62c746bd8985a93342ffd3cd592173e2b7ed/docs/validation/pr41-review-followup-20261104.md)
+Die [unveränderliche vorige Fassung mit allen Detailnachweisen](https://github.com/Puma7/meeting-for-handy/blob/f175d7f6d06ee632dc35427accbd34be29d03612/docs/validation/pr41-review-followup-20261104.md)
 erhält frühere Fehler, Korrekturen, Fehlläufe und deren Grenzen. Dazu gehören
 Batch-Fixture-Synchronisation bei unveränderten produktiven ASR-Bytes und
 Fristen, Belegnavigation, englische Beschriftung, strikte LM-Instanzeigentümerschaft,

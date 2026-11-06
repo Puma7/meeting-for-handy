@@ -936,6 +936,49 @@ fn unasserted_embedding(
             start = next;
         }
     }
+    // A finite modal governs its dependent assertion too. Starting only after
+    // "that/dass" would mistake a requested check for its confirmed result.
+    let modal_governor = (start..predicate).any(|index| {
+        if !MODAL_PREDICATE_WORDS.contains(&words[index])
+            || (index > start
+                && [
+                    "the", "a", "an", "our", "your", "their", "der", "die", "das",
+                ]
+                .contains(&words[index - 1]))
+        {
+            return false;
+        }
+        let clause_start = subordinate_start(words, start, index).unwrap_or(start);
+        finite_subject_before(words, original, clause_start, index)
+    });
+    let required_infinitive = words[start..predicate].windows(2).any(|pair| {
+        ["have", "has", "had", "need", "needs", "needed"].contains(&pair[0]) && pair[1] == "to"
+    });
+    let polite_request = words
+        .get(start)
+        .is_some_and(|word| ["please", "bitte"].contains(word));
+    let imperative_check = words.get(start).is_some_and(|word| {
+        [
+            "check",
+            "verify",
+            "confirm",
+            "ensure",
+            "review",
+            "inspect",
+            "prüfe",
+            "prüfen",
+            "überprüfe",
+            "überprüfen",
+            "bestätige",
+            "bestätigen",
+        ]
+        .contains(word)
+    }) && words[start..predicate]
+        .iter()
+        .any(|word| SUBORDINATE_CLAUSE_MARKERS.contains(word));
+    if modal_governor || required_infinitive || polite_request || imperative_check {
+        return true;
+    }
     (start..predicate).any(|index| {
         if ![
             "hope",
