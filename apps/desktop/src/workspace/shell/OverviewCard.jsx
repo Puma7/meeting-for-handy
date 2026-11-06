@@ -1,5 +1,6 @@
 import { useWorkspaceText } from "./workspaceLocale.jsx";
-import { useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import {
   ArrowDown,
   ArrowLeft,
@@ -13,6 +14,127 @@ import {
 } from "lucide-react";
 import { IconButton } from "./ui.jsx";
 import { clampManualHeight, moduleName, modules } from "./overviewLayout.mjs";
+
+/** Keep placement actions reachable above clipped cards, including WebViews without native popovers. */
+function PlacementMenu({ id, label, children }) {
+  const menu = useRef(null),
+    trigger = useRef(null),
+    openAtPress = useRef(null);
+  const [nativePopover] = useState(
+    () =>
+      typeof HTMLElement.prototype.showPopover === "function" &&
+      typeof HTMLElement.prototype.hidePopover === "function",
+  );
+  const [open, setOpen] = useState(false);
+  const [portalRoot, setPortalRoot] = useState(null);
+  const [position, setPosition] = useState({ left: 10, top: 10 });
+  useEffect(() => {
+    if (!nativePopover) return;
+    const popup = menu.current;
+    const sync = () => setOpen(popup.matches(":popover-open"));
+    popup.addEventListener("toggle", sync);
+    return () => popup.removeEventListener("toggle", sync);
+  }, [nativePopover]);
+  useLayoutEffect(() => {
+    if (!open) return;
+    const popup = menu.current;
+    const anchor = trigger.current.getBoundingClientRect();
+    const bounds = popup.getBoundingClientRect();
+    setPosition({
+      left: Math.max(
+        10,
+        Math.min(innerWidth - bounds.width - 10, anchor.right - bounds.width),
+      ),
+      top: Math.max(
+        10,
+        Math.min(innerHeight - bounds.height - 10, anchor.bottom + 6),
+      ),
+    });
+    if (nativePopover) return;
+    popup.querySelector("button, select")?.focus();
+    const dismissOutside = (event) => {
+      const path = event.composedPath();
+      if (!path.includes(popup) && !path.includes(trigger.current))
+        setOpen(false);
+    };
+    const escape = (event) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      event.stopPropagation();
+      setOpen(false);
+      trigger.current.focus();
+    };
+    document.addEventListener("pointerdown", dismissOutside, true);
+    document.addEventListener("focusin", dismissOutside);
+    document.addEventListener("keydown", escape);
+    return () => {
+      document.removeEventListener("pointerdown", dismissOutside, true);
+      document.removeEventListener("focusin", dismissOutside);
+      document.removeEventListener("keydown", escape);
+    };
+  }, [open, nativePopover]);
+  /** Preserve native pointer light-dismiss semantics; fallback dismissal never queries unsupported selectors. */
+  function toggleMenu(event) {
+    if (!nativePopover) {
+      setPortalRoot(event.currentTarget.closest(".prototype") || document.body);
+      setOpen(!open);
+      return;
+    }
+    const popup = menu.current;
+    const pointerActivation =
+      event.detail > 0 || event.nativeEvent?.pointerType;
+    const wasOpen = pointerActivation
+      ? (openAtPress.current ?? popup.matches(":popover-open"))
+      : popup.matches(":popover-open");
+    openAtPress.current = null;
+    if (wasOpen) {
+      if (popup.matches(":popover-open")) popup.hidePopover();
+      setOpen(false);
+    } else {
+      popup.showPopover();
+      setOpen(true);
+    }
+  }
+  const popup = (
+    <div
+      ref={menu}
+      id={id}
+      popover={nativePopover ? "auto" : undefined}
+      hidden={nativePopover ? undefined : !open}
+      className={`placement-popover${nativePopover ? "" : " placement-fallback"}${!nativePopover && open ? " placement-open" : ""}`}
+      style={position}
+    >
+      {children}
+    </div>
+  );
+  return (
+    <div className="card-placement-menu">
+      <IconButton
+        label={label}
+        aria-haspopup="true"
+        aria-controls={id}
+        aria-expanded={open}
+        onPointerDown={(event) => {
+          trigger.current = event.currentTarget;
+          if (nativePopover)
+            openAtPress.current = menu.current.matches(":popover-open");
+        }}
+        onPointerCancel={() => {
+          openAtPress.current = null;
+        }}
+        onClick={(event) => {
+          trigger.current = event.currentTarget;
+          toggleMenu(event);
+        }}
+      >
+        <MoreHorizontal size={15} />
+      </IconButton>
+      {!nativePopover && open && portalRoot
+        ? createPortal(popup, portalRoot)
+        : popup}
+    </div>
+  );
+}
 
 /** Render a dashboard card with compact controls, expansion and explicit layout-edit actions. */
 export function OverviewCard({
@@ -37,39 +159,7 @@ export function OverviewCard({
 }) {
   const t = useWorkspaceText();
   const pointer = useRef(null),
-    menu = useRef(null),
-    openAtPress = useRef(null),
     clickOrigin = useRef(null);
-  const [menuPosition, setMenuPosition] = useState({ left: 10, top: 10 });
-  /** Toggle card actions while retaining the triggering button for focus restoration. */
-  function toggleMenu(event) {
-    const popup = menu.current;
-    // Auto popovers may light-dismiss after pointerdown but before click.
-    // Keyboard activation uses the current state, including after an abandoned press.
-    const pointerActivation =
-      event.detail > 0 || event.nativeEvent?.pointerType;
-    const wasOpen = pointerActivation
-      ? (openAtPress.current ?? popup.matches(":popover-open"))
-      : popup.matches(":popover-open");
-    openAtPress.current = null;
-    if (wasOpen) {
-      if (popup.matches(":popover-open")) popup.hidePopover();
-      return;
-    }
-    popup.showPopover();
-    const anchor = event.currentTarget.getBoundingClientRect();
-    const bounds = popup.getBoundingClientRect();
-    setMenuPosition({
-      left: Math.max(
-        10,
-        Math.min(innerWidth - bounds.width - 10, anchor.right - bounds.width),
-      ),
-      top: Math.max(
-        10,
-        Math.min(innerHeight - bounds.height - 10, anchor.bottom + 6),
-      ),
-    });
-  }
   const height = renderedHeight ?? card.height;
   return (
     <div
@@ -118,91 +208,72 @@ export function OverviewCard({
             <GripVertical size={14} />
             <span>{t(moduleName(card.id))}</span>
           </button>
-          <div className="card-placement-menu">
-            <IconButton
-              label={`${t(moduleName(card.id))} ${t("anordnen")}`}
-              aria-haspopup="true"
-              aria-controls={`placement-${card.id}`}
-              onPointerDown={() => {
-                openAtPress.current = menu.current.matches(":popover-open");
-              }}
-              onPointerCancel={() => {
-                openAtPress.current = null;
-              }}
-              onClick={toggleMenu}
-            >
-              <MoreHorizontal size={15} />
-            </IconButton>
-            <div
-              ref={menu}
-              id={`placement-${card.id}`}
-              popover="auto"
-              className="placement-popover"
-              style={menuPosition}
-            >
-              <span>{t("Verschieben")}</span>
-              <div className="placement-directions">
-                {[
-                  ["up", ArrowUp, t("Nach oben")],
-                  ["down", ArrowDown, t("Nach unten")],
-                  ["left", ArrowLeft, t("Spalte nach links")],
-                  ["right", ArrowRight, t("Spalte nach rechts")],
-                ].map(([direction, Symbol, label]) => (
-                  <IconButton
-                    key={direction}
-                    label={`${t(moduleName(card.id))}: ${t(label)}`}
-                    onClick={() => onMove(card.id, direction)}
-                  >
-                    <Symbol size={15} />
-                  </IconButton>
-                ))}
-              </div>
-              {autoFill ? (
-                <span className="auto-height-label">
-                  {t("Höhe · bis zu den Notizen")}
-                </span>
-              ) : (
-                <label>
-                  {t("Höhe")}
-                  <select
-                    aria-label={`${t(moduleName(card.id))} ${t("Kartenhöhe")}`}
-                    value={card.height}
-                    onChange={(event) =>
-                      onResize(card.id, Number(event.target.value))
-                    }
-                  >
-                    {[...new Set([216, 312, 432, 636, card.height])]
-                      .sort((a, b) => a - b)
-                      .map((value) => (
-                        <option key={value} value={value}>
-                          {value} px
-                          {value === 216
-                            ? t(" · Kompakt")
-                            : value === 636
-                              ? t(" · Groß")
-                              : ""}
-                        </option>
-                      ))}
-                  </select>
-                </label>
-              )}
-              <label>
-                {t("Modul")}
-                <select
-                  aria-label={`${t(moduleName(card.id))} ${t("Modul austauschen")}`}
-                  value={card.id}
-                  onChange={(event) => onReplace(card.id, event.target.value)}
+          <PlacementMenu
+            id={`placement-${card.id}`}
+            label={`${t(moduleName(card.id))} ${t("anordnen")}`}
+          >
+            <span>{t("Verschieben")}</span>
+            <div className="placement-directions">
+              {[
+                ["up", ArrowUp, t("Nach oben")],
+                ["down", ArrowDown, t("Nach unten")],
+                ["left", ArrowLeft, t("Spalte nach links")],
+                ["right", ArrowRight, t("Spalte nach rechts")],
+              ].map(([direction, Symbol, label]) => (
+                <IconButton
+                  key={direction}
+                  label={`${t(moduleName(card.id))}: ${t(label)}`}
+                  onClick={() => onMove(card.id, direction)}
                 >
-                  {availableModules.map(([id, label]) => (
-                    <option key={id} value={id}>
-                      {t(label)}
-                    </option>
-                  ))}
+                  <Symbol size={15} />
+                </IconButton>
+              ))}
+            </div>
+            {autoFill ? (
+              <span className="auto-height-label">
+                {t("Höhe · bis zu den Notizen")}
+              </span>
+            ) : (
+              <label>
+                {t("Höhe")}
+                <select
+                  aria-label={`${t(moduleName(card.id))} ${t("Kartenhöhe")}`}
+                  value={card.height}
+                  onChange={(event) =>
+                    onResize(card.id, Number(event.target.value))
+                  }
+                >
+                  {[...new Set([216, 312, 432, 636, card.height])]
+                    .sort((a, b) => a - b)
+                    .map((value) => (
+                      <option key={value} value={value}>
+                        {value} px
+                        {value === 216
+                          ? t(" · Kompakt")
+                          : value === 636
+                            ? t(" · Groß")
+                            : ""}
+                      </option>
+                    ))}
                 </select>
               </label>
-              <small>{t("Bereits sichtbare Module tauschen den Platz.")}</small>
-            </div>
-          </div>
+            )}
+            <label>
+              {t("Modul")}
+              <select
+                aria-label={`${t(moduleName(card.id))} ${t("Modul austauschen")}`}
+                value={card.id}
+                onChange={(event) => onReplace(card.id, event.target.value)}
+              >
+                {availableModules.map(([id, label]) => (
+                  <option key={id} value={id}>
+                    {t(label)}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <small>{t("Bereits sichtbare Module tauschen den Platz.")}</small>
+          </PlacementMenu>
           <IconButton
             label={`${t(moduleName(card.id))} ${t("aus Überblick entfernen")}`}
             onClick={() => onHide(card.id)}

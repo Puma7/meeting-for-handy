@@ -306,7 +306,7 @@
   display: none;
 }
 .module-picker > div,
-.card-placement-menu > div {
+.placement-popover {
   position: absolute;
   right: 0;
   top: calc(100% + 6px);
@@ -346,17 +346,17 @@
   background: transparent;
   border-color: transparent;
 }
-.card-placement-menu > div {
+.placement-popover {
   width: 174px;
   right: -20px;
   gap: 8px;
 }
-.card-placement-menu small {
+.placement-popover small {
   font-size: 10px;
   line-height: 1.4;
   color: var(--muted);
 }
-.card-placement-menu > div > span {
+.placement-popover > span {
   font-size: 10px;
   color: var(--muted);
 }
@@ -364,14 +364,14 @@
   display: flex;
   justify-content: space-between;
 }
-.card-placement-menu label {
+.placement-popover label {
   display: flex;
   align-items: center;
   justify-content: space-between;
   font-size: 11px;
   gap: 8px;
 }
-.card-placement-menu select {
+.placement-popover select {
   max-width: 125px;
   font-size: 10px;
 }
@@ -917,7 +917,7 @@
   height: 24px;
   min-height: 24px;
 }
-.card-placement-menu > .placement-popover {
+.placement-popover {
   position: fixed;
   right: auto;
   bottom: auto;
@@ -926,12 +926,17 @@
   max-height: calc(100dvh - 20px);
   overflow: auto;
   color: var(--text);
+  display: none;
 }
 .placement-popover:not(:popover-open) {
   display: none;
 }
 .placement-popover:popover-open {
   display: flex;
+}
+.placement-popover.placement-fallback.placement-open {
+  display: flex;
+  z-index: 100;
 }
 .overview-column > .overview-card:first-child .drop-before span {
   top: 5px;

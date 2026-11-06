@@ -1,4 +1,5 @@
 import { StrictMode } from "react";
+import { createPortal } from "react-dom";
 import {
   act,
   fireEvent,
@@ -535,6 +536,9 @@ it("localizes every built-in module and its conversation-history controls", () =
   expect(
     screen.getByRole("button", { name: "Conversation history arrange" }),
   ).toBeTruthy();
+  fireEvent.click(
+    screen.getByRole("button", { name: "Conversation history arrange" }),
+  );
   const picker = screen.getByRole("combobox", {
     name: "Conversation history replace module",
   });
@@ -851,6 +855,115 @@ describe("Native workspace boundary", () => {
           .hidePopover;
     }
   });
+  it.each(["none", "show-only", "hide-only"])(
+    "keeps placement controls usable without complete native popover support (%s)",
+    async (support) => {
+      const f = fixture();
+      const descriptors = ["showPopover", "hidePopover"].map(
+        (name) =>
+          [
+            name,
+            Object.getOwnPropertyDescriptor(HTMLElement.prototype, name),
+          ] as const,
+      );
+      for (const [name] of descriptors) {
+        Object.defineProperty(HTMLElement.prototype, name, {
+          configurable: true,
+          value:
+            support === (name === "showPopover" ? "show-only" : "hide-only")
+              ? vi.fn(() => {
+                  throw new Error("Incomplete native API called");
+                })
+              : undefined,
+        });
+      }
+      const matches = Element.prototype.matches;
+      const matcher = vi
+        .spyOn(Element.prototype, "matches")
+        .mockImplementation(function (this: Element, selector: string) {
+          if (selector.includes(":popover-open"))
+            throw new DOMException("Unsupported pseudo-class", "SyntaxError");
+          return matches.call(this, selector);
+        });
+      let mounted: ReturnType<typeof render> | undefined;
+      const host = document.createElement("div");
+      document.body.append(host);
+      const root = host.attachShadow({ mode: "open" });
+      const query = within(root as unknown as HTMLElement);
+      const getPopup = () => root.getElementById("placement-transcript")!;
+      try {
+        mounted = render(
+          createPortal(
+            <LiveWorkspace
+              adapter={f.adapter}
+              meeting={f.meeting}
+              onBack={() => {}}
+            />,
+            root,
+          ),
+        );
+        fireEvent.click(await query.findByRole("button", { name: "Anordnen" }));
+        const trigger = query.getByRole("button", {
+          name: "Transkript anordnen",
+        });
+        let popup = getPopup();
+        expect(popup.hasAttribute("hidden")).toBe(true);
+        fireEvent.click(trigger, { detail: 0 });
+        popup = getPopup();
+        expect(popup.hasAttribute("hidden")).toBe(false);
+        expect(popup.parentElement?.classList.contains("prototype")).toBe(true);
+        expect(trigger.getAttribute("aria-expanded")).toBe("true");
+        expect(root.activeElement).toBe(
+          within(popup).getByRole("button", { name: "Transkript: Nach oben" }),
+        );
+        fireEvent.keyDown(root.activeElement!, {
+          key: "Escape",
+          composed: true,
+        });
+        expect(root.activeElement).toBe(trigger);
+        expect(getPopup().hasAttribute("hidden")).toBe(true);
+        expect(trigger.getAttribute("aria-expanded")).toBe("false");
+        fireEvent.pointerDown(trigger, { pointerType: "touch" });
+        fireEvent.click(trigger, { detail: 1 });
+        fireEvent.pointerDown(trigger, { pointerType: "touch" });
+        fireEvent.click(trigger, { detail: 1 });
+        expect(getPopup().hasAttribute("hidden")).toBe(true);
+        fireEvent.click(trigger);
+        fireEvent.pointerDown(query.getByRole("button", { name: "Fertig" }), {
+          composed: true,
+        });
+        expect(getPopup().hasAttribute("hidden")).toBe(true);
+        fireEvent.click(trigger);
+        popup = getPopup();
+        const oldColumn = trigger.closest(".overview-column");
+        fireEvent.click(
+          within(popup).getByRole("button", {
+            name: "Transkript: Spalte nach links",
+          }),
+        );
+        expect(
+          query
+            .getByRole("button", { name: "Transkript anordnen" })
+            .closest(".overview-column"),
+        ).not.toBe(oldColumn);
+        expect(f.adapter.start).not.toHaveBeenCalled();
+        mounted.unmount();
+        expect(root.getElementById("placement-transcript")).toBeNull();
+      } finally {
+        mounted?.unmount();
+        host.remove();
+        matcher.mockRestore();
+        for (const [name, descriptor] of descriptors) {
+          if (descriptor)
+            Object.defineProperty(HTMLElement.prototype, name, descriptor);
+          else
+            delete (
+              HTMLElement.prototype as unknown as Record<string, unknown>
+            )[name];
+        }
+      }
+    },
+  );
   it("restores native shared notes without replacing private text or submitting a stale browser cache", async () => {
     const f = fixture();
     localStorage.setItem(
