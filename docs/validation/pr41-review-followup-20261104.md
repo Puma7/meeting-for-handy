@@ -2,13 +2,13 @@
 
 Stand: 6. November 2026. Version **1.1.0-beta.1**, unverändert.
 
-Diese Nacharbeit unterscheidet Teilfortschritt von Prozentwerten im Namen
-einer vollständig erledigten Aufgabe. Explizite Teilmengen schließen eine
-Aufgabe nicht automatisch. Beide Referenzsprachen enthalten seit dem Vorgänger
-eine ausdrückliche Budgetfrage, wenn der Test einen Gesprächsimpuls verlangt.
+Diese Nacharbeit unterscheidet ausdrückliche Fortschrittsverhältnisse von
+Jahres-, Quartals- und Berichtsbezeichnungen im Aufgabengegenstand. Explizite
+Teilmengen schließen eine Aufgabe nicht automatisch. Beide Referenzsprachen
+enthalten unverändert eine ausdrückliche Budgetfrage, wenn der Test einen Gesprächsimpuls verlangt.
 Die ursprünglichen Zusagen und unverbindlichen Aussagen bleiben erhalten.
 
-Die [bisherige ausführliche Fassung](https://github.com/Puma7/meeting-for-handy/blob/9da4d6d91af9d561a5ea2ff2b3fda04f471ff559/docs/validation/pr41-review-followup-20261104.md)
+Die [bisherige ausführliche Fassung](https://github.com/Puma7/meeting-for-handy/blob/6170d4a6b076d20361880c91369bd7600b7cec48/docs/validation/pr41-review-followup-20261104.md)
 und deren Detailhistorie bleiben unveränderlich in Git.
 Private Rohbelege, alte Checkpoints und fehlgeschlagene Läufe bleiben erhalten.
 Der vollständige TEST_REPORT bleibt gegenüber dem PR-Basisstand byteunverändert.
@@ -57,8 +57,23 @@ oder einer Präpositionalgruppe wurden tatsächlich als vollständig angenommen.
 Eine unbekannte Nachfolge allein beweist jetzt keinen Gegenstandsnamen. Die
 Ausnahme verlangt eine ausdrückliche Gegenstandseinleitung und einen folgenden
 Bezeichner; eine Fortschrittsangabe bleibt auch vor Adverbien ein Teilfortschritt.
-Acht weitere dauerhafte Fälle prüfen diese sechs Ablehnungen und zwei zulässige
-100-Prozent-Abschlüsse mit Adverbien. Alle Rabattbericht-Gegenbeispiele bleiben erhalten.
+Acht bereits vorhandene dauerhafte Fälle prüfen diese sechs Ablehnungen und
+zwei zulässige 100-Prozent-Abschlüsse mit Adverbien. Alle Rabattbericht-Gegenbeispiele bleiben erhalten.
+
+Die zweite Codex-Runde auf 6170d4a fand einen weiteren
+[gültigen Befund](https://github.com/Puma7/meeting-for-handy/pull/41#discussion_r4487395730):
+Jahresbezeichnungen wie 2026/2027 und Quartalsnamen wie Q1/2026 wurden als
+unvollständiges Verhältnis behandelt. Sechs tatsächliche Vorherfälle zeigten
+fälschlich abgewiesene vollständige Jahres-/Quartalsberichte und einzelne
+Berichte mit Ordnungsbezeichnung 1 von 2.
+
+Die Verhältnisprüfung verlangt jetzt einen ausdrücklichen Teilmengenbezug oder
+eine Menge direkt nach einem Fortschrittsprädikat beziehungsweise einer
+Fortschrittspräposition. Eingebettete Kennungen wie Q1/2026 sind keine
+freistehenden Mengen. Dreizehn zusätzliche dauerhafte Fälle erhalten zulässige
+Perioden-/Berichtsnamen, echte Teilmengen mit und ohne Abstand zur Teileinheit
+und vollständige 2-von-2-Mengen am Satzende. Ein Satzpunkt wird nicht mehr als
+leere Dezimalstelle eines Mengenverhältnisses behandelt.
 Die Zahl der Testfunktionen bleibt unverändert.
 Abgelehnte Antworten verändern weder Aufgabe noch Zitate oder alten Checkpoint
 und schreiben keine zweite Revision.
@@ -73,13 +88,13 @@ oder Bedeutungsbeweis. Menschliche Überprüfung bleibt erforderlich.
 
 ## Echte Referenzen und korrigierte Prüfsituation
 
-Vor dem Vorgänger verlangte die deutsche Referenz einen offenen Gesprächsimpuls,
+Die frühere deutsche Prüfsituation verlangte einen offenen Gesprächsimpuls,
 enthielt aber keine ausdrückliche Frage.
 Ein tatsächlicher Durchlauf speicherte Aufgabe und Fakten ohne Impuls
 und fiel daher durch diese zusätzliche Erwartung.
 Die englische Referenz enthielt bereits „Who can approve the budget?“.
 
-Der Vorgänger ergänzte „Wer kann das Budget freigeben?“.
+Die dokumentierte Fixture-Korrektur ergänzte „Wer kann das Budget freigeben?“.
 Dieser Korpus und der Referenzhelfer bleiben in dieser Nacharbeit byteunverändert.
 Alle bisherigen positiven Zusagen, der fehlende Budgetauftrag und der
 unverbindliche Webseitenvorschlag bleiben enthalten.
@@ -93,8 +108,8 @@ alte Fehlläufe werden dadurch nicht als bestanden umgedeutet.
 | --- | --- |
 | Rust-Workspace, alle Targets | Frisch **567 bestanden**, darunter **168 Notizenfälle** und **37 Providerprotokollfälle**; drei bestehende besondere Einstiege regulär ignoriert. |
 | Rustformat und Clippy | Frisch bestanden, gesperrte Abhängigkeiten und Warnungen als Fehler. |
-| Deutsch, tatsächliches lokales Modell | Frisch **118.0736323 s**; reguläre vollständig validierte Wiederholungen: **0**. |
-| Englisch, tatsächliches lokales Modell | Frisch **123.1522437 s**; reguläre vollständig validierte Wiederholungen: **0**. |
+| Deutsch, tatsächliches lokales Modell | Frisch **113.3022092 s**; reguläre vollständig validierte Wiederholungen: **0**. |
+| Englisch, tatsächliches lokales Modell | Frisch **152.1628312 s**; reguläre vollständig validierte Wiederholungen: **0**. |
 | Frontend | **414 Tests in 21 Dateien**, TypeScript, Produktionsbuild und Format auf den hier bytegleichen Komponenten von 8d0ba21 bestanden; hier nicht erneut ausgeführt. |
 | Projektprüfung | Nach dem letzten Dokumentedit vor Upload erneut verify.ps1 erforderlich: 47 PCM-, 35 Notizen-, 28 Vorlagen-, acht Agenten- und Monitorprüfungen. |
 
@@ -117,16 +132,17 @@ Modell-Dateigröße ist keine RAM-Messung.
 
 ## Erhaltene Fehlläufe und Nachweisgrenzen
 
-Der erste deutsche Versuch dieser Nacharbeit hielt im zweiten Fenster wegen
+Ein deutscher Versuch auf dem Vorgängerstand 6170d4a hielt im zweiten Fenster wegen
 einer Zahl ohne passenden Originalbeleg in einer Impulsänderung an
 (NumberNotQuoted). Erster Checkpoint, menschlich besprochener Impuls und
 Protokolländerung blieben erhalten; keine zweite Ergebnisrevision entstand.
 Die konkrete abgelehnte Zahl, ihr Zitat und die Modellantwort wurden nicht
-separat gespeichert, die weitergehende Ursache ist unbekannt. Das oben genannte
-weitere Paar verwendet unveränderten Code, Modell, Korpus und Kriterien.
+separat gespeichert, die weitergehende Ursache ist unbekannt. Ein damals getrenntes
+weiteres Paar bestand mit identischem Code, Modell, Korpus und Kriterien;
+dieser historische Erfolg wird nicht den frischen Messungen hier zugeordnet.
 Der Fehllauf bleibt ausdrücklich erhalten und zählt nicht als bestanden.
 
-Ein früherer deutscher Versuch des Vorgängerstands brach im ersten Fenster
+Ein deutscher Versuch auf 9da4d6d brach im ersten Fenster
 mit der Meldung zum Antwortlimit ab. Es entstand keine Ergebnisrevision; der ursprüngliche
 Agendakontext blieb erhalten. Die genaue Phase und abgelehnte Modellantwort wurden
 nicht separat gespeichert, die weitergehende Ursache ist unbekannt. Ein damals
@@ -207,7 +223,8 @@ Die zwei sauberen Codex-Codeprüfungen auf 5896b2b waren historische Einzelnachw
 Der folgende vollständige CodeRabbit-Lauf fand die inzwischen korrigierte
 doppelte Workspace-Projektion. Nachfolgende Codex-Läufe fanden Wortmarker
 auf 90becdd, quantitative Teilfortschritte auf dfe5d65 und die zu breite
-Prozentprüfung auf 94b3ee6 sowie die nachgestellten Adverbien auf 9da4d6d.
+Prozentprüfung auf 94b3ee6 sowie die nachgestellten Adverbien auf 9da4d6d. Eine erste Code-Runde auf
+6170d4a war sauber; dessen zweite Runde fand die zu breite Verhältnisprüfung.
 Diese Runden waren keine sauberen Abschlüsse.
 
 Die Projektionskorrektur wurde von CodeRabbit
@@ -255,7 +272,7 @@ sowie bestehende Speicher- und Verwaltungsschranken bleiben erhalten.
 
 Statische Produktprompts, Vertragsdateien, Belegbudget, Fristen, UI, Transport,
 Aufnahme-/ASR-Logik, Modellreservierungen, Abhängigkeiten, Schutz-/Reviewerregeln,
-Version und vollständiger TEST_REPORT bleiben gegenüber 9da4d6d unverändert.
+Version und vollständiger TEST_REPORT bleiben gegenüber 6170d4a unverändert.
 Auch der deutsche und englische synthetische Referenztext bleiben hier byteunverändert.
 
 Physische Aufnahme-, Berechtigungs-, Geräteverlust- und zweistündige Gerätetests

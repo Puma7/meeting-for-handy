@@ -819,7 +819,11 @@ fn incomplete_quantity(text: &str) -> bool {
             .take_while(|(_, c)| c.is_ascii_digit() || ['.', ','].contains(c))
             .last()
             .map_or(start, |(at, c)| start + at + c.len_utf8());
-        (start, end)
+        // A following sentence stop is not a decimal digit ("2/2.").
+        (
+            start,
+            start + text[start..end].trim_end_matches(['.', ',']).len(),
+        )
     };
     let mut ratios = text
         .match_indices('/')
@@ -837,16 +841,67 @@ fn incomplete_quantity(text: &str) -> bool {
         if left == left_end || right == right_end {
             return false;
         }
+        // Q1/2026 and other embedded identifiers are not standalone quantities.
+        if text[..left]
+            .chars()
+            .next_back()
+            .is_some_and(char::is_alphanumeric)
+        {
+            return false;
+        }
         // Date notation is not a progress ratio (including chained YYYY/MM/DD).
         let before = text[..left].trim_end();
+        let preceding = words.iter().rev().find(|w| w.1 == before.len());
         if before.ends_with('/')
             || text[right_end..].trim_start().starts_with('/')
-            || words
-                .iter()
-                .rev()
-                .find(|w| w.1 == before.len())
+            || preceding
                 .is_some_and(|w| ["on", "am", "at", "date", "datum", "dated", "vom"].contains(&w.2))
         {
+            return false;
+        }
+        // Require partitive wording or a quantity immediately after a progress
+        // predicate/preposition. A fiscal year or "report 1 of 2" names work;
+        // it does not say that only part of that work was completed.
+        let following = text[right_end..]
+            .trim_start()
+            .split(|c: char| !c.is_alphabetic())
+            .next()
+            .unwrap_or("");
+        let partitive = [
+            "of",
+            "von",
+            "der",
+            "des",
+            "part",
+            "parts",
+            "teil",
+            "teile",
+            "teilen",
+            "item",
+            "items",
+            "step",
+            "steps",
+            "schritte",
+            "schritten",
+            "prozent",
+            "percent",
+            "per",
+        ]
+        .contains(&following);
+        let after_progress = preceding.is_some_and(|w| {
+            [
+                "completed",
+                "finished",
+                "done",
+                "have",
+                "habe",
+                "haben",
+                "zu",
+                "to",
+            ]
+            .contains(&w.2)
+        });
+        if !partitive && !after_progress {
             return false;
         }
         let numerator = completion_number(&text[left..left_end]);
