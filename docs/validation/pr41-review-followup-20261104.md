@@ -11,6 +11,30 @@ Private Rohbelege und Nutzermeetings werden nicht veröffentlicht.
 
 ## Aktuelle Korrektur und Regressionen
 
+Die [Codex-Runde auf 5644ec0](https://github.com/Puma7/meeting-for-handy/pull/41#pullrequestreview-5798412142)
+fand einen gültigen Updaterfehler: Der bisherige Zahlenparser wies die eigene
+Vorabversion 1.1.0-beta.1 ab. Eine neue Regression reproduzierte tatsächlich
+Unsupported release version. Der Versionsvergleich verwendet jetzt die bereits
+gesperrte SemVer-Bibliothek 1.0.27 und ignoriert Buildmetadaten bei der Rangfolge.
+Der Wechsel von Beta zu stabiler 1.1.0 wird angeboten, gleiche oder ältere
+Versionen nicht. Fehlerhafte Versionen und als stabil fehlmarkierte Vorabtags
+bleiben gesperrt. Dieser Kanal bietet weiterhin ausschließlich stabile Tags an.
+Downloadherkunft, Größenlimit, Prüfsummen, Plattformauswahl und Installationsschutz
+bleiben erhalten. Die Bereinigung erkennt weiterhin nur eigene stabile partielle
+Downloads; Vorab- und Metadaten-Dateinamen bleiben unberührt. Synthetische
+Release-Metadaten und lokale Testdateien, kein echter Download oder Installationslauf.
+
+Nur eine direkte Abhängigkeitskante kommt hinzu. Paketidentitäten, Prüfsummen,
+Versionen und aufgelöste Features sind unverändert. Die Lizenzsammlung wurde für
+alle vier Ziele offline geprüft; die vier Manifeste sind an die neuen Lockbytes
+gebunden. Vollständige Quelltestmodule wurden in zwei bereits geprüfte verwandte
+Module zusammengeführt. Alle 79 Workspace-Testnamen sowie deren vollständige
+Funktionen, Attribute und Assertions bleiben erhalten. So kann der vollständige
+Anbieterlauf weiterhin jede der 100 zulässigen Dateien der 102-Dateien-PR prüfen;
+keine zusätzlichen Filter, keine ausgeschlossenen Funktionen oder Regeländerungen.
+
+### Vorherige Inhalts- und Wiederaufnahmekorrekturen
+
 Die [Codex-Runde auf 0542e31](https://github.com/Puma7/meeting-for-handy/pull/41#pullrequestreview-5797710027)
 fand einen gültigen Fehler: We denied that the report is complete bestätigte
 fälschlich einen Abschluss. Dasselbe galt für bestrittene Rücknahmen und Beschlüsse.
@@ -61,13 +85,13 @@ ausgeblendete KI-Entwürfe werden nicht erneut an das Modell gesendet.
 
 | Prüfung | Ergebnis und Zuordnung |
 | --- | --- |
-| Rust, Workspace, alle Targets | Frisch **568 bestanden**, darunter **169 Notizenfälle** und **37 Providerprotokollfälle**; drei bestehende besondere Einstiege regulär ignoriert. |
+| Rust, Workspace, alle Targets | Frisch **569 bestanden**, darunter **169 Notizenfälle** und **37 Providerprotokollfälle**; drei bestehende besondere Einstiege regulär ignoriert. |
 | Format und Clippy | Frisch bestanden, gesperrte Abhängigkeiten, Warnungen als Fehler. |
 | Frontend | Bytegleich zu f7fc62c; dessen **417 Tests in 21 Dateien**, TypeScript, Build und Format wurden hierfür nicht erneut ausgeführt. |
 | Browser | Bytegleich zur tatsächlichen vorherigen **16er-Matrix**, nicht erneut ausgeführt. |
 | Projektprüfung | Frisch verify.ps1: 47 PCM-, 35 Notizen-, 28 Vorlagen-, acht Agenten- und Monitorprüfungen bestanden. |
-| Deutsch, echtes lokales Modell | **117.8902805 s**, **0** reguläre Validierungswiederholungen. |
-| Englisch, echtes lokales Modell | **115.0313873 s**, **0** reguläre Validierungswiederholungen. |
+| Deutsch, echtes lokales Modell | Auf 5644ec0: **117.8902805 s**, **0** reguläre Validierungswiederholungen; unveränderte Modellanbindung, nicht erneut ausgeführt. |
+| Englisch, echtes lokales Modell | Auf 5644ec0: **115.0313873 s**, **0** reguläre Validierungswiederholungen; unveränderte Modellanbindung, nicht erneut ausgeführt. |
 
 Beide Modellreferenzen nutzen den unveränderten synthetischen Gesprächskorpus.
 Englisch einschließlich I’ll und der ursprüngliche englische Referenzpatch
@@ -146,8 +170,9 @@ bleibt lokal; Cloud benötigt ausdrückliche Textfreigabe je Auswertung und erh�
 weder Audio noch Dateipfade oder Sitzungsobjekte. Keine Weiterleitungen,
 System-Proxys oder automatischen Anbieterwechsel. Keine fremden Modellentladungen.
 Statische Prompts, Verträge, Belegbudget, Produktfristen, Ollama-TTL 300 s mit
-Erneuerung alle 60 s, Abhängigkeiten, Version, Lizenz- und Schutz-/Reviewerregeln
-sowie der vollständige TEST_REPORT bleiben unverändert.
+Erneuerung alle 60 s, Paketversionen, Lizenztexte, Version und Schutz-/Reviewerregeln
+sowie der vollständige TEST_REPORT bleiben unverändert. Die einzige neue direkte
+Abhängigkeitskante ist oben ausgewiesen.
 
 Physische Aufnahme-, Berechtigungs-, Geräteverlust- und Zweistundenprüfungen sind
 auf später verschoben. Keine neue echte Parakeet-Dauer-, GPU-, kombinierte

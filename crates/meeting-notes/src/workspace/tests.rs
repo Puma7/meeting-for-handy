@@ -106,10 +106,8 @@ fn setup() -> (WorkspaceState, Request, serde_json::Value) {
 mod context_01;
 mod context_02;
 mod inference_01;
-mod inference_02;
 mod inheritance_01;
 mod persistence_01;
-mod sources_01;
 mod validation_01;
 
 #[test]
