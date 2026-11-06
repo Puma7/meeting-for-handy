@@ -1636,8 +1636,11 @@ function LivePanel({
                       <small>
                         {t("Zuständig:")} {item.owner || t("nicht benannt")}{" "}
                         {t("· Termin:")}{" "}
-                        {formatMeetingDue(item.due, language) ||
-                          t("nicht benannt")}
+                        {formatMeetingDue(
+                          item.due,
+                          language,
+                          item.evidence?.map((e) => e.quote),
+                        ) || t("nicht benannt")}
                       </small>
                     )}
                     {quote(item)}

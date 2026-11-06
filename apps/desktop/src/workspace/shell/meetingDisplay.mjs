@@ -158,9 +158,24 @@ function dayNumber(word) {
   );
 }
 
-/** Distinguish numeric calendar mentions from decimal amounts in generated prose. */
+/** Recognize explicit dotted clock context before interpreting the same digits as a date. */
+function clockContext(text, index, raw) {
+  return (
+    /^\d{1,2}\.\d{1,2}\.?$/.test(raw) &&
+    (/^\s*(?:uhr\b|[ap]\.?m\.?(?=\s|$|[,;.!?]))/i.test(
+      text.slice(index + raw.length),
+    ) ||
+      /\b(?:um|at)\s*$/i.test(text.slice(0, index)))
+  );
+}
+
+/** Distinguish numeric calendar mentions from amounts and clock times in generated prose. */
 function calendarContext(text, index, raw, assumeDate) {
-  if (nonDatePrefix.test(text.slice(0, index))) return false;
+  if (
+    nonDatePrefix.test(text.slice(0, index)) ||
+    clockContext(text, index, raw)
+  )
+    return false;
   return (
     assumeDate ||
     text.trim() === raw ||
@@ -245,7 +260,31 @@ export function formatMeetingDates(value, language = "de") {
 }
 
 /** Format the separately grounded due field, retaining uncertainty and relative wording. */
-export function formatMeetingDue(value, language = "de") {
+export function formatMeetingDue(value, language = "de", quotes = []) {
+  // A model may return only the numeric substring of a literal "9.05 Uhr".
+  // Keep the clock context supplied by its evidence even when due omits that suffix.
+  const numeric =
+    typeof value === "string"
+      ? value.match(
+          /^\s*(?:(?:bis|by|at|um|before)\s+)?(\d{1,2}\.\d{1,2}\.?)\s*$/i,
+        )?.[1]
+      : null;
+  if (
+    numeric &&
+    quotes.some((quote) => {
+      let index = quote.indexOf(numeric);
+      while (index >= 0) {
+        if (
+          !/\d/.test(quote[index - 1] || "") &&
+          clockContext(quote, index, numeric)
+        )
+          return true;
+        index = quote.indexOf(numeric, index + 1);
+      }
+      return false;
+    })
+  )
+    return value;
   const result = dates(value, language, true);
   if (result === value || typeof result !== "string") return result;
   return result.replace(/^(?:(?:am|bis|zum|den|dem|on|by|at|the|of)\s+)+/i, "");

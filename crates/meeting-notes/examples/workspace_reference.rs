@@ -5,6 +5,7 @@ use meeting_notes::residency::{LocalModelPool, LocalProvider};
 use meeting_notes::workspace::{Agenda, WorkspaceContext};
 use meeting_notes::{AnalysisControl, Connection};
 use std::{path::PathBuf, time::Instant};
+/// Run two synthetic text windows through the real local provider and verify durable manual state.
 fn main() -> Result<()> {
     let mut args = std::env::args().skip(1);
     let folder = PathBuf::from(

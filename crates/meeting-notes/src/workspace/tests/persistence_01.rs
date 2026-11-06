@@ -1,6 +1,66 @@
 use super::*;
 
 #[test]
+/// Reject speaker wishes and requests without excluding explicit named/pronominal work.
+fn hedges_requests_and_indefinite_people_are_not_assignment_subjects() {
+    for (quote, allowed) in [
+        ("Wahrscheinlich holt Jana die Technik ab.", false),
+        ("Hoffentlich bringt Jana die Unterlagen mit.", false),
+        ("Bitte holt die Unterlagen ab.", false),
+        ("Someone will collect the equipment.", false),
+        ("Someone will prepare the documents.", false),
+        ("Please bring the documents.", false),
+        ("Probably Jana will collect the equipment.", false),
+        ("Jana holt die Technik ab.", true),
+        ("Der Leon bringt die Unterlagen mit.", true),
+        ("Sie bringt die Unterlagen mit.", true),
+        ("She brings the documents.", true),
+        ("Jana will collect the equipment.", true),
+    ] {
+        assert_eq!(validate::task_quote_allowed(quote), allowed, "{quote}");
+        let (mut state, mut request, mut answer) = setup();
+        request.transcript_sources[0].text = quote.into();
+        answer["changes"][0]["text"] = json!(quote);
+        answer["changes"][0]["owner"] = json!(null);
+        answer["changes"][0]["due"] = json!(null);
+        answer["changes"][0]["evidence"][0]["quote"] = json!(quote);
+        assert_eq!(
+            validate::apply(&mut state, &request, &answer.to_string()).is_ok(),
+            allowed,
+            "{quote}"
+        );
+        assert_eq!(state.entities.is_empty(), !allowed, "{quote}");
+    }
+}
+
+#[test]
+/// A negative object must leave the complete native task state unpublished.
+fn negated_collection_pronouns_cannot_publish_new_tasks() {
+    for (quote, allowed) in [
+        ("Jana holt nichts ab.", false),
+        ("Jana bringt nichts mit.", false),
+        ("Jana brings nothing.", false),
+        ("Ich übernehme nichts.", false),
+        ("I will collect nothing.", false),
+        ("Jana holt die Unterlagen ab.", true),
+        ("Jana brings the documents.", true),
+        ("I will check whether nothing is missing.", true),
+    ] {
+        assert_eq!(validate::task_quote_allowed(quote), allowed, "{quote}");
+        let (mut state, mut request, mut answer) = setup();
+        request.transcript_sources[0].text = quote.into();
+        answer["changes"][0]["text"] = json!(quote);
+        answer["changes"][0]["due"] = json!(null);
+        answer["changes"][0]["owner"] = json!(null);
+        answer["changes"][0]["evidence"][0]["quote"] = json!(quote);
+        let result = validate::apply(&mut state, &request, &answer.to_string());
+        assert_eq!(result.is_ok(), allowed, "{quote}: {result:?}");
+        assert_eq!(state.entities.is_empty(), !allowed, "{quote}");
+    }
+}
+
+#[test]
+/// An unrelated but literal suggestion cannot satisfy an acknowledged question's evidence.
 fn unrelated_impulse_cannot_replace_an_acknowledged_open_question() {
     let (mut state, mut req, mut answer) = setup();
     let question = "Ich weiß nicht, wer das Budget freigeben kann.";
@@ -42,6 +102,7 @@ fn unrelated_impulse_cannot_replace_an_acknowledged_open_question() {
 }
 
 #[test]
+/// Keep finite collection assignments distinct from questions and conditional proposals.
 fn named_collection_assignments_reach_the_task_phase_without_accepting_questions() {
     for quote in [
         "Jana holt die Technik ab.",
@@ -63,6 +124,7 @@ fn named_collection_assignments_reach_the_task_phase_without_accepting_questions
 }
 
 #[test]
+/// Preserve legacy checkpoint bytes while rejecting writers and mixed prompt generations.
 fn legacy_prompt_stays_readable_and_cannot_be_mixed_with_new_checkpoints() {
     let dir = tempfile::tempdir().unwrap();
     let mut original = WorkspaceState {
@@ -111,6 +173,7 @@ fn legacy_prompt_stays_readable_and_cannot_be_mixed_with_new_checkpoints() {
 }
 
 #[test]
+/// Compact generated wording without truncating evidence or partially publishing invalid output.
 fn compact_model_titles_keep_literal_quotes_and_reject_oversized_generated_text() {
     let (mut state, mut request, mut answer) = setup();
     request.compact_titles();
@@ -128,6 +191,7 @@ fn compact_model_titles_keep_literal_quotes_and_reject_oversized_generated_text(
 }
 
 #[test]
+/// Resume the new generation by its own identity while retaining the legacy run and deltas.
 fn new_prompt_generation_has_its_own_run_and_preserves_legacy_identity() {
     use crate::live::LiveRunner;
     let root = tempfile::tempdir().unwrap();
@@ -246,6 +310,7 @@ fn legacy_context_times_remain_readable_but_malformed_times_are_preserved_as_err
 }
 
 #[test]
+/// Re-reading must reject corrupt evidence in either current entities or historical events.
 fn corrupt_persisted_entity_and_event_evidence_is_rejected_without_rewriting_files() {
     for target in ["entities", "events"] {
         for corruption in ["unknown-source", "nonliteral-quote", "changed-original"] {
@@ -321,6 +386,7 @@ fn status_only_evidence_stays_bounded_for_tasks_with_literal_metadata() {
     }
 }
 
+/// Exercise bounded evidence selection across status changes, text replacement and durable reopen.
 fn assert_status_only_evidence_history(kind: &str, replace_text: bool, initial_quotes: usize) {
     let dir = tempfile::tempdir().unwrap();
     let mut runner = WorkspaceRunner::open(dir.path()).unwrap();
@@ -718,6 +784,7 @@ fn invalid_second_change_rolls_back_the_whole_bundle() {
     assert!(state.events.is_empty());
 }
 #[test]
+/// Incomplete responses and foreign request identities must leave the previous state intact.
 fn incomplete_and_foreign_answers_do_not_advance_state() {
     for key in ["moreChangesPossible", "requestId"] {
         let (mut state, req, mut answer) = setup();
@@ -845,6 +912,7 @@ fn status_updates_select_binding_inherited_due_witnesses_independently_of_quote_
     assert_valid_inherited_due_witness_order(true);
 }
 
+/// Quote ordering cannot replace the authoritative inherited deadline with a hedged witness.
 fn assert_valid_inherited_due_witness_order(hedged: bool) {
     for misleading_first in [false, true] {
         let (mut state, mut req, mut answer) = setup();
@@ -1158,6 +1226,7 @@ fn an_explicit_empty_fact_overview_clears_old_selection() {
 }
 
 #[test]
+/// Condition screening uses clause/word boundaries and preserves unconditional suffix wording.
 fn task_exclusions_match_words_without_rejecting_unconditional_suffixes() {
     for quote in [
         "Ich schreibe jedenfalls den Bericht bis Freitag.",
@@ -1189,6 +1258,7 @@ fn task_exclusions_match_words_without_rejecting_unconditional_suffixes() {
 }
 
 #[test]
+/// Explicit refusals reject new work while affirmative negation idioms retain valid promises.
 fn explicit_task_refusals_cannot_publish_new_work_but_affirmations_remain_valid() {
     for (quote, allowed) in [
         ("Ich übernehme den Bericht nicht.", false),
@@ -1254,6 +1324,7 @@ fn explicit_task_refusals_cannot_publish_new_work_but_affirmations_remain_valid(
 }
 
 #[test]
+/// A decision against an action differs from denying that any decision was made.
 fn review22_negative_decision_content_is_distinct_from_a_negated_assertion() {
     for (quote, allowed) in [
         ("We decided not to release on Friday.", true),
@@ -1325,6 +1396,7 @@ fn review22_denied_completion_preserves_the_open_task_and_its_original_evidence(
     );
 }
 
+/// Run each terminal-status case against native publication and retained original evidence.
 fn review22_status_cases(status_name: &str, kinds: &[&str], cases: &[(&str, bool)]) {
     for kind in kinds {
         let (mut state, mut request, mut answer) = setup();
@@ -1384,6 +1456,7 @@ fn review22_status_cases(status_name: &str, kinds: &[&str], cases: &[(&str, bool
 }
 
 #[test]
+/// Uncertain or negated decisions must roll back atomically; explicit decisions stay admissible.
 fn recorded_decisions_reject_negation_and_uncertainty_without_publishing_state() {
     let invalid = [
         "Wir haben den Pilotstart nicht beschlossen.",

@@ -74,6 +74,31 @@ const SUBORDINATE_CLAUSE_MARKERS: &[&str] = &[
     "if", "unless",
 ];
 
+/// A request, initial hedge or indefinite actor is not a named/pronominal assignment.
+pub(super) fn assignment_prefix_allowed(quote: &str) -> bool {
+    let lower = quote.to_lowercase();
+    let words = assertion_words(&lower);
+    !words.first().is_some_and(|word| {
+        [
+            "wahrscheinlich",
+            "hoffentlich",
+            "vermutlich",
+            "bitte",
+            "probably",
+            "hopefully",
+            "please",
+            "someone",
+            "somebody",
+            "anyone",
+            "anybody",
+            "jemand",
+            "irgendjemand",
+            "irgendwer",
+        ]
+        .contains(word)
+    })
+}
+
 /// Admit finite named/pronominal assignments such as "Jana holt ... ab".
 /// Questions, proposals, past reports and a preceding planning predicate remain excluded.
 pub(super) fn present_assignment_quote(quote: &str) -> bool {
@@ -102,6 +127,9 @@ pub(super) fn present_assignment_quote(quote: &str) -> bool {
                 "möchten",
                 "vielleicht",
                 "eventuell",
+                "wahrscheinlich",
+                "hoffentlich",
+                "vermutlich",
                 "hypothetisch",
                 "gestern",
                 "damals",
@@ -117,6 +145,8 @@ pub(super) fn present_assignment_quote(quote: &str) -> bool {
                 "might",
                 "maybe",
                 "perhaps",
+                "probably",
+                "hopefully",
                 "yesterday",
                 "wonder",
             ]

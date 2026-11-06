@@ -48,6 +48,22 @@ deutsche Versuch lieferte einen sachfremden Impuls und wurde deshalb nicht als
 Qualitätsnachweis akzeptiert; die zusätzliche Belegbindung behebt diesen Fall.
 Private Versuche und Messbelege bleiben lokal.
 
+Die anschließende Codeprüfung fand zwei zusätzliche gültige Randfälle:
+negative Pronomen wie „nichts“/„nothing“ bei neuen Aufgaben und punktgetrennte
+Uhrzeiten wie „9.05 Uhr“. Beide wurden vor der Korrektur reproduziert. Die
+gemeinsame Aufnahmeprüfung weist jetzt auch diese negativen Pronomen zurück;
+bejahte Prüfaufträge mit eingebetteten Fragen bleiben zulässig. Expliziter
+Uhrzeitkontext (`Uhr`, `am`/`pm`, `um`/`at`) hat bei punktgetrennten Zahlen
+Vorrang vor einer Kalenderinterpretation. Echte Daten neben einer Uhrzeit
+werden weiterhin formatiert; Zitate und gespeicherte Termine bleiben wörtlich.
+Die Terminanzeige berücksichtigt dafür auch den Originalbeleg, wenn das Modell
+aus „9.05 Uhr“ nur „9.05“ als Terminwert übernimmt.
+Ein weiterer gültiger Reviewhinweis betraf großgeschriebene Bitten, Vermutungen
+und unbestimmte Personen als vermeintliche Namen. Diese Präfixe werden jetzt
+auch vor alten Aufgabenmarkern abgefangen; echte benannte und pronominale
+Zuweisungen bleiben zulässig. Die betroffenen Ablauf- und Regressionfunktionen
+sind dokumentiert; die unveränderte Dokumentationsgrenze bleibt 80 Prozent.
+
 Gemessen wird auf Windows x64 / Intel Core i7-13700 mit rund 63,7 GiB nutzbarem
 RAM. Keine eigenen Compiler liefen während der Modellreferenzen. Laufzeiten
 gelten für zwei synthetische Textfenster, nicht für eine physische Aufnahme.

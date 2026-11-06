@@ -6,6 +6,36 @@ import {
 } from "./shell/meetingDisplay.mjs";
 
 describe("grounded calendar presentation", () => {
+  it("keeps the source clock context when the model's due field omits Uhr", () => {
+    const quotes = ["Jana liefert bis 9.05 Uhr."];
+    expect(formatMeetingDue("9.05", "de", quotes)).toBe("9.05");
+    expect(formatMeetingDue("9.05", "en", quotes)).toBe("9.05");
+    expect(formatMeetingDue("bis 9.05", "en", quotes)).toBe("bis 9.05");
+    expect(formatMeetingDue("9.05", "en", ["Jana liefert am 9.05."])).toBe(
+      "05/09",
+    );
+  });
+  it.each([
+    "bis 9.05 Uhr",
+    "bis 9.5 Uhr",
+    "9.05am",
+    "at 9.05 pm",
+    "9.05 p.m.",
+    "um 9.05",
+    "at 9.05",
+    "9:05 Uhr",
+  ])("preserves the explicit clock time %s", (raw) => {
+    for (const language of ["de", "en"]) {
+      expect(formatMeetingDue(raw, language)).toBe(raw);
+      expect(formatMeetingDates(raw, language)).toBe(raw);
+    }
+  });
+  it("formats a date next to a dotted clock time without changing the time", () => {
+    expect(formatMeetingDates("Abholen am 9.05. um 9.05 Uhr", "en")).toBe(
+      "Abholen am 05/09 um 9.05 Uhr",
+    );
+    expect(formatMeetingDue("am 9.05.", "de")).toBe("09.05.");
+  });
   it.each([
     ["dreiundzwanzigsten neunten", "23.09.", "09/23"],
     ["bis zum siebenundzwanzigsten elften", "27.11.", "11/27"],

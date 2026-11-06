@@ -142,7 +142,13 @@ export function stableVisibleItems(
       (e) =>
         (!kind || e.kind === kind) &&
         (!needle ||
-          `${e.text} ${formatMeetingDates(e.text, language)} ${e.owner || ""} ${e.due || ""} ${formatMeetingDue(e.due, language) || ""} ${e.status}`
+          `${e.text} ${formatMeetingDates(e.text, language)} ${e.owner || ""} ${e.due || ""} ${
+            formatMeetingDue(
+              e.due,
+              language,
+              e.evidence?.map((v) => v.quote),
+            ) || ""
+          } ${e.status}`
             .toLocaleLowerCase()
             .includes(needle)),
     );

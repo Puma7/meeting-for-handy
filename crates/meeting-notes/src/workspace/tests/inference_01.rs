@@ -184,6 +184,7 @@ fn provider_context_rejection_shrinks_the_existing_frontier_before_sources() {
     assert_eq!(runner.state.entities.len(), 6);
 }
 #[test]
+/// An acknowledged direct or indirect gap gets a bounded request, without an ignored-schema loop.
 fn acknowledged_open_questions_get_a_bounded_request_and_ignored_constraints_do_not_loop() {
     use std::{
         io::{Read, Write},

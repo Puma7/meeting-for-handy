@@ -653,7 +653,8 @@ fn task_missing_pledge(quote: &str) -> bool {
 pub(super) fn task_quote_allowed(quote: &str) -> bool {
     // Temporary classification text only: literal evidence and saved IDs are unchanged.
     let text = quote.to_lowercase().replace('’', "'");
-    !task_missing_pledge(quote)
+    super::assertions::assignment_prefix_allowed(quote)
+        && !task_missing_pledge(quote)
         && crate::validation::has_new_task_commitment(quote)
         && !text.contains('?')
         && (crate::validation::task_pledge_end(&text, crate::validation::GERMAN_TASK_PLEDGES)

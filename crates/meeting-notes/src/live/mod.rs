@@ -171,6 +171,7 @@ impl LiveRunner {
         })
     }
 
+    /// Attach the current prompt generation and restore shared/manual inputs without rewriting old runs.
     pub fn with_workspace(mut self, context: crate::workspace::WorkspaceContext) -> Result<Self> {
         anyhow::ensure!(
             self.run().mode == "local",

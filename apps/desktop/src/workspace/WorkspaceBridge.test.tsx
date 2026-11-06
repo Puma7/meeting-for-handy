@@ -18,6 +18,48 @@ import { workspaceText } from "./shell/workspaceLocale.jsx";
 import MeetingView from "../views/MeetingView";
 import { de, en, extraDe, extraEn } from "../i18n";
 
+it.each(["de", "en"] as const)(
+  "keeps a shortened clock due as a time in the task row (%s)",
+  async (language) => {
+    const f = fixture();
+    const original = "Jana liefert die Unterlagen bis 9.05 Uhr.";
+    const task = {
+      ...f.status.view.workspace.entities[0],
+      id: "e_clock",
+      kind: "task",
+      text: "Unterlagen liefern",
+      owner: "Jana",
+      due: "9.05",
+      attention: "normal",
+      evidence: [{ sourceId: "s_one", quote: original }],
+    };
+    f.status.view.workspace.originals[0].text = original;
+    (f.status.view.workspace.entities as unknown[]).push(task);
+    const mounted = render(
+      <LiveWorkspace
+        adapter={f.adapter}
+        meeting={f.meeting}
+        language={language}
+        onBack={() => {}}
+      />,
+    );
+    try {
+      fireEvent.click(await screen.findByRole("tab", { name: "Details" }));
+      await screen.findByText("Unterlagen liefern");
+      const row = [...mounted.container.querySelectorAll(".impulse-row")].find(
+        (row) => row.textContent?.includes("Unterlagen liefern"),
+      )!;
+      expect(row.querySelector("small")!.textContent).toContain("9.05");
+      expect(row.querySelector("small")!.textContent).not.toContain("05/09");
+      expect(row.querySelector("small")!.textContent).not.toContain("09.05.");
+      expect(task.due).toBe("9.05");
+      expect(task.evidence[0].quote).toBe(original);
+    } finally {
+      mounted.unmount();
+    }
+  },
+);
+
 it("shows a factual addition without repeating the previous complete paragraph", async () => {
   const f = fixture();
   const first =

@@ -1,6 +1,14 @@
 export function formatMeetingDates(value: string, language?: string): string;
-export function formatMeetingDue(value: string, language?: string): string;
-export function formatMeetingDue(value: null, language?: string): null;
+export function formatMeetingDue(
+  value: string,
+  language?: string,
+  quotes?: readonly string[],
+): string;
+export function formatMeetingDue(
+  value: null,
+  language?: string,
+  quotes?: readonly string[],
+): null;
 export interface HistoryFrame {
   id: string;
   entityId: string;
