@@ -4,6 +4,30 @@ use super::*;
 fn perfect_decisions_validate_literal_sources_and_durable_reopen() {
     let mut mismatches = Vec::new();
     for (quote, allowed) in [
+        ("We check that we have decided to start the pilot.", false),
+        (
+            "We did check that we have decided to start the pilot.",
+            true,
+        ),
+        ("We denied that we have decided to start the pilot.", false),
+        ("We deny that we agreed to start the pilot.", false),
+        (
+            "We disputed that we have decided to start the pilot.",
+            false,
+        ),
+        (
+            "We imagined that we have decided to start the pilot.",
+            false,
+        ),
+        (
+            "We confirmed that we denied that we have decided to start the pilot.",
+            false,
+        ),
+        ("We verified that we have decided to start the pilot.", true),
+        (
+            "The members of the team confirmed that we have decided to start the pilot.",
+            true,
+        ),
         (
             "The members of the team must check that we have decided to start the pilot.",
             false,
@@ -242,6 +266,29 @@ fn perfect_decisions_validate_literal_sources_and_durable_reopen() {
 #[test]
 fn contracted_perfect_completion_retains_literal_quotes_after_reopen() {
     let cases = [
+        ("We check that the report is complete.", false),
+        ("We did check that the report is complete.", true),
+        ("We denied that the report is complete.", false),
+        ("We deny that the report is done.", false),
+        ("We disputed that the report is complete.", false),
+        ("We imagined that the report is done.", false),
+        (
+            "We confirmed that we denied that the report is complete.",
+            false,
+        ),
+        ("We denied the report is complete.", false),
+        (
+            "Wir bestreiten, dass ich den Bericht abgeschlossen habe.",
+            false,
+        ),
+        ("Wir haben bestritten, der Bericht ist erledigt.", false),
+        ("We verified that the report is complete.", true),
+        (
+            "The members of the team confirmed that the report is done.",
+            true,
+        ),
+        ("The denied report is complete.", true),
+        ("We denied the claim, but the report is complete.", true),
         (
             "The members of the team must check that the report is complete.",
             false,

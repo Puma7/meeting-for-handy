@@ -11,48 +11,51 @@ Private Rohbelege und Nutzermeetings werden nicht veröffentlicht.
 
 ## Aktuelle Korrektur und Regressionen
 
-Die [Codex-Runde auf 454cdea](https://github.com/Puma7/meeting-for-handy/pull/41#pullrequestreview-5797267596)
-fand zwei gültige Fehler. Übergeordnete Modalität blieb bei langen Subjekten
-wie The members of the team must check unerkannt. Der enge Erkenner für direkte
-Nominalsubjekte darf hier keine Grenze für die Modalprüfung setzen.
-Die Korrektur trennt beides. Drei bestehende dauerhafte Regressionen enthalten
-15 zusätzliche Literale und 20 Szenarien. Die ersten zwölf Literale mit 16
-Szenarien reproduzierten lokal zwölf falsche Beschluss-/Abschluss-/Rücknahmefälle;
-die zusätzlich berichteten genauen Formulierungen sind ebenfalls abgesichert.
-Lange tatsächlich bestätigende Sätze und May als Name oder Themenbezeichnung
-bleiben zulässig. Alle bisherigen Modal-, Hoffnungs-, Mengen-, Verneinungs-
-und Nichtstun-Gegenfälle bleiben erhalten. Dies ist eine begrenzte konservative
-Konstruktionserkennung, kein Grammatik- oder Wahrheitsbeweis.
+Die [Codex-Runde auf 0542e31](https://github.com/Puma7/meeting-for-handy/pull/41#pullrequestreview-5797710027)
+fand einen gültigen Fehler: We denied that the report is complete bestätigte
+fälschlich einen Abschluss. Dasselbe galt für bestrittene Rücknahmen und Beschlüsse.
 
-Der zweite Fehler betraf das Leeren einer freigegebenen Protokollnotiz. Dadurch
-werden alte KI-Entwürfe aus der Modellansicht ausgeschlossen. Eine erledigte oder
-zurückgenommene Aufgabe konnte beim erneuten Lesen der ursprünglichen Zusage
-jedoch als neue offene Aufgabe erscheinen; ein zurückgenommener Beschluss
-ebenso als neuer Beschluss. Die tatsächlichen synthetischen HTTP-Vorherläufe
-reproduzierten beide Aufgabenfälle und den Beschlussfall mit Zusage und späterem
-Statusbeleg in getrennten begrenzten Gesprächsfenstern.
+Die gemeinsame Prüfung verlangt jetzt für jeden übergeordneten dass/that-Satz
+eine finite bejahte Bestätigung oder Aussage. Unbekannte übergeordnete Prädikate
+werden nicht als Bestätigung gewertet. Jede Verschachtelung wird gesondert
+geprüft; eine bestätigte Bestreitung bestätigt nicht den bestrittenen Inhalt.
+Die bestehenden Modal-, Infinitiv-, Mengen-, Verneinungs- und Quellenregeln bleiben
+erhalten. Bekannte ausdrückliche Bestreitungen ohne dass/that bleiben ebenfalls
+unzulässige Statusbelege. Originalzitate werden nicht umgeschrieben.
 
-Jetzt bleiben ausgeschlossene terminale Identitäten ausschließlich interne,
-schreibgeschützte Deduplizierungszeugen, wenn alle aktuellen Originalbelege
-noch wörtlich vorhanden und nicht ersetzt sind. Die Modellansicht wird nicht
-erweitert. Keine Mutation oder neue Modell-Ereignisrevision des alten Eintrags;
-keine erneute Freigabe zurückgezogener Notizen. Die tatsächlichen Anfragen,
-Überblicksprojektion, alten Checkpointbytes und mehrfache Wiederöffnung sind geprüft.
-Menschlich bestätigte Aufgaben bleiben geschützt. Eine tatsächlich neue spätere
-Zusage mit eigener Quellenkennung bleibt eine neue Aufgabe.
+Die drei vorhandenen dauerhaften Regressionen enthalten 43 zusätzliche Literale
+und 63 Szenarien. Die erste Gruppe mit 30 Literalen/41 Szenarien reproduzierte
+auf dem veröffentlichten Stand fünf falsche Beschlüsse, acht Abschlüsse und je
+acht Aufgaben-/Beschlussrücknahmen: 29 tatsächliche Fehlannahmen. Dazu gehören
+auch bestrittene, vorgestellte und verschachtelte Aussagen mit zuvor unbekannten
+übergeordneten Verben. Alle neuen und bisherigen Fälle bestehen nachher.
 
-Die bestehenden Runner-Regressionen decken nun zusätzlich Notizwiderruf bei
-KI-erledigten, menschlich erledigten und KI-zurückgenommenen Aufgaben sowie
-zurückgenommenen Beschlüssen ab. Neun Gegenfälle ersetzen, entfernen oder
-überholen deren Statusbelege; solche alten Ergebnisse unterdrücken keine neue
-Arbeit. Ein zusätzlicher Überblicks-Aliastest bestand bereits mit der bestehenden
-Projektion; dafür wurde kein weiterer Produktionspfad geändert.
-Ein erster privater Aufgaben-Vorherlauf hatte im neuen Fixture einen fehlenden
-Anfangstermin. Er bleibt erhalten und zählt nicht als Produktfehlernachweis.
-Der korrigierte Vorherlauf reproduzierte die tatsächlichen doppelten Identitäten.
-Keine neue Testfunktion, keine neue Datei und keine abgesenkte Prüfungsschwelle.
-Alle vorangehenden Zwischenläufe dieser Korrektur bleiben erhalten; nur die
-abschließende vollständige Prüfung gehört zum endgültigen Stand.
+Sechs weitere Literale mit acht Szenarien prüfen eine noch laufende Prüfung
+gegen eine ausdrücklich abgeschlossene Prüfung. Ein unveröffentlichter
+Zwischenstand nahm dabei vier falsche Statusaussagen an. Dieser Fehlversuch bleibt
+erhalten und zählt nicht als bestanden; die abschließende Prüfung besteht.
+Auch der alte Sonderpfad für nicht mehr benötigte Anforderungen verwendet
+jetzt dieselbe übergeordnete Prüfung. Vier lokal reproduzierte falsche Rücknahmen
+je Zielart wurden mit sieben weiteren Literalen/14 Szenarien abgesichert.
+Hoffnungen, Bestreitungen und Prüfaufträge reichen dort nicht aus; tatsächlich
+bestätigte Rücknahmen und unabhängige Folgesätze bleiben zulässig.
+Die ersten bestandenen Modellreferenzen dieser Korrektur gehörten noch zum
+Zwischenstand vor dieser Ergänzung. Sie bleiben erhalten und werden dem
+abschließenden Stand nicht zugerechnet. Das unten ausgewiesene Paar wurde
+getrennt vorab auf dem vollständig geprüften ergänzten Stand festgelegt.
+Lange tatsächlich bestätigende Sätze, bestätigte Folgesätze, Namen und
+Themenbezeichnungen wie The denied report bleiben zulässig. Keine neue
+Testfunktion, keine neue Datei und keine abgesenkte Schwelle. Die Erkennung
+ist begrenzt und konservativ, kein vollständiger Grammatik- oder Wahrheitsbeweis.
+
+Die vorherige Wiederaufnahmekorrektur bleibt vollständig erhalten: Nach dem
+Widerruf einer freigegebenen Notiz werden terminale Identitäten ausschließlich
+intern und schreibgeschützt zur Deduplizierung verwendet, wenn ihre Originalbelege
+noch gültig sind. Die tatsächlichen synthetischen HTTP-Regressionen, neun
+Gegenfälle mit ungültigen Statusbelegen, getrennte Replayfenster, Schutz
+menschlicher Änderungen, alte Checkpointbytes, unabhängige neue Zusagen und
+mehrfache Wiederöffnung bestehen weiter. Zurückgezogene Notiztexte und
+ausgeblendete KI-Entwürfe werden nicht erneut an das Modell gesendet.
 
 ## Tatsächlich geprüft
 
@@ -63,8 +66,8 @@ abschließende vollständige Prüfung gehört zum endgültigen Stand.
 | Frontend | Bytegleich zu f7fc62c; dessen **417 Tests in 21 Dateien**, TypeScript, Build und Format wurden hierfür nicht erneut ausgeführt. |
 | Browser | Bytegleich zur tatsächlichen vorherigen **16er-Matrix**, nicht erneut ausgeführt. |
 | Projektprüfung | Frisch verify.ps1: 47 PCM-, 35 Notizen-, 28 Vorlagen-, acht Agenten- und Monitorprüfungen bestanden. |
-| Deutsch, echtes lokales Modell | **128.3122401 s**, **0** reguläre Validierungswiederholungen. |
-| Englisch, echtes lokales Modell | **159.0205338 s**, **0** reguläre Validierungswiederholungen. |
+| Deutsch, echtes lokales Modell | **117.8902805 s**, **0** reguläre Validierungswiederholungen. |
+| Englisch, echtes lokales Modell | **115.0313873 s**, **0** reguläre Validierungswiederholungen. |
 
 Beide Modellreferenzen nutzen den unveränderten synthetischen Gesprächskorpus.
 Englisch einschließlich I’ll und der ursprüngliche englische Referenzpatch
@@ -108,12 +111,17 @@ nach tatsächlicher Veröffentlichung der geprüften Korrektur beantwortet.
 Die frühere Linux-CI auf f7fc62c scheiterte bei virtuellen Spuren mit 10091/10094 ms
 über der unveränderten 10000-ms-Grenze; Startunterbrechungen waren gemeldet.
 Ursache des Überlaufs unbekannt, Fehllauf erhalten, keine Grenze geändert.
+Der spätere Linux-Lauf auf 0542e31 wurde beim vollständigen GUI-Build
+abgebrochen. Seine Paketinstallation dauerte rund 35 Minuten mit langen
+Downloads vom Ubuntu-Azure-Spiegel. Der Zeitpunkt passt zur unveränderten
+50-Minuten-Jobgrenze; der Log nennt nur den Abbruch, keine getrennt bestätigte
+Ursache. Er zählt nicht als Erfolg. Keine Frist, Paket- oder Workflowänderung.
 Für den endgültigen Head bleiben zwei frische saubere Codex-Codeprüfungen,
 eine vollständige saubere CodeRabbit-Runde und seine eigene grüne CI nötig.
 Spätere tatsächliche Links werden separat im PR dokumentiert. Alte oder leere
 Security-Flags sind kein aktueller formaler Securitynachweis.
 
-Die [unveränderliche vorige Fassung mit allen Detailnachweisen](https://github.com/Puma7/meeting-for-handy/blob/454cdea57adf1aff584c86527d849710e16378de/docs/validation/pr41-review-followup-20261104.md)
+Die [unveränderliche vorige Fassung mit allen Detailnachweisen](https://github.com/Puma7/meeting-for-handy/blob/0542e31ef7fc1c2e2be161b91641db96fd702cce/docs/validation/pr41-review-followup-20261104.md)
 erhält frühere Fehler, Korrekturen, Fehlläufe und deren Grenzen. Dazu gehören
 Batch-Fixture-Synchronisation bei unveränderten produktiven ASR-Bytes und
 Fristen, Belegnavigation, englische Beschriftung, strikte LM-Instanzeigentümerschaft,

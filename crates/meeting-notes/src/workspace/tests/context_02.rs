@@ -698,6 +698,19 @@ fn oversized_legacy_shared_context_remains_readable_and_can_be_shortened() {
 #[test]
 fn withdrawal_requires_explicit_current_intent_and_rejection_preserves_both_kinds() {
     let invalid = [
+        "Ich hoffe, wir brauchen den Bericht nicht mehr.",
+        "Wir bestreiten, wir brauchen den Bericht nicht mehr.",
+        "Wir müssen prüfen, wir brauchen den Bericht nicht mehr.",
+        "Bitte prüfen, wir brauchen den Bericht nicht mehr.",
+        "We check that the decision has been withdrawn.",
+        "We denied that the decision has been withdrawn.",
+        "We deny that the decision has been withdrawn.",
+        "We disputed that the decision has been withdrawn.",
+        "We imagined that the decision has been withdrawn.",
+        "We confirmed that we denied that the decision has been withdrawn.",
+        "We denied the decision has been withdrawn.",
+        "Wir bestreiten, dass wir den Beschluss zurückgenommen haben.",
+        "Wir haben bestritten, dass der Beschluss zurückgenommen wurde.",
         "The members of the team must check that the decision has been withdrawn.",
         "A team must check that the decision has been withdrawn.",
         "All engineers must verify that the decision has been withdrawn.",
@@ -781,6 +794,13 @@ fn withdrawal_requires_explicit_current_intent_and_rejection_preserves_both_kind
         "We revoked none of the decisions.",
     ];
     let valid = [
+        "Wir haben bestätigt, wir brauchen den Bericht nicht mehr.",
+        "Wir hoffen. Wir brauchen den Bericht nicht mehr.",
+        "Ich habe bestätigt, wir benötigen den Bericht nicht mehr.",
+        "We did check that the decision has been withdrawn.",
+        "We verified that the decision has been withdrawn.",
+        "The members of the team confirmed that the decision has been withdrawn.",
+        "We denied the claim, but the decision has been withdrawn.",
         "Our platform security team has confirmed that the decision has been withdrawn.",
         "We have checked that the decision has been withdrawn.",
         "We must check, but the decision has been withdrawn.",

@@ -894,6 +894,126 @@ fn finite_subject_before(
                 .contains(&nominal[0])))
 }
 
+/// Recognize a finite subject for an explicit confirmation, including a long
+/// nominal subject. Do not cross another clause, pronoun or nonfinite auxiliary.
+fn affirmative_matrix_subject(words: &[&str], original: &[&str], start: usize, end: usize) -> bool {
+    if finite_subject_before(words, original, start, end) {
+        return true;
+    }
+    let prefix = &words[start..end];
+    !prefix.is_empty()
+        && (prefix.first().is_some_and(|word| {
+            [
+                "the", "a", "an", "our", "your", "their", "his", "her", "this", "that", "der",
+                "die", "das", "ein", "eine", "unser", "unsere", "ihr", "ihre",
+            ]
+            .contains(word)
+        }) || original[start..end]
+            .iter()
+            .all(|word| word.chars().next().is_some_and(char::is_uppercase)))
+        && !prefix.iter().any(|word| {
+            [
+                "i", "we", "you", "they", "he", "she", "it", "ich", "wir", "du", "er", "sie", "es",
+                "to", "zu", "having", "being", "have", "has", "had", "is", "are", "was", "were",
+                "habe", "haben", "hat", "hatte", "hatten", "ist", "sind", "war", "waren", "dass",
+            ]
+            .contains(word)
+        })
+}
+
+/// A dependent terminal claim needs a finite affirmative reporting/confirmation
+/// predicate. Unknown matrix predicates are not treated as confirmations.
+fn affirmative_matrix_before(
+    words: &[&str],
+    original: &[&str],
+    start: usize,
+    marker: usize,
+) -> bool {
+    let Some(verb) = marker.checked_sub(1).filter(|index| *index >= start) else {
+        return false;
+    };
+    if ![
+        "confirm",
+        "confirms",
+        "confirmed",
+        "verify",
+        "verifies",
+        "verified",
+        "check",
+        "checked",
+        "establish",
+        "establishes",
+        "established",
+        "prove",
+        "proves",
+        "proved",
+        "proven",
+        "state",
+        "states",
+        "stated",
+        "report",
+        "reports",
+        "reported",
+        "say",
+        "says",
+        "said",
+        "acknowledge",
+        "acknowledges",
+        "acknowledged",
+        "announce",
+        "announces",
+        "announced",
+        "find",
+        "finds",
+        "found",
+        "learn",
+        "learns",
+        "learned",
+        "notice",
+        "notices",
+        "noticed",
+        "bestätige",
+        "bestätigen",
+        "bestätigt",
+        "bestätigte",
+        "bestätigten",
+        "geprüft",
+        "verifiziert",
+        "festgestellt",
+        "feststellen",
+        "belegt",
+        "bewiesen",
+        "berichtet",
+        "erklärt",
+        "erklärte",
+        "erklärten",
+        "sagt",
+        "sagte",
+        "sagten",
+    ]
+    .contains(&words[verb])
+    {
+        return false;
+    }
+    // A present-tense check describes a procedure, not its confirmed outcome.
+    // Keep the explicit past construction "we did check that ..." available.
+    (words[verb] != "check" && affirmative_matrix_subject(words, original, start, verb))
+        || (start..verb).any(|auxiliary| {
+            [
+                "have", "has", "had", "is", "are", "was", "were", "did", "do", "does", "habe",
+                "haben", "hat", "hatte", "hatten", "ist", "sind", "war", "waren", "wurde",
+                "wurden",
+            ]
+            .contains(&words[auxiliary])
+                && (words[verb] != "check" || words[auxiliary] == "did")
+                && affirmative_matrix_subject(words, original, start, auxiliary)
+                && words[auxiliary + 1..verb].iter().all(|word| {
+                    AFFIRMATIVE_PREDICATE_ADVERBS.contains(word)
+                        || ["been", "bereits", "schon", "jedenfalls"].contains(word)
+                })
+        })
+}
+
 /// Reject a desired, expected or believed outcome even when its dependent
 /// clause uses a completed tense. A separate finite assertion remains eligible.
 fn unasserted_embedding(
@@ -994,6 +1114,25 @@ fn unasserted_embedding(
     if modal_governor || required_infinitive || polite_request || imperative_check {
         return true;
     }
+    let mut matrix_start = start;
+    for marker in start..predicate {
+        if !["that", "dass"].contains(&words[marker])
+            || marker == matrix_start
+            || (words[marker] == "that"
+                && marker > start
+                && [
+                    "with", "without", "of", "for", "to", "on", "from", "in", "about", "mit",
+                    "von", "für",
+                ]
+                .contains(&words[marker - 1]))
+        {
+            continue;
+        }
+        if !affirmative_matrix_before(words, original, matrix_start, marker) {
+            return true;
+        }
+        matrix_start = marker + 1;
+    }
     (start..predicate).any(|index| {
         if ![
             "hope",
@@ -1087,6 +1226,20 @@ fn unasserted_embedding(
             "vermutete",
             "vermuteten",
             "vorgeschlagen",
+            "deny",
+            "denies",
+            "denied",
+            "denying",
+            "bestreite",
+            "bestreiten",
+            "bestreitet",
+            "bestritt",
+            "bestritten",
+            "leugne",
+            "leugnen",
+            "leugnet",
+            "leugnete",
+            "geleugnet",
         ]
         .contains(&words[index])
         {
@@ -1302,13 +1455,21 @@ pub(super) fn withdrawal_quote_allowed(quote: &str) -> bool {
     if words.iter().any(|w| w == "nicht") {
         // "No longer needed" withdraws a requirement. A bare "nicht mehr" is
         // insufficient: "nicht mehr zurücknehmen" states the opposite intent.
+        let screening = assertion_words(&lower);
+        let original = quote.replace('’', "'");
+        let original_words = assertion_words(&original);
+        let sentences = assertion_ranges(&lower, false);
+        let mut clause_start = 0;
         return words.iter().filter(|w| *w == "nicht").count() == 1
             && clauses.iter().any(|p| {
+                let predicate = clause_start + 1;
+                clause_start += p.len();
                 p.len() >= 5
                     && ["ich", "wir"].contains(&p[0].as_str())
                     && ["brauche", "brauchen", "benötige", "benötigen"].contains(&p[1].as_str())
                     && p[p.len() - 2] == "nicht"
                     && p[p.len() - 1] == "mehr"
+                    && !unasserted_embedding(&screening, &original_words, &sentences, predicate)
             });
     }
     let words = assertion_words(&lower);
