@@ -5,35 +5,36 @@ Diese Notiz enthält bereinigte Nachweise mit synthetischen Eingaben, darunter
 ausdrücklich echte lokale Modellinferenz. Der ganze TEST_REPORT bleibt zur
 PR-Basis byteunverändert. Private Rohbelege und Nutzermeetings werden nicht veröffentlicht.
 
-## Aktuelle Testfixture-Korrektur
+## Abschließende Testfixture-Korrektur
 
-Die echten Intel- und ARM-Mac-Läufe auf 2118eb1 scheiterten in der neuen positiven
-Streamingfixture: jeweils 173 Notizenfälle bestanden, einer erhielt ein Zeitlimit.
-Beide Läufe bleiben erhalten. Das ist kein nachgewiesener Fehler der produktiven
-300-Sekunden-Grenze. Die alte Fixture protokollierte keine Empfängerzeitpunkte;
-die genaue frühere Kernel-/Schedulingursache ist rückwirkend nicht bewiesen.
+Die Intel-/ARM-Fehlläufe auf 2118eb1 und der ARM-Fehllauf auf 5599001 bleiben
+erhalten. Die zusätzliche Empfängerdiagnose auf 5599001 belegt zwischen
+631 und 837 ms keine neuen Bytes, obwohl nur 60 ms Sendepause geplant waren.
+Die private 200-ms-Idle-Grenze hat deshalb korrekt ausgelöst. Eine geplante
+Threadpause ist auf einem ausgelasteten Prüfrechner keine präzise Testuhr.
 
-Winzige write_all-Aufrufe im 60-ms-Abstand belegen allein keinen entsprechenden
-Byteempfang. Die Fixture aktiviert deshalb TCP_NODELAY auf ihren eigenen
-angenommenen Sockets, wartet vor dem Messbeginn auf den bereiten Server und
-bestätigt jedes der acht Fortschrittspakete über den tatsächlichen
-AnalysisControl-Bytezähler. Bei einem neuen Fehler stehen synthetische
-Empfangszähler/Zeitpunkte für die Diagnose bereit. Es gibt keine fremden Prozesse
-oder echten Modelldienste in dieser Fixture.
+Der positive synthetische Test benutzt jetzt die kontrollierte Tokio-Testuhr:
+acht bestätigte reale Loopback-Empfänge, jeweils danach 60 ms logischer
+Zeitfortschritt, insgesamt exakt 480 ms bei unveränderter 200-ms-Idle-Grenze.
+Er prüft weiterhin, dass laufender Byteempfang die gesamte Idle-Dauer
+überschreiten darf. Eine eigene bereite Aufgabe verhindert unkontrolliertes
+Vorspringen der Testuhr während echter Socket-I/O. Der reale 3-Sekunden-Wächter
+bricht eine hängende Fixture ab; alle eigenen Threads werden verbunden.
+**480 ms sind simulierte Zeit**, kein gemessener 480-ms-Dauerlauf.
 
-Die produktiven **300 Sekunden**, internen **200 Millisekunden**, acht
-**60-ms-Abstände**, die ursprünglichen Assertions einschließlich **mehr als
-400 ms Gesamtdauer** und sämtliche bisherigen Testfristen bleiben erhalten.
-Acht bestätigte Empfangsschritte sind zusätzlich verlangt. Es wird kein alter
-Head erneut ausgeführt, um seinen Fehllauf zu ersetzen. Ein neuer erfolgreicher
-Intel-/ARM-Lauf auf diesem Stand bleibt erforderlich.
+Die drei negativen Fälle für fehlende Header, verstummten Erfolgs- und
+Fehlerkörper behalten ihre echte 200-ms-Zeitmessung. Produktiv bleiben
+300 Sekunden Idle-Zeit und alle bisherigen Schutz-/Größenregeln unverändert.
+Nur der cfg(test)-Abschnitt, diese Notiz und das ausschließlich als
+Dev-Abhängigkeit aktivierte test-util-Feature der bereits gesperrten
+Tokio-Version 1.54.1 ändern sich. Kein neues Paket, keine Versionsänderung;
+Cargo.lock, Lizenzen und ganzer TEST_REPORT bleiben byteunverändert.
+Alle produktiven Transportbytes und UI-Quellen entsprechen 2118eb1.
 
-**Nur cfg(test)-Code und diese Notiz ändern sich.** Der gesamte produktiv
-kompilierte Präfix von workspace_stream.rs ist zu 2118eb1 tatsächlich
-raw-bytegleich; andere produktive Quellen, Oberfläche, Prompts, Abhängigkeiten
-und ganzer TEST_REPORT ebenfalls unverändert. Damit sind die unten genannten
-Browser- und Modellreferenzen ausdrücklich erhaltene Nachweise von 2118eb1,
-keine neu ausgeführten Läufe dieses Teststands.
+Auf Wunsch des Maintainers endet damit die offene Suche nach weiteren
+Verbesserungen. Bekannte Befunde werden abgeschlossen und ein separater
+Windows-Teststand für die anschließende Erprobung im Alltag vorbereitet.
+Eine Geräte-/Zweistundenfreigabe oder Fehlerfreiheit wird daraus nicht abgeleitet.
 
 ## Erhaltene produktive Korrekturen
 
@@ -65,7 +66,8 @@ Testaufruf verwendet **200 ms** Idle-Zeit; es gibt keinen Laufzeit- oder
 Umgebungsschalter dafür. Mit dem veröffentlichten Funktionskörper ohne einzig
 die neue Idle-Einstellung blieb der erste Fall bis zum ausdrücklichen Abbruch
 hängen. Danach bestehen alle drei Fälle. Ein weiterer Stream sendet achtmal
-fortlaufende Bytes mit 60-ms-Abständen und endet erst nach mehr als 400 ms:
+fortlaufende Bytes mit 60-ms-Abständen der kontrollierten Testuhr und endet
+erst nach 480 ms simulierter Zeit:
 Er besteht trotz Überschreitung des gesamten 200-ms-Idle-Budgets. Dies ist eine
 beschleunigte synthetische Prüfung, kein tatsächlich fünf Minuten langer Ausfall.
 Die eigene Anfrage und sämtliche Fixture-Threads werden bereinigt.
@@ -88,8 +90,8 @@ weiterhin nicht als freigegebener Kontext übertragen.
 | Prüfung | Ergebnis dieses Stands |
 | --- | --- |
 | Rust Workspace/All-Targets unter Windows | **576 bestanden**, darunter **172 Notizen- und 40 Providerfälle**; drei bestehende besondere Einstiege regulär ignoriert. |
-| Frontend | **435 Tests in 21 Dateien** auf 2118eb1 bestanden; alle Frontendbytes unverändert, nicht erneut ausgeführt. |
-| TypeScript und Produktionsbuild | Auf 2118eb1 bestanden, unveränderte Frontend-/Paketbytes; nicht erneut ausgeführt. |
+| Frontend | **435 Tests in 21 Dateien** im abschließenden lokalen Lauf erneut bestanden. |
+| TypeScript und Produktionsbuild | Im abschließenden lokalen Lauf erneut bestanden, gesperrte Pakete. |
 | Rust-/Frontendformat und Clippy | Bestanden, Warnungen als Fehler. |
 | Projektprüfung | verify.ps1: 47 PCM-, 35 Notizen-, 28 Vorlagen-, acht Agenten- und Monitorprüfungen. |
 | Browser | Vier tatsächliche Vorherfehler und vier bestandene Konfigurationen auf 2118eb1; unveränderte UI-Quellen, nicht erneut ausgeführt. |
@@ -130,9 +132,10 @@ Codex-Threads wurden individuell menschlich beantwortet und geschlossen. Die
 beiden letzten CodeRabbit-Abhilfen wurden am veröffentlichten 2118eb1 bestätigt.
 Dessen erste frische CODE-Runde war sauber; eine zweite wurde wegen des
 tatsächlichen Mac-CI-Fehlers nicht mehr auf diesem alten Stand angefordert.
-Der neue Teststand braucht zwei eigene saubere CODE-Runden, eine vollständige
-CodeRabbit-Runde und seine eigene grüne aktuelle CI. Die Mac-Fehlläufe werden
-ausdrücklich nicht als erfolgreich ausgegeben.
+Die anschließend gestarteten Prüfungen werden nur ihrem tatsächlichen Head
+zugerechnet. Auf Wunsch des Maintainers werden keine weiteren offenen
+Suchrunden angehängt. Fehlgeschlagene Mac-Läufe werden ausdrücklich nicht
+als erfolgreich ausgegeben; aktuelle CI und Reviewstatus sind im PR sichtbar.
 
 Die letzte vollständige CodeRabbit-Runde auf fb03a76 war wegen der beiden
 in 2118eb1 korrigierten Hinweise nicht sauber, Risiko Low. Alle 100 ausgewählten

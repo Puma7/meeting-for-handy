@@ -21,3 +21,4 @@ zeroize = "=1.8.2"
 
 [dev-dependencies]
 tempfile = "=3.23.0"
+tokio = { version = "=1.54.1", features = ["test-util"] }

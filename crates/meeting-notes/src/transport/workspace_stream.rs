@@ -447,6 +447,38 @@ mod idle_tests {
         let received = control.clone();
         let events = Arc::new(Mutex::new(Vec::new()));
         let sent_events = Arc::clone(&events);
+        // Keep socket I/O real, but advance the idle clock only after the receiver
+        // acknowledges a frame. OS scheduling delays are not simulated silence.
+        let finished = Arc::new(AtomicBool::new(false));
+        let clock_finished = Arc::clone(&finished);
+        let clock_control = control.clone();
+        let (advance, ticks) = mpsc::channel();
+        let (advanced, ticked) = mpsc::channel();
+        client.runtime.block_on(async {
+            tokio::time::pause();
+        });
+        let clock = client.runtime.spawn(async move {
+            while !clock_finished.load(Ordering::Acquire) {
+                if clock_control.is_cancelled() {
+                    tokio::time::advance(Duration::from_millis(20)).await;
+                    return;
+                }
+                if ticks.try_recv().is_ok() {
+                    tokio::time::advance(Duration::from_millis(60)).await;
+                    let _ = advanced.send(());
+                }
+                // A ready task prevents the paused runtime from automatically
+                // jumping to the idle deadline while waiting for real I/O.
+                tokio::task::yield_now().await;
+            }
+        });
+        let (completed, completion) = mpsc::channel();
+        let watchdog_control = control.clone();
+        let watchdog = thread::spawn(move || {
+            if completion.recv_timeout(Duration::from_secs(3)).is_err() {
+                watchdog_control.cancel();
+            }
+        });
         let (ready, started) = mpsc::channel();
         let server = thread::spawn(move || {
             ready.send(()).unwrap();
@@ -477,12 +509,15 @@ mod idle_tests {
                     received.response_bytes() >= expected,
                     "Fixture progress frame was not received"
                 );
-                thread::sleep(Duration::from_millis(60));
+                advance.send(()).unwrap();
+                ticked.recv_timeout(Duration::from_secs(3)).unwrap();
             }
             socket.write_all(b"data: {\"choices\":[{\"delta\":{\"content\":\"{}\"},\"finish_reason\":\"stop\"}]}\n").unwrap();
         });
         started.recv_timeout(Duration::from_secs(3)).unwrap();
-        let before = std::time::Instant::now();
+        let before = client
+            .runtime
+            .block_on(async { tokio::time::Instant::now() });
         let result = client.workspace_json_with_idle(
             "synthetic",
             "synthetic",
@@ -493,6 +528,11 @@ mod idle_tests {
         if result.is_err() {
             control.cancel();
         }
+        let elapsed = client.runtime.block_on(async { before.elapsed() });
+        finished.store(true, Ordering::Release);
+        let _ = completed.send(());
+        client.runtime.block_on(clock).unwrap();
+        watchdog.join().unwrap();
         server.join().unwrap();
         assert_eq!(
             result.unwrap_or_else(|error| panic!(
@@ -501,7 +541,8 @@ mod idle_tests {
             )),
             "{}"
         );
-        assert!(before.elapsed() > Duration::from_millis(400));
+        assert!(elapsed > Duration::from_millis(400));
+        assert_eq!(elapsed, Duration::from_millis(8 * 60));
         assert!(control.response_bytes() > 0);
         assert_eq!(events.lock().unwrap().len(), 8);
     }
