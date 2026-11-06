@@ -32,6 +32,42 @@ fn perfect_decisions_validate_literal_sources_and_durable_reopen() {
             true,
         ),
         ("Heute beschließen wir den Pilotstart.", true),
+        (
+            "Wir haben vorgeschlagen, dass der Pilotstart beschlossen wird.",
+            false,
+        ),
+        (
+            "Es ist wichtig, dass der Pilotstart beschlossen wird.",
+            false,
+        ),
+        (
+            "Wir haben vorgeschlagen dass der Pilotstart beschlossen wird.",
+            false,
+        ),
+        (
+            "Es ist wichtig dass der Pilotstart beschlossen wird.",
+            false,
+        ),
+        ("Wir haben vorgeschlagen, dass wir beschließen.", false),
+        ("Es ist wichtig dass wir beschließen.", false),
+        ("Wir beschlossen den Pilotstart.", true),
+        ("Wir entschieden uns für den Pilotstart.", true),
+        (
+            "Robin bestätigt: Wir haben den Pilotstart beschlossen.",
+            true,
+        ),
+        (
+            "Nach der Beratung haben wir den Pilotstart beschlossen.",
+            true,
+        ),
+        (
+            "Robin bestätigt, dass wir den Pilotstart beschlossen haben.",
+            true,
+        ),
+        (
+            "Es ist bestätigt, dass der Pilotstart beschlossen ist.",
+            true,
+        ),
         ("We have not decided to release on Friday.", false),
         ("We haven't decided to release on Friday.", false),
         ("We haven’t decided to release on Friday.", false),

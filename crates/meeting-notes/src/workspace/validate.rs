@@ -592,27 +592,58 @@ pub(super) fn recorded_decision_quote_allowed(quote: &str) -> bool {
             _ => token.split('\'').filter(|w| !w.is_empty()).collect(),
         })
         .collect();
+    // Bind German auxiliaries to the same clause, including ASR without commas.
+    // Token counts also match the temporary two-token expansion of "we've".
+    let mut clause_start = 0;
+    let clauses: Vec<_> = lower
+        .split(['.', '!', '?', ';', ',', ':', '\n'])
+        .map(|clause| {
+            let count = clause
+                .split(|c: char| !c.is_alphabetic())
+                .filter(|word| !word.is_empty())
+                .count();
+            let range = clause_start..clause_start + count;
+            clause_start += count;
+            range
+        })
+        .collect();
     let german = words.iter().enumerate().find_map(|(index, word)| {
+        if !["entscheiden", "beschließen", "beschlossen", "entschieden"].contains(word) {
+            return None;
+        }
+        let clause = clauses.iter().find(|range| range.contains(&index))?;
+        let subordinate = words[clause.start..index].iter().rposition(|word| {
+            ["dass", "ob", "weil", "damit", "wenn", "falls", "sofern"].contains(word)
+        });
+        let start = subordinate.map_or(clause.start, |at| clause.start + at + 1);
+        let finite = subordinate.is_none()
+            && ((index > start && words[index - 1] == "wir")
+                || (index + 1 < clause.end && words[index + 1] == "wir"));
+        let auxiliary = |word: &str| {
+            [
+                "habe", "haben", "hat", "hatte", "hatten", "ist", "war", "waren", "wurde", "wurden",
+            ]
+            .contains(&word)
+        };
         let asserted = match *word {
             // These spellings can be finite plural verbs or bare infinitives.
             // A modal/intention followed by an infinitive is not a decision.
-            "entscheiden" | "beschließen" => {
-                index.checked_sub(1).and_then(|i| words.get(i)) == Some(&"wir")
-                    || words.get(index + 1) == Some(&"wir")
+            "entscheiden" | "beschließen" => finite,
+            "beschlossen" | "entschieden" => {
+                finite
+                    || words[start..index]
+                        .iter()
+                        .rposition(|w| auxiliary(w))
+                        .is_some_and(|at| !words[start + at + 1..index].contains(&"zu"))
+                    // In an asserted subordinate past/passive clause the finite
+                    // auxiliary follows the participle at the end of that clause.
+                    || (subordinate.is_some()
+                        && index + 2 == clause.end
+                        && auxiliary(words[index + 1]))
             }
-            "beschlossen" | "entschieden" => words[..index]
-                .iter()
-                .rposition(|w| {
-                    [
-                        "habe", "haben", "hat", "hatte", "hatten", "ist", "war", "waren", "wurde",
-                        "wurden",
-                    ]
-                    .contains(w)
-                })
-                .is_some_and(|auxiliary| !words[auxiliary + 1..index].contains(&"zu")),
             _ => false,
         };
-        asserted.then_some(index)
+        asserted.then_some((index, clause.end))
     });
     let english = words.iter().enumerate().find_map(|(index, word)| {
         let next = words.get(index + 1).copied();
@@ -647,16 +678,9 @@ pub(super) fn recorded_decision_quote_allowed(quote: &str) -> bool {
         }
         (words.get(predicate) == Some(&"decided")).then_some(predicate + 1)
     });
-    let assertion_end = if let Some(index) = german {
-        let first_clause_words = lower
-            .split(',')
-            .next()
-            .unwrap_or_default()
-            .split(|c: char| !c.is_alphabetic())
-            .filter(|w| !w.is_empty())
-            .count();
-        if first_clause_words > index && first_clause_words < words.len() {
-            first_clause_words
+    let assertion_end = if let Some((index, clause_end)) = german {
+        if clause_end < words.len() {
+            clause_end
         } else if let Some(negation) = words.windows(2).position(|p| p == ["nicht", "zu"]) {
             // ASR may omit the comma before an infinitive clause. Require an
             // intervening object and an actual infinitive after "nicht zu".

@@ -2,18 +2,49 @@
 
 Stand: 6. November 2026. Version **1.1.0-beta.1**, unverändert.
 
-Diese Nacharbeit unterscheidet beabsichtigte Entscheidungen von ausdrücklichen
-Beschlussaussagen. Ein deutscher Infinitiv allein ist kein Beschlussprädikat.
-Alle bisherigen Rücknahme-, Mengen- und Nichtstun-Gegenfälle bleiben erhalten.
-Zusätzlich werden doppelte Notizstände und fehlende Schaltflächen-Hervorhebungen korrigiert. Beide Referenzsprachen
+Diese Nacharbeit bindet deutsches Hilfsverb und Beschlussprädikat an denselben
+Satzteil. Ein früheres Hilfsverb aus einem Vorschlag begründet keinen späteren
+Beschluss im Nebensatz. Gültige einfache Vergangenheit und tatsächlich ausgesagte
+Vergangenheit beziehungsweise passive Beschlusszustände bleiben zulässig.
+Die bisherigen UI-, Rücknahme-, Mengen- und Nichtstun-Korrekturen bleiben erhalten. Beide Referenzsprachen
 enthalten unverändert eine ausdrückliche Budgetfrage, wenn der Test einen Gesprächsimpuls verlangt.
 Die ursprünglichen Zusagen und unverbindlichen Aussagen bleiben erhalten.
 
-Die [bisherige ausführliche Fassung](https://github.com/Puma7/meeting-for-handy/blob/35a9beebda90ebf930fb5b32579a539c98e3df37/docs/validation/pr41-review-followup-20261104.md)
+Die [bisherige ausführliche Fassung](https://github.com/Puma7/meeting-for-handy/blob/b8b1ed83ab5f4b918ec6cf01a3fbeff3b09c188e/docs/validation/pr41-review-followup-20261104.md)
 und deren Detailhistorie bleiben unveränderlich in Git.
 Private Rohbelege, alte Checkpoints und fehlgeschlagene Läufe bleiben erhalten.
 Der vollständige TEST_REPORT bleibt gegenüber dem PR-Basisstand byteunverändert.
 Dieser bereinigte Vermerk veröffentlicht keine Nutzermeetings oder privaten Sitzungsdaten.
+
+## Hilfsverb und Beschlussprädikat im selben Satzteil
+
+Die [Codex-Runde auf b8b1ed8](https://github.com/Puma7/meeting-for-handy/pull/41#discussion_r4488482090)
+fand einen gültigen Fehler: „Wir haben vorgeschlagen, dass der Pilotstart
+beschlossen wird.“ und „Es ist wichtig, dass der Pilotstart beschlossen wird.“
+konnten als bereits gefasster Beschluss gespeichert werden. Die Prüfung band
+das spätere Partizip an haben beziehungsweise ist aus dem übergeordneten Satz.
+
+Die bestehende dauerhafte Regression erhielt zwölf zusätzliche wörtliche Fälle.
+Der finale Vorherlauf reproduzierte sechs falsche Annahmen: die beiden Aussagen
+mit und ohne ASR-Komma sowie zwei beabsichtigte finite Nebensätze. Er zeigte
+auch drei zu Unrecht abgewiesene echte Vergangenheitsformen: direkte einfache
+Vergangenheit und eine bestätigte abgeschlossene Entscheidung im Nebensatz.
+Ein vorheriger kleinerer Zehn-Fälle-Lauf bleibt getrennt erhalten.
+
+Die Zuordnung ist jetzt auf denselben Satzteil begrenzt. Satzzeichen und
+Nebensatzmarker trennen ihn auch bei fehlendem Komma. Ein bloßes finites
+Präsens im dass-Nebensatz genügt nicht. Echte direkte Vergangenheitsformen
+bleiben zulässig; im ausgesagten vergangenen oder passiven Nebensatz kann das
+zugehörige finite Hilfsverb am Ende desselben Satzteils stehen. Ein wird aus
+einem bloß geplanten zukünftigen Beschluss erfüllt diese Konstruktion nicht.
+Die Grenze der Beschlussbehauptung folgt dem tatsächlichen Satzteil.
+
+Alle zwölf Fälle und sämtliche bisherigen Beschluss-, Nichtstun-, Bedingungs-,
+Rücknahme- und Mengen-Gegenfälle bestehen. Die Regression prüft Originalzitate,
+den produktiven Zustandsschreiber, mehrfaches Wiederöffnen und dass eine
+abgelehnte Antwort keine Revision oder bestätigte Zustandsänderung erzeugt.
+Dies bleibt eine begrenzte konservative Belegprüfung, kein vollständiger
+Grammatik-, Bedeutungs- oder Wahrheitsbeweis.
 
 ## Notizstände und sichtbare Schaltflächenzustände
 
@@ -33,8 +64,8 @@ und das spätere bewusste Leeren bleiben versioniert; alte Stände werden weder
 gekürzt noch automatisch gelöscht. Ein beliebig langer tatsächlicher Verlauf
 ist damit nicht zugesichert; die vorhandene sichtbare Speicherfehlerbehandlung bleibt erhalten.
 
-Frisch bestanden 416 UI-Tests in 21 Dateien, TypeScript, Produktionsbuild und
-Format. Die zusätzlichen Tests prüfen leere Notizen, wechselnde Notizarten,
+Auf b8b1ed8 bestanden 416 UI-Tests in 21 Dateien, TypeScript, Produktionsbuild und
+Format. Sämtliche UI-Dateien bleiben hier bytegleich; diese Prüfungen wurden nicht erneut ausgeführt. Die zusätzlichen Tests prüfen leere Notizen, wechselnde Notizarten,
 echte Änderungen, Leeren, gespeicherte Originalstände, Wiederöffnung und dass
 private Texte nicht an die synthetische native Adaptergrenze gelangen.
 Der erste private Testversuch hatte für den zweiten Fall noch einen absichtlich
@@ -42,7 +73,7 @@ belegten Auswertungszustand; er zählt nicht als Nachweis des Duplikatfehlers.
 Der getrennte finale Vorherlauf verwendete eine freie synthetische Auswertung
 und zeigte beide tatsächlichen Fehler. Beide Läufe bleiben erhalten.
 
-Die Browserprüfung verwendet die tatsächliche LiveWorkspace-Komponente in
+Die Browserprüfung auf b8b1ed8 verwendete die hier bytegleiche LiveWorkspace-Komponente in
 Edge 156.0.4314.58 mit dem vorhandenen Playwright 1.57.0: 390/1280 Pixel,
 Deutsch/Englisch und hell/dunkel, insgesamt acht Konfigurationen. Die drei
 Hervorhebungsregeln waren vorher in allen 24 Messungen transparent und stimmen
@@ -68,7 +99,8 @@ ist damit nicht bewiesen. Zwei vorhandene, zusammengehörige Runner-/Replaytests
 wurden mit exakt unverändertem Funktionsinhalt nach inference_02.rs verschoben.
 Beide Dateien waren bereits Teil desselben PR; keine neue Datei, kein Filter,
 kein Timeout und kein Testfall wurde entfernt oder abgeschwächt.
-Die bisherige Testdatei sinkt von 83049 auf 62611 Bytes. Erst eine frische
+Bei dieser Umverteilung sank die Testdatei von 83049 auf 62611 Bytes; die jetzigen
+zwölf zusätzlichen Tabellenfälle bleiben vollständig enthalten. Erst eine frische
 vollständige Runde ohne unverfügbare Datei darf die Prüflücke als geschlossen bestätigen.
 AudioSources.tsx enthielt in dieser Runde nur die bereits manuell nachgelesene
 Entfernung des sichtbaren Pegel-Hilfetexts; die zugängliche Pegelerklärung bleibt erhalten.
@@ -82,7 +114,7 @@ konnten als bereits gefasste Beschlüsse erscheinen. Die bestehende
 Validator-/Checkpoint-Regression reproduzierte diese beiden und zwei weitere
 Absichtssätze mit wollen und versuchen als vier tatsächliche falsche Annahmen.
 
-Die deutsche Prüfung verlangt jetzt eine ausdrückliche finite Konstruktion
+Die damalige deutsche Korrektur verlangte eine ausdrückliche finite Konstruktion
 für entscheiden/beschließen oder ein passendes Hilfsverb vor dem Partizip
 beschlossen/entschieden. Ein modaler oder beabsichtigter bloßer Infinitiv
 genügt nicht; ein zwischen Hilfsverb und Partizip stehendes zu wird nicht
@@ -260,9 +292,9 @@ alte Fehlläufe werden dadurch nicht als bestanden umgedeutet.
 | --- | --- |
 | Rust-Workspace, alle Targets | Frisch **568 bestanden**, darunter **169 Notizenfälle** und **37 Providerprotokollfälle**; drei bestehende besondere Einstiege regulär ignoriert. |
 | Rustformat und Clippy | Frisch bestanden, gesperrte Abhängigkeiten und Warnungen als Fehler. |
-| Deutsch, tatsächliches lokales Modell | Frisch **141.1924193 s**; reguläre vollständig validierte Wiederholungen: **1**. |
-| Englisch, tatsächliches lokales Modell | Frisch **114.708746 s**; reguläre vollständig validierte Wiederholungen: **0**. |
-| Frontend | Frisch **416 Tests in 21 Dateien**, TypeScript, Produktionsbuild und Format bestanden. |
+| Deutsch, tatsächliches lokales Modell | Frisch **136.64991 s**; reguläre vollständig validierte Wiederholungen: **0**. |
+| Englisch, tatsächliches lokales Modell | Frisch **108.0559909 s**; reguläre vollständig validierte Wiederholungen: **0**. |
+| Frontend | **416 Tests in 21 Dateien**, TypeScript, Produktionsbuild und Format auf dem hier bytegleichen b8b1ed8-UI-Stand bestanden; nicht erneut ausgeführt. |
 | Projektprüfung | Nach dem letzten Dokumentedit vor Upload erneut verify.ps1 erforderlich: 47 PCM-, 35 Notizen-, 28 Vorlagen-, acht Agenten- und Monitorprüfungen. |
 
 Beide frischen Modellreferenzen auf dem unveränderten Korpus bestehen für positive
@@ -283,6 +315,21 @@ Working Set, Private Bytes und Grafikspeicher wurden hier nicht neu gemessen;
 Modell-Dateigröße ist keine RAM-Messung.
 
 ## Erhaltene Fehlläufe und Nachweisgrenzen
+
+Ein erster deutscher Modellversuch dieses Satzteil-Stands hielt im ersten
+Fenster mit der Meldung zum Antwortlimit an. Es entstand weder eine
+Ergebnisrevision noch ein Referenz-Erfolgsvermerk; der ursprünglich geschriebene
+Agendakontext blieb erhalten. Der englische Lauf wurde nach diesem Fehler
+noch nicht gestartet. Die eigene Modellinstanz war danach nicht mehr geladen.
+Die konkrete Phase, Finish-Reason und abgelehnte Antwort wurden vom Helfer
+nicht separat gespeichert. Dieselbe Fehlerklasse kann aus dem Transport oder
+aus einer Antwort mit weiteren Änderungen entstehen; ein tatsächlicher
+4096-Token-Verbrauch ist damit nicht bewiesen. Die weitergehende Ursache
+bleibt offen. Der Fehllauf bleibt erhalten und zählt nicht als bestanden.
+Das hier gemessene getrennte Referenzpaar wurde anschließend mit identischem
+Code, Modell, Korpus, Fristen und allen fünf Kriterien separat festgelegt.
+Keine Akzeptanzgrenze oder Wiederholungsregel wurde dafür erweitert.
+
 
 Ein deutscher Versuch auf dem Vorgängerstand 6170d4a hielt im zweiten Fenster wegen
 einer Zahl ohne passenden Originalbeleg in einer Impulsänderung an
@@ -380,6 +427,7 @@ Prozentprüfung auf 94b3ee6 sowie die nachgestellten Adverbien auf 9da4d6d. Eine
 Die folgende Runde auf e502c91 fand Mengenadverbien und zurückgenommene Beschlüsse.
 Die Runde auf c8ffeed fand verneinte Rücknahmen und den mehrteiligen Operator out of.
 Die folgende Runde auf 35a9bee fand beabsichtigte deutsche Entscheidungen.
+Die Runde auf b8b1ed8 fand eine falsche Hilfsverb-Zuordnung über Satzteilgrenzen.
 Diese Runden waren keine sauberen Abschlüsse.
 
 Die Projektionskorrektur wurde von CodeRabbit
@@ -427,7 +475,7 @@ sowie bestehende Speicher- und Verwaltungsschranken bleiben erhalten.
 
 Statische Produktprompts, statische Vertragsdateien, Belegbudget, Fristen und Transport,
 Aufnahme-/ASR-Logik, Modellreservierungen, Abhängigkeiten, Schutz-/Reviewerregeln,
-Version und vollständiger TEST_REPORT bleiben gegenüber 35a9bee unverändert.
+Version und vollständiger TEST_REPORT bleiben gegenüber b8b1ed8 unverändert.
 Die bereits enger gefassten dynamischen Änderungszweige für zurückgenommene
 Beschlüsse bleiben hier ebenfalls byteunverändert.
 Auch der deutsche und englische synthetische Referenztext bleiben hier byteunverändert.
