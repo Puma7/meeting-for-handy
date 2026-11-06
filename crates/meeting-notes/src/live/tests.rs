@@ -179,7 +179,7 @@ fn a_shared_run_keeps_newer_classic_results_when_workspace_is_present() {
         "de",
     )
     .unwrap();
-    let workspace = runner.folder.join("workspace-v9");
+    let workspace = runner.folder.join(crate::workspace::WORKSPACE_FOLDER);
     drop(crate::workspace::WorkspaceRunner::open(&workspace).unwrap());
     let pending = runner.pending(&[part("a", "system", 0, quote)]);
     runner

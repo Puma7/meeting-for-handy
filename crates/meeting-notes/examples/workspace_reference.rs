@@ -23,6 +23,12 @@ fn main() -> Result<()> {
         "Unknown fixture language"
     );
     let english = language == "en";
+    let scenario = args.next().unwrap_or_else(|| "baseline".into());
+    ensure!(
+        ["baseline", "quality"].contains(&scenario.as_str()),
+        "Unknown reference scenario"
+    );
+    let quality = scenario == "quality";
     let connection = Connection {
         endpoint,
         model,
@@ -50,7 +56,7 @@ fn main() -> Result<()> {
         }],
         ..Default::default()
     };
-    let mut runner = LiveRunner::start(
+    let mut runner = LiveRunner::start_workspace(
         &folder.join("live-notes"),
         "synthetic-workspace-reference",
         connection,
@@ -59,7 +65,20 @@ fn main() -> Result<()> {
     .with_workspace(context)?
     .with_residency(lease.clone())?;
     let start = Instant::now();
-    let lines = if english {
+    // Keep the original positive/nonbinding/typographic-apostrophe corpus intact.
+    // The additional quality corpus covers finite third-person assignments and
+    // indirect open questions without relying on ASR question punctuation.
+    let lines = if quality && english {
+        [
+            "Jana will collect the equipment by September twenty-third. Leon will bring the documents by September twenty-fourth. Mara will buy the refreshments by September twenty-fifth. I do not know who can approve the budget. Maybe we could renew the website in December. That is not a commitment.",
+            "We decide to start the pilot on November 12. The draft is approved. There is still no decision on the budget.",
+        ]
+    } else if quality {
+        [
+            "Jana holt die Technik bis zum dreiundzwanzigsten neunten ab. Leon bringt die Unterlagen bis zum vierundzwanzigsten neunten mit. Mara besorgt die Getränke bis zum fünfundzwanzigsten neunten. Ich weiß nicht, wer das Budget freigeben kann. Vielleicht könnten wir die Webseite im Dezember erneuern. Das ist keine Zusage.",
+            "Wir entscheiden uns für den Pilotstart am 12. November. Die Freigabe für den Entwurf ist erteilt. Zum Budget wurde noch keine neue Entscheidung getroffen.",
+        ]
+    } else if english {
         [
             "Robin says: I’ll email the report tomorrow. Who can approve the budget? There is no commitment on the budget. Maybe we could renew the website in December. That is not a commitment.",
             "We decide to start the pilot on November 12. The draft is approved. There is still no decision on the budget.",
@@ -107,10 +126,41 @@ fn main() -> Result<()> {
             "Positive binding task was not retained"
         );
         ensure!(
-            state.entities.iter().filter(|e| e.kind == "task").count() == 1,
+            state.entities.iter().filter(|e| e.kind == "task").count()
+                == if quality { 3 } else { 1 },
             "Synthetic missing pledge became an extra task"
         );
-        if english {
+        if quality {
+            ensure!(
+                state.entities.iter().any(|e| e.kind == "impulse"
+                    && e.evidence.iter().any(|v| v.quote.contains(if english {
+                        "I do not know who can approve the budget."
+                    } else {
+                        "Ich weiß nicht, wer das Budget freigeben kann."
+                    }))),
+                "The acknowledged indirect question was replaced by an unrelated impulse"
+            );
+            for name in ["Jana", "Leon", "Mara"] {
+                let task = state
+                    .entities
+                    .iter()
+                    .find(|e| e.kind == "task" && e.owner.as_deref() == Some(name))
+                    .context("A named assignment was not retained separately")?;
+                ensure!(task.due.is_some(), "Explicit calendar due missing");
+                ensure!(task.text.chars().count() <= 180, "Task is not compact");
+                ensure!(
+                    task.evidence
+                        .iter()
+                        .any(|e| e.quote.contains(task.due.as_deref().unwrap())),
+                    "Calendar due lost its literal evidence"
+                );
+            }
+            ensure!(
+                state.entities.iter().all(|e| e.text.chars().count() <= 180),
+                "Generated result exceeds compact title budget"
+            );
+        }
+        if english && !quality {
             ensure!(
                 state.entities.iter().any(|entity| entity.kind == "task"
                     && entity
@@ -217,7 +267,7 @@ fn main() -> Result<()> {
     std::fs::write(
         folder.join("reference-result.json"),
         serde_json::to_vec_pretty(
-            &serde_json::json!({"synthetic":true,"language":language,"validationRetries":total_retries,"promptVersion":meeting_notes::workspace::PROMPT_VERSION,"provider":"actual local","elapsedSeconds":start.elapsed().as_secs_f64(),"impulsesRetained":true,"manualImpulseAfterProtocolEdit":true,"positiveTask":true,"nonbindingNotTask":true,"stateBytes":before.len(),"reopenByteEqual":true,"hardwareCaptureTest":false}),
+            &serde_json::json!({"synthetic":true,"language":language,"scenario":scenario,"validationRetries":total_retries,"promptVersion":meeting_notes::workspace::PROMPT_VERSION,"provider":"actual local","elapsedSeconds":start.elapsed().as_secs_f64(),"impulsesRetained":true,"manualImpulseAfterProtocolEdit":true,"positiveTask":true,"nonbindingNotTask":true,"namedAssignmentsWithLiteralDates":quality,"stateBytes":before.len(),"reopenByteEqual":true,"hardwareCaptureTest":false}),
         )?,
     )?;
     Ok(())

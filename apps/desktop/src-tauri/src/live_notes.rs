@@ -492,9 +492,11 @@ impl LiveNotes {
             if saved.workspace.is_none() {
                 return Err("Dieser Meetingstand verwendet noch keine Kachelanbindung.".into());
             }
-            live_root(service, meeting_id)
-                .join(saved.run_id.ok_or("Laufkennung fehlt.")?)
-                .join("workspace-v9")
+            let run_folder =
+                live_root(service, meeting_id).join(saved.run_id.ok_or("Laufkennung fehlt.")?);
+            live::workspace_folder(&run_folder)
+                .map_err(|error| error.to_string())?
+                .ok_or("Kein gespeicherter Kachelstand.")?
         };
         if folder
             .parent()
@@ -641,7 +643,12 @@ impl LiveNotes {
             crate::local_models::provider_for_endpoint(&connection.endpoint),
         )?;
         let model_lease = model_work.as_ref().map(|work| work.lease()).transpose()?;
-        let runner = LiveRunner::start(
+        let start = if request.workspace.is_some() {
+            LiveRunner::start_workspace
+        } else {
+            LiveRunner::start
+        };
+        let runner = start(
             &live_root(service, &request.meeting_id),
             &request.meeting_id,
             connection,

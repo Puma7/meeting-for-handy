@@ -1,6 +1,6 @@
 import { useWorkspaceText, WorkspaceLanguage } from "./workspaceLocale.jsx";
 import { workspaceStorageKey } from "../workspaceStorage";
-import { Fragment, useEffect, useRef, useState } from "react";
+import { Fragment, useContext, useEffect, useRef, useState } from "react";
 import {
   Activity,
   ArrowLeft,
@@ -28,6 +28,11 @@ import SourceAudioPreview from "../SourceAudioPreview";
 import { IconButton, Modal, Panel, Status } from "./ui.jsx";
 import { usePanelSettings } from "./usePanelSettings.jsx";
 import { formatTime } from "./data.mjs";
+import {
+  eventAdditions,
+  formatMeetingDates,
+  formatMeetingDue,
+} from "./meetingDisplay.mjs";
 import {
   initialLiveState,
   loadLiveState,
@@ -1262,6 +1267,7 @@ function LivePanel({
   onExpand,
 }) {
   const t = useWorkspaceText();
+  const language = useContext(WorkspaceLanguage);
   const [view, patch] = usePanelSettings(ctx, panel, {
     query: "",
     ascending: true,
@@ -1289,6 +1295,7 @@ function LivePanel({
     workspace,
     panel === "impulses" ? "impulse" : null,
     view.query || "",
+    language,
   );
   const relevant =
     panel === "summary"
@@ -1360,6 +1367,8 @@ function LivePanel({
         part.startSample / 16000 < toSeconds,
     )
     .sort((a, b) => direction * (a.startSample - b.startSample));
+  const additions =
+    panel === "changes" ? eventAdditions(workspace?.events || []) : new Map();
   const timeline = (workspace?.events || [])
     .filter(
       (event) =>
@@ -1367,7 +1376,7 @@ function LivePanel({
           view.eventStatus === "all" ||
           event.status === view.eventStatus) &&
         (!needle ||
-          `${event.text} ${t(statusName[event.status]) || event.status}`
+          `${event.text} ${formatMeetingDates(event.text, language)} ${t(statusName[event.status]) || event.status}`
             .toLocaleLowerCase()
             .includes(needle)),
     )
@@ -1563,7 +1572,12 @@ function LivePanel({
                   <span>{formatTime(e.atMs / 1000)}</span>
                   <div>
                     <div className="result-title">
-                      <b>{e.text}</b>
+                      <b>
+                        {formatMeetingDates(
+                          additions.get(e.id)?.text || e.text,
+                          language,
+                        )}
+                      </b>
                       <Status
                         kind={
                           e.status === "completed" || e.status === "discussed"
@@ -1575,6 +1589,12 @@ function LivePanel({
                         {e.human ? t(" · manuell") : ""}
                       </Status>
                     </div>
+                    {additions.get(e.id)?.isAddition && (
+                      <details className="history-full-stand">
+                        <summary>{t("Vollständigen Stand anzeigen")}</summary>
+                        <p>{formatMeetingDates(e.text, language)}</p>
+                      </details>
+                    )}
                     {quote(e)}
                   </div>
                 </article>
@@ -1598,7 +1618,7 @@ function LivePanel({
                     key={item.id}
                   >
                     <div className="result-title">
-                      <b>{item.text}</b>
+                      <b>{formatMeetingDates(item.text, language)}</b>
                       <Status
                         kind={
                           ["completed", "discussed"].includes(item.status)
@@ -1615,7 +1635,9 @@ function LivePanel({
                     {item.kind === "task" && (
                       <small>
                         {t("Zuständig:")} {item.owner || t("nicht benannt")}{" "}
-                        {t("· Termin:")} {item.due || t("nicht benannt")}
+                        {t("· Termin:")}{" "}
+                        {formatMeetingDue(item.due, language) ||
+                          t("nicht benannt")}
                       </small>
                     )}
                     {quote(item)}

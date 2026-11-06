@@ -74,6 +74,100 @@ const SUBORDINATE_CLAUSE_MARKERS: &[&str] = &[
     "if", "unless",
 ];
 
+/// Admit finite named/pronominal assignments such as "Jana holt ... ab".
+/// Questions, proposals, past reports and a preceding planning predicate remain excluded.
+pub(super) fn present_assignment_quote(quote: &str) -> bool {
+    let lower = quote.to_lowercase();
+    let words = assertion_words(&lower);
+    let original = assertion_words(quote);
+    if words.len() != original.len()
+        || words.iter().any(|word| {
+            [
+                "wer",
+                "was",
+                "wann",
+                "wo",
+                "wie",
+                "warum",
+                "ob",
+                "wollte",
+                "wollten",
+                "würde",
+                "würden",
+                "könnte",
+                "könnten",
+                "sollte",
+                "sollten",
+                "möchte",
+                "möchten",
+                "vielleicht",
+                "eventuell",
+                "hypothetisch",
+                "gestern",
+                "damals",
+                "who",
+                "what",
+                "when",
+                "where",
+                "why",
+                "whether",
+                "would",
+                "could",
+                "should",
+                "might",
+                "maybe",
+                "perhaps",
+                "yesterday",
+                "wonder",
+            ]
+            .contains(word)
+        })
+    {
+        return false;
+    }
+    let finite = [
+        "holt",
+        "hole",
+        "holen",
+        "besorgt",
+        "besorge",
+        "besorgen",
+        "bringt",
+        "bringe",
+        "bringen",
+        "organisiert",
+        "organisiere",
+        "organisieren",
+        "collects",
+        "collect",
+        "brings",
+        "bring",
+        "buys",
+        "buy",
+        "organizes",
+        "organize",
+    ];
+    let future = [
+        "collect", "pick", "bring", "buy", "send", "write", "prepare", "organize", "organise",
+        "check",
+    ];
+    words.iter().enumerate().any(|(index, word)| {
+        let action = finite.contains(word)
+            || (*word == "will"
+                && words
+                    .get(index + 1)
+                    .is_some_and(|next| future.contains(next)));
+        if !action {
+            return false;
+        }
+        let start = words[..index]
+            .iter()
+            .rposition(|word| ["und", "and"].contains(word))
+            .map_or(0, |i| i + 1);
+        finite_subject_before(&words, &original, start, index)
+    })
+}
+
 /// Temporary screening tokens never change the literal source or its quote.
 fn assertion_words(text: &str) -> Vec<&str> {
     text.split(|c: char| !c.is_alphabetic() && c != '\'')

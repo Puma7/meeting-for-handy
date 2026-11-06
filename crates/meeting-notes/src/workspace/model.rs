@@ -112,6 +112,8 @@ pub struct Event {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct WorkspaceState {
     #[serde(skip)]
+    pub(crate) stored_prompt_version: Option<String>,
+    #[serde(skip)]
     pub(crate) context_updated_at: Option<chrono::DateTime<chrono::FixedOffset>>,
     #[serde(skip)]
     pub(crate) human_activity:
@@ -137,6 +139,12 @@ pub struct WorkspaceState {
     pub(crate) inherited_sources: Vec<crate::live::LiveSource>,
 }
 impl WorkspaceState {
+    /// Preserve the exact prompt generation of immutable historical revisions.
+    pub fn prompt_version(&self) -> &str {
+        self.stored_prompt_version
+            .as_deref()
+            .unwrap_or(super::PROMPT_VERSION)
+    }
     /// Rank durable human activity separately from the displayed time of the last model inference.
     pub(crate) fn activity_at(&self) -> Option<chrono::DateTime<chrono::FixedOffset>> {
         self.context_updated_at.max(
@@ -294,6 +302,7 @@ pub(crate) struct HumanContext {
 pub(crate) struct Budget {
     max_changes: usize,
     max_overview_refs: usize,
+    max_title_chars: usize,
 }
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -311,6 +320,14 @@ pub(crate) struct Request {
     output_budget: Budget,
 }
 impl Request {
+    /// Use compact generated titles in the production pipeline; literal evidence has its own budget.
+    pub fn compact_titles(&mut self) {
+        self.output_budget.max_title_chars = 180;
+    }
+    /// Read the app-owned title budget; it is never taken from a model response.
+    pub fn max_title_chars(&self) -> usize {
+        self.output_budget.max_title_chars
+    }
     /// Return the exact new-source identifiers the provider must examine in this window.
     pub fn required_source_ids(&self) -> &[String] {
         &self.window.required_source_ids
@@ -360,6 +377,7 @@ impl Request {
             output_budget: Budget {
                 max_changes: 20,
                 max_overview_refs: 8,
+                max_title_chars: 1600,
             },
         }
     }

@@ -3,6 +3,9 @@ import { createContext, useContext } from "react";
 export const WorkspaceLanguage = createContext("de");
 
 const english = {
+  "Vollständigen Stand anzeigen": "Show complete version",
+  "Diese Auswertung verwendet ältere Prompts und bleibt unverändert lesbar. Eine neue lokale Auswertung starten, um mit der aktuellen Fassung weiterzuarbeiten.":
+    "This analysis uses older prompts and remains readable. Start a new local analysis to continue with the current version.",
   Beleg: "Evidence",
   "Die Änderung wurde nicht übernommen. Bitte aktuellen Auswertungsstand abwarten und erneut versuchen.":
     "The change was not applied. Wait for the current analysis state and try again.",

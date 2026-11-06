@@ -20,7 +20,10 @@ use std::{
 };
 
 pub const CONTRACT_VERSION: &str = "meeting-update-1";
-pub const PROMPT_VERSION: &str = "handymeeting-workspace-9";
+pub const PROMPT_VERSION: &str = "handymeeting-workspace-10";
+pub const LEGACY_PROMPT_VERSION: &str = "handymeeting-workspace-9";
+pub const WORKSPACE_FOLDER: &str = "workspace-v10";
+pub const LEGACY_WORKSPACE_FOLDER: &str = "workspace-v9";
 /// Read shared-input chronology without treating model output or confirmations as new releases.
 pub(crate) fn shared_context_timestamp(
     folder: &Path,
@@ -559,6 +562,7 @@ impl WorkspaceRunner {
                 );
                 req.purpose = phase.into();
                 req.language = language.into();
+                req.compact_titles();
                 let input = serde_json::to_string(&req)?;
                 if input.chars().count() > MAX_REQUEST_CHARS {
                     if ["facts", "reconcile"].contains(&phase) && seeds {
@@ -575,6 +579,8 @@ impl WorkspaceRunner {
                 }
                 let mut schema: serde_json::Value =
                     serde_json::from_str(include_str!("response.schema.json"))?;
+                schema["properties"]["changes"]["items"]["properties"]["text"]["maxLength"] =
+                    req.max_title_chars().into();
                 let evidence_options = req.transcript_sources.iter().filter_map(|source| {
                     let quotes = quote_options(&source.text);
                     (!quotes.is_empty()).then(|| serde_json::json!({
@@ -701,23 +707,16 @@ impl WorkspaceRunner {
                     // A small model can otherwise satisfy this phase by touching the agenda
                     // and omit the already acknowledged open question. Give that question
                     // one constrained request before the ordinary agenda/status reconciliation.
-                    let needs_question = !next.entities.iter().any(|entity| {
-                        entity.kind == "impulse" && !next.context_excluded_ids.contains(&entity.id)
-                    }) && req.transcript_sources.iter().any(|source| {
-                        req.required_source_ids().contains(&source.id)
-                            && source.text.contains('?')
-                            && next.entities.iter().any(|entity| {
-                                !next.context_excluded_ids.contains(&entity.id)
-                                    && ["fact", "agenda"].contains(&entity.kind.as_str())
-                                    && entity.evidence.iter().any(|evidence| {
-                                        evidence.source_id == source.id
-                                            && validate::missing_pledge(&evidence.quote)
-                                    })
-                            })
-                    });
+                    let needs_question = validate::initial_question_needed(&next, &req);
                     if needs_question {
                         variants.clear();
                         schema["properties"]["changes"]["minItems"] = 1.into();
+                        let witnesses = validate::initial_question_evidence(&next, &req).into_iter().map(|evidence| serde_json::json!({
+                            "type":"object", "additionalProperties":false, "required":["sourceId","quote"],
+                            "properties":{"sourceId":{"type":"string","enum":[evidence.source_id]},"quote":{"type":"string","enum":[evidence.quote]}}
+                        })).collect::<Vec<_>>();
+                        new_impulse["properties"]["evidence"]["items"] =
+                            serde_json::json!({"anyOf":witnesses});
                     }
                     variants.push(new_impulse);
                     schema["properties"]["changes"]["items"] =
@@ -912,6 +911,9 @@ pub fn update_context(
     folder: &Path,
     context: &WorkspaceContext,
 ) -> Result<(WorkspaceContext, WorkspaceState)> {
+    let state = store::read(folder)?;
+    ensure!(state.revision == 0 || state.prompt_version() == PROMPT_VERSION,
+        "Diese Auswertung verwendet ältere Prompts und bleibt unverändert lesbar. Eine neue lokale Auswertung starten, um mit der aktuellen Fassung weiterzuarbeiten.");
     context_store::update(folder, context)
 }
 

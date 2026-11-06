@@ -133,7 +133,10 @@ pub(crate) fn load(folder: &Path) -> Result<(File, WorkspaceState)> {
     let lock = open_lock(folder, "writer.lock")?;
     lock.try_lock_exclusive()
         .context("Eine andere Auswertung verwendet diesen Meetingstand.")?;
-    Ok((lock, read(folder)?))
+    let state = read(folder)?;
+    ensure!(state.revision == 0 || state.prompt_version() == super::PROMPT_VERSION,
+        "Ältere Meetingfassungen werden nur gelesen. Eine neue Auswertung mit den aktuellen Prompts starten.");
+    Ok((lock, state))
 }
 /// Reconstruct workspace state from contiguous immutable revisions; never repair damaged input silently.
 pub(crate) fn read(folder: &Path) -> Result<WorkspaceState> {
@@ -155,9 +158,12 @@ pub(crate) fn read(folder: &Path) -> Result<WorkspaceState> {
         let delta: Delta = serde_json::from_slice(&bytes)
             .context("Meetingstand ist beschädigt; Originale bleiben unverändert.")?;
         ensure!(
-            delta.schema == super::PROMPT_VERSION && delta.revision == state.revision + 1,
+            [super::PROMPT_VERSION, super::LEGACY_PROMPT_VERSION].contains(&delta.schema.as_str())
+                && (state.revision == 0 || state.prompt_version() == delta.schema)
+                && delta.revision == state.revision + 1,
             "Meetingfassungen sind unvollständig oder inkompatibel."
         );
+        state.stored_prompt_version = Some(delta.schema.clone());
         for e in delta.entities {
             if let Some(old) = state.entities.iter_mut().find(|old| old.id == e.id) {
                 *old = e;

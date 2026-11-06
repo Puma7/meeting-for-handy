@@ -104,6 +104,33 @@ impl LiveRunner {
         connection: Connection,
         language: &str,
     ) -> Result<Self> {
+        Self::start_versioned(root, meeting_id, connection, language, LIVE_PROMPT_VERSION)
+    }
+
+    /// Start/resume only the matching workspace prompt generation; older model runs remain immutable.
+    pub fn start_workspace(
+        root: &Path,
+        meeting_id: &str,
+        connection: Connection,
+        language: &str,
+    ) -> Result<Self> {
+        Self::start_versioned(
+            root,
+            meeting_id,
+            connection,
+            language,
+            crate::workspace::PROMPT_VERSION,
+        )
+    }
+
+    /// Bind durable run identity before any request or checkpoint is created.
+    fn start_versioned(
+        root: &Path,
+        meeting_id: &str,
+        connection: Connection,
+        language: &str,
+        prompt_version: &str,
+    ) -> Result<Self> {
         anyhow::ensure!(
             ["de", "en"].contains(&language),
             "Unbekannte Sprache der Live-Zusammenfassung."
@@ -116,7 +143,7 @@ impl LiveRunner {
             model: connection.model.clone(),
             mode: connection.mode.clone(),
             endpoint: client.base.to_string(),
-            prompt_version: LIVE_PROMPT_VERSION.to_string(),
+            prompt_version: prompt_version.to_string(),
             language: language.to_string(),
         };
         let (runs, damaged_runs) = list_runs(root)?;
@@ -149,15 +176,43 @@ impl LiveRunner {
             self.run().mode == "local",
             "Automatische Kachelauswertung benötigt ein lokales Modell."
         );
-        let root = self.folder.parent().context("Live root missing")?;
-        let shared = read_latest_shared_context(root, &self.state.run.meeting_id)?;
+        let root = self
+            .folder
+            .parent()
+            .context("Live root missing")?
+            .to_path_buf();
+        // Backward-compatible callers may have opened a classic run first. Never
+        // attach different prompts to that identity or its existing checkpoints.
+        if self.state.run.prompt_version != crate::workspace::PROMPT_VERSION {
+            let mut identity = self.state.run.clone();
+            identity.id = uuid::Uuid::new_v4().simple().to_string();
+            identity.created_at = chrono::Utc::now().to_rfc3339();
+            identity.prompt_version = crate::workspace::PROMPT_VERSION.into();
+            let (runs, damaged) = list_runs(&root)?;
+            self.damaged_runs = damaged;
+            self.state = match runs.into_iter().find(|loaded| {
+                let run = &loaded.run;
+                run.meeting_id == identity.meeting_id
+                    && run.model == identity.model
+                    && run.mode == identity.mode
+                    && run.endpoint == identity.endpoint
+                    && run.prompt_version == identity.prompt_version
+                    && run.language == identity.language
+            }) {
+                Some(state) => state,
+                None => store::create_run(&root, &identity)?,
+            };
+            self.folder = root.join(&self.state.run.id);
+        }
+        let shared = read_latest_shared_context(&root, &self.state.run.meeting_id)?;
         let previous = read_latest_workspace_excluding(
-            root,
+            &root,
             &self.state.run.meeting_id,
             Some(self.state.run.id.as_str()),
         )?;
-        let mut workspace =
-            crate::workspace::WorkspaceRunner::open(&self.folder.join("workspace-v9"))?;
+        let mut workspace = crate::workspace::WorkspaceRunner::open(
+            &self.folder.join(crate::workspace::WORKSPACE_FOLDER),
+        )?;
         let initial =
             shared
                 .as_ref()
@@ -547,7 +602,7 @@ pub fn read_latest(root: &Path, meeting_id: &str) -> Result<Option<LiveView>> {
         let folder = root.join(&run.run.id);
         let mut view = LiveView::from_run(run, 0);
         let classic_activity = timestamp(view.updated_at.as_deref());
-        match read_workspace_if_present(&folder.join("workspace-v9")) {
+        match read_run_workspace(&folder) {
             Ok(Some(state))
                 if view.updated_at.is_none() || state.activity_at() >= classic_activity =>
             {
@@ -584,6 +639,41 @@ fn read_workspace_if_present(folder: &Path) -> Result<Option<crate::workspace::W
     }
 }
 
+/// Recognize only the two explicit application-owned generations; never follow links.
+fn workspace_folders(run_folder: &Path) -> Result<Vec<std::path::PathBuf>> {
+    let mut folders = Vec::new();
+    for name in [
+        crate::workspace::WORKSPACE_FOLDER,
+        crate::workspace::LEGACY_WORKSPACE_FOLDER,
+    ] {
+        let path = run_folder.join(name);
+        match std::fs::symlink_metadata(&path) {
+            Ok(metadata) => {
+                anyhow::ensure!(
+                    metadata.is_dir() && !crate::service::is_linked(&metadata),
+                    "Gespeicherter Meetingstand ist kein sicherer Ordner."
+                );
+                folders.push(path);
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error.into()),
+        }
+    }
+    Ok(folders)
+}
+
+/// Resolve the current saved generation; a damaged newer folder never falls back to the older one.
+pub fn workspace_folder(run_folder: &Path) -> Result<Option<std::path::PathBuf>> {
+    Ok(workspace_folders(run_folder)?.into_iter().next())
+}
+
+/// Read only the preferred generation while retaining older folders byte-for-byte.
+fn read_run_workspace(run_folder: &Path) -> Result<Option<crate::workspace::WorkspaceState>> {
+    workspace_folder(run_folder)?
+        .map(|folder| crate::workspace::read_state(&folder))
+        .transpose()
+}
+
 /// Selects the latest readable workspace by activity without letting a classic run hide it.
 pub fn read_latest_workspace(root: &Path, meeting_id: &str) -> Result<Option<LiveView>> {
     read_latest_workspace_excluding(root, meeting_id, None)
@@ -606,25 +696,27 @@ fn read_latest_shared_context(
         .into_iter()
         .filter(|run| run.run.meeting_id == meeting_id)
     {
-        let folder = root.join(&run.run.id).join("workspace-v9");
-        let Some(state) = read_workspace_if_present(&folder).context("Gespeicherter Meetingkontext ist nicht sicher lesbar. Vorhandene Dateien bleiben erhalten.")? else {
+        for folder in workspace_folders(&root.join(&run.run.id))? {
+            let Some(state) = read_workspace_if_present(&folder).context("Gespeicherter Meetingkontext ist nicht sicher lesbar. Vorhandene Dateien bleiben erhalten.")? else {
             continue;
         };
-        if state.context.revision == 0 {
-            continue;
-        }
-        let Some(at) = crate::workspace::shared_context_timestamp(&folder, &state.context)? else {
-            undated.push(state.context);
-            continue;
-        };
-        if let Some((prior, context)) = &newest {
-            if at == *prior {
-                anyhow::ensure!(context.agenda == state.context.agenda && context.shared_notes == state.context.shared_notes,
-                    "Gleichzeitige gespeicherte Meetingkontexte widersprechen sich. Gewünschten Stand ausdrücklich prüfen.");
+            if state.context.revision == 0 {
+                continue;
             }
-        }
-        if newest.as_ref().is_none_or(|(prior, _)| at > *prior) {
-            newest = Some((at, state.context));
+            let Some(at) = crate::workspace::shared_context_timestamp(&folder, &state.context)?
+            else {
+                undated.push(state.context);
+                continue;
+            };
+            if let Some((prior, context)) = &newest {
+                if at == *prior {
+                    anyhow::ensure!(context.agenda == state.context.agenda && context.shared_notes == state.context.shared_notes,
+                    "Gleichzeitige gespeicherte Meetingkontexte widersprechen sich. Gewünschten Stand ausdrücklich prüfen.");
+                }
+            }
+            if newest.as_ref().is_none_or(|(prior, _)| at > *prior) {
+                newest = Some((at, state.context));
+            }
         }
     }
     let authority = newest
@@ -665,10 +757,11 @@ fn confirm_damaged_runs_have_no_workspace(
             metadata.is_dir() && !crate::service::is_linked(&metadata),
             "{error}"
         );
-        match std::fs::symlink_metadata(entry.path().join("workspace-v9")) {
-            Err(failure) if failure.kind() == std::io::ErrorKind::NotFound => confirmed += 1,
-            _ => anyhow::bail!(error),
-        }
+        anyhow::ensure!(
+            workspace_folders(&entry.path()).context(error)?.is_empty(),
+            "{error}"
+        );
+        confirmed += 1;
     }
     anyhow::ensure!(confirmed == damaged, "{error}");
     Ok(())
@@ -689,7 +782,7 @@ fn read_latest_workspace_excluding(
             continue;
         }
         let folder = root.join(&run.run.id);
-        let state = match read_workspace_if_present(&folder.join("workspace-v9")) {
+        let state = match read_run_workspace(&folder) {
             Ok(Some(state)) => state,
             Ok(None) => continue,
             Err(_) => {
@@ -767,7 +860,7 @@ pub struct LiveView {
 impl LiveView {
     /// Rebuild all classic lists from the authoritative workspace, including manual status changes.
     pub fn attach_workspace(&mut self, state: crate::workspace::WorkspaceState) {
-        self.prompt_version = crate::workspace::PROMPT_VERSION.into();
+        self.prompt_version = state.prompt_version().to_owned();
         self.updated_at = state.updated_at.clone();
         self.windows = state.revision as usize;
         self.summarized_sections = state.originals.len();

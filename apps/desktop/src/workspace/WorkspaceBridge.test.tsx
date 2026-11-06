@@ -18,6 +18,122 @@ import { workspaceText } from "./shell/workspaceLocale.jsx";
 import MeetingView from "../views/MeetingView";
 import { de, en, extraDe, extraEn } from "../i18n";
 
+it("shows a factual addition without repeating the previous complete paragraph", async () => {
+  const f = fixture();
+  const first =
+    "Die Technik wird geliefert. Die Unterlagen werden vorbereitet.";
+  const addition = "Uhrzeit und Kosten sind noch offen.";
+  const events = [
+    {
+      id: "v_first",
+      entityId: "e_fact",
+      revision: 1,
+      atMs: 30000,
+      text: first,
+      status: "unclear",
+      human: false,
+      evidence: [],
+    },
+    {
+      id: "v_addition",
+      entityId: "e_fact",
+      revision: 2,
+      atMs: 60000,
+      text: `${first} ${addition}`,
+      status: "unclear",
+      human: false,
+      evidence: [],
+    },
+  ];
+  (f.status.view.workspace.events as unknown[]).push(...events);
+  const before = JSON.stringify(events);
+  const mounted = render(
+    <LiveWorkspace adapter={f.adapter} meeting={f.meeting} onBack={() => {}} />,
+  );
+  try {
+    fireEvent.click(await screen.findByRole("tab", { name: "Verlauf" }));
+    await waitFor(() =>
+      expect(mounted.container.querySelectorAll(".change-row").length).toBe(2),
+    );
+    const rows = mounted.container.querySelectorAll(".change-row");
+    expect(rows[0].querySelector("b")!.textContent).toBe(first);
+    expect(rows[1].querySelector("b")!.textContent).toBe(addition);
+    const fullVersion = rows[1].querySelector("details")!;
+    expect(fullVersion.querySelector("p")!.textContent).toBe(
+      `${first} ${addition}`,
+    );
+    expect(fullVersion.querySelector("summary")!.textContent).toBe(
+      "Vollständigen Stand anzeigen",
+    );
+    fireEvent.change(
+      screen.getByRole("textbox", {
+        name: "Änderungen im Gespräch durchsuchen",
+      }),
+      { target: { value: "Uhrzeit" } },
+    );
+    expect(mounted.container.querySelectorAll(".change-row")).toHaveLength(1);
+    expect(mounted.container.querySelector(".change-row b")!.textContent).toBe(
+      addition,
+    );
+    expect(JSON.stringify(events)).toBe(before);
+  } finally {
+    mounted.unmount();
+  }
+});
+
+it.each(["de", "en"] as const)(
+  "formats a clearly spoken date in %s without changing its quote",
+  async (language) => {
+    const f = fixture();
+    const original =
+      "Jana holt die Technik bis zum dreiundzwanzigsten neunten ab.";
+    const task = {
+      ...f.status.view.workspace.entities[0],
+      id: "e_collection",
+      kind: "task",
+      text: "Technik abholen",
+      owner: "Jana",
+      due: "dreiundzwanzigsten neunten",
+      attention: "normal",
+      evidence: [{ sourceId: "s_one", quote: original }],
+    };
+    f.status.view.workspace.originals[0].text = original;
+    (f.status.view.workspace.entities as unknown[]).push(task);
+    const mounted = render(
+      <LiveWorkspace
+        adapter={f.adapter}
+        meeting={f.meeting}
+        language={language}
+        onBack={() => {}}
+      />,
+    );
+    try {
+      fireEvent.click(await screen.findByRole("tab", { name: "Details" }));
+      await screen.findByText("Technik abholen");
+      const row = [...mounted.container.querySelectorAll(".impulse-row")].find(
+        (row) => row.textContent?.includes("Technik abholen"),
+      )!;
+      expect(row.querySelector("small")!.textContent).toContain(
+        language === "de" ? "23.09." : "09/23",
+      );
+      expect(
+        within(row as HTMLElement).getByRole("button", {
+          name: `„${original}“`,
+        }),
+      ).toBeTruthy();
+      fireEvent.change(
+        mounted.container.querySelector(".compact-search input")!,
+        { target: { value: language === "de" ? "23.09." : "09/23" } },
+      );
+      expect(screen.getByText("Technik abholen")).toBeTruthy();
+      expect(task.due).toBe("dreiundzwanzigsten neunten");
+      expect(task.evidence[0].quote).toBe(original);
+    } finally {
+      mounted.unmount();
+    }
+  },
+);
+
 it.each(["de", "en"] as const)(
   "keeps the classic displayed meeting identity outside closed setup (%s)",
   (locale) => {

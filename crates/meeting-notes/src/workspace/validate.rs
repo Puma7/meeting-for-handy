@@ -38,13 +38,27 @@ pub(crate) fn apply(
     let mut targets = HashSet::new();
     let mut events = vec![];
     let mut acknowledged_open_topic = false;
+    let required_question =
+        request.purpose == "reconcile" && initial_question_needed(state, request);
+    let required_question_evidence = if required_question {
+        initial_question_evidence(state, request)
+    } else {
+        Vec::new()
+    };
     for mut c in response.changes {
+        if let Some(text) = c.text.as_mut() {
+            *text = text.split_whitespace().collect::<Vec<_>>().join(" ");
+            ensure!(
+                text.chars().count() <= request.max_title_chars(),
+                "Ein Ergebnistitel ist zu lang; einen einzelnen knappen Punkt formulieren."
+            );
+        }
         acknowledged_open_topic |= request.purpose == "reconcile"
             && c.kind == "agenda"
             && ["touched", "unclear"].contains(&c.status.as_str())
             && c.evidence
                 .iter()
-                .any(|evidence| missing_pledge(&evidence.quote));
+                .any(|evidence| explicit_open_topic(&evidence.quote));
         let phase_allowed = match request.purpose.as_str() {
             "tasks" => c.kind == "task",
             "facts" => ["fact", "decision"].contains(&c.kind.as_str()),
@@ -371,7 +385,17 @@ pub(crate) fn apply(
     }
     // Enforce the existing prompt contract for a gap the model itself acknowledged.
     // A retained human-reviewed impulse satisfies it; never auto-reopen or invent a question.
-    ensure!(!acknowledged_open_topic || next.entities.iter().any(|entity|
+    ensure!(
+        !required_question
+            || next.entities.iter().any(|entity| entity.kind == "impulse"
+                && !next.context_excluded_ids.contains(&entity.id)
+                && entity
+                    .evidence
+                    .iter()
+                    .any(|evidence| required_question_evidence.contains(evidence))),
+        "Der Frageimpuls muss das ausdrücklich offene Thema mit dessen Originalbeleg aufgreifen."
+    );
+    ensure!(!(acknowledged_open_topic || required_question) || next.entities.iter().any(|entity|
         entity.kind == "impulse" && !next.context_excluded_ids.contains(&entity.id)),
         "Ein als offen belegter Agendapunkt benötigt den geforderten Frageimpuls; die Antwort wird vollständig verworfen.");
     next.events.extend(events.clone());
@@ -557,6 +581,69 @@ pub(super) fn missing_pledge(quote: &str) -> bool {
     .iter()
     .any(|s| text.contains(s))
 }
+
+/// Detect explicitly unresolved topics even when ASR supplies no question mark.
+pub(super) fn explicit_open_topic(quote: &str) -> bool {
+    let text = quote.to_lowercase().replace('’', "'");
+    missing_pledge(quote)
+        || [
+            "ich weiß nicht",
+            "ich weiß auch nicht",
+            "ich weiss nicht",
+            "wir wissen nicht",
+            "ist unklar",
+            "sind unklar",
+            "noch zu klären",
+            "noch geklärt werden",
+            "i don't know",
+            "we don't know",
+            "i do not know",
+            "we do not know",
+            "not sure",
+            "is unclear",
+            "are unclear",
+            "still to clarify",
+        ]
+        .iter()
+        .any(|marker| text.contains(marker))
+}
+
+/// An acknowledged fresh open topic requires an initial question, independently of ASR punctuation.
+pub(super) fn initial_question_needed(state: &WorkspaceState, request: &Request) -> bool {
+    !initial_question_evidence(state, request).is_empty()
+}
+
+/// Bind the initial question to the literal open-topic witnesses, not an unrelated suggestion.
+pub(super) fn initial_question_evidence(
+    state: &WorkspaceState,
+    request: &Request,
+) -> Vec<crate::Evidence> {
+    if state
+        .entities
+        .iter()
+        .any(|entity| entity.kind == "impulse" && !state.context_excluded_ids.contains(&entity.id))
+    {
+        return Vec::new();
+    }
+    let mut witnesses = Vec::new();
+    for entity in state.entities.iter().filter(|entity| {
+        !state.context_excluded_ids.contains(&entity.id)
+            && ["fact", "agenda"].contains(&entity.kind.as_str())
+    }) {
+        for evidence in &entity.evidence {
+            if explicit_open_topic(&evidence.quote)
+                && request.required_source_ids().contains(&evidence.source_id)
+                && request.transcript_sources.iter().any(|source| {
+                    source.id == evidence.source_id && source.text.contains(&evidence.quote)
+                })
+                && !witnesses.contains(evidence)
+            {
+                witnesses.push(evidence.clone());
+            }
+        }
+    }
+    witnesses
+}
 /// Missing promises outside the checked subject still block new work; agenda screening is separate.
 fn task_missing_pledge(quote: &str) -> bool {
     missing_pledge(&crate::validation::commitment_assertion_text(quote))
@@ -572,5 +659,6 @@ pub(super) fn task_quote_allowed(quote: &str) -> bool {
         && (crate::validation::task_pledge_end(&text, crate::validation::GERMAN_TASK_PLEDGES)
             .is_some()
             || crate::validation::task_pledge_end(&text, crate::validation::ENGLISH_TASK_PLEDGES)
-                .is_some())
+                .is_some()
+            || super::assertions::present_assignment_quote(quote))
 }

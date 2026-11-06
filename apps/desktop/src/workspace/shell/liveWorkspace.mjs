@@ -1,4 +1,5 @@
 // Explicit renderer/native DTOs. Private notes and preparation never enter this object.
+import { formatMeetingDates, formatMeetingDue } from "./meetingDisplay.mjs";
 /** Create an empty renderer draft; private fields remain separate from shared provider context. */
 export function initialLiveState() {
   return {
@@ -128,7 +129,12 @@ export function workspaceStatusText(status, language = "de") {
   );
 }
 /** Filter active entities by kind and search while preserving native stable identities. */
-export function stableVisibleItems(workspace, kind, query = "") {
+export function stableVisibleItems(
+  workspace,
+  kind,
+  query = "",
+  language = "de",
+) {
   const needle = query.trim().toLocaleLowerCase();
   return (workspace?.entities || [])
     .filter((e) => !(workspace?.contextExcludedIds || []).includes(e.id))
@@ -136,7 +142,9 @@ export function stableVisibleItems(workspace, kind, query = "") {
       (e) =>
         (!kind || e.kind === kind) &&
         (!needle ||
-          `${e.text} ${e.status}`.toLocaleLowerCase().includes(needle)),
+          `${e.text} ${formatMeetingDates(e.text, language)} ${e.owner || ""} ${e.due || ""} ${formatMeetingDue(e.due, language) || ""} ${e.status}`
+            .toLocaleLowerCase()
+            .includes(needle)),
     );
 }
 

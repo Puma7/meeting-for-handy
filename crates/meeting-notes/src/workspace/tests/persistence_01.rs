@@ -1,6 +1,184 @@
 use super::*;
 
 #[test]
+fn unrelated_impulse_cannot_replace_an_acknowledged_open_question() {
+    let (mut state, mut req, mut answer) = setup();
+    let question = "Ich weiß nicht, wer das Budget freigeben kann.";
+    let suggestion = "Vielleicht könnten wir die Webseite erneuern.";
+    req.transcript_sources[0].text = format!("{question} {suggestion}");
+    req.purpose = "facts".into();
+    answer["changes"][0]["kind"] = json!("fact");
+    answer["changes"][0]["status"] = json!("unclear");
+    answer["changes"][0]["text"] = json!("Budgetfreigabe unklar");
+    answer["changes"][0]["owner"] = json!(null);
+    answer["changes"][0]["due"] = json!(null);
+    answer["changes"][0]["evidence"][0]["quote"] = json!(question);
+    validate::apply(&mut state, &req, &answer.to_string()).unwrap();
+    let before = serde_json::to_vec(&state).unwrap();
+    let mut reconcile = Request::new(
+        "r_question".into(),
+        &Default::default(),
+        &state,
+        state.entities.clone(),
+        &req.transcript_sources,
+        req.transcript_sources.clone(),
+    );
+    reconcile.purpose = "reconcile".into();
+    answer["requestId"] = json!("r_question");
+    answer["overviewRefs"] = json!([]);
+    answer["changes"][0]["kind"] = json!("impulse");
+    answer["changes"][0]["status"] = json!("open");
+    answer["changes"][0]["text"] = json!("Webseite erneuern");
+    answer["changes"][0]["evidence"][0]["quote"] = json!(suggestion);
+    assert!(validate::apply(&mut state, &reconcile, &answer.to_string()).is_err());
+    assert_eq!(serde_json::to_vec(&state).unwrap(), before);
+    answer["changes"][0]["text"] = json!("Wer kann das Budget freigeben?");
+    answer["changes"][0]["evidence"][0]["quote"] = json!(question);
+    validate::apply(&mut state, &reconcile, &answer.to_string()).unwrap();
+    assert!(state
+        .entities
+        .iter()
+        .any(|e| e.kind == "impulse" && e.evidence.iter().any(|v| v.quote == question)));
+}
+
+#[test]
+fn named_collection_assignments_reach_the_task_phase_without_accepting_questions() {
+    for quote in [
+        "Jana holt die Technik ab.",
+        "Mara besorgt die Getränke bis Freitag.",
+        "Der Leon bringt die Unterlagen zum Termin mit.",
+    ] {
+        assert!(validate::task_quote_allowed(quote), "{quote}");
+    }
+    for quote in [
+        "Wer holt die Technik ab",
+        "Vielleicht holt Jana die Technik ab.",
+        "Jana holt die Technik nicht ab.",
+        "Jana könnte die Technik abholen.",
+        "Ich weiß nicht, wer die Technik abholt.",
+        "Wenn die Freigabe kommt, holt Jana die Technik ab.",
+    ] {
+        assert!(!validate::task_quote_allowed(quote), "{quote}");
+    }
+}
+
+#[test]
+fn legacy_prompt_stays_readable_and_cannot_be_mixed_with_new_checkpoints() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut original = WorkspaceState {
+        revision: 1,
+        context: WorkspaceContext {
+            revision: 1,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    original.context.agenda.push(Agenda {
+        id: "e_topic".into(),
+        revision: 1,
+        text: "Erhaltenes menschliches Thema".into(),
+    });
+    let delta = store::Delta::between(&WorkspaceState::default(), &original, vec![], vec![]);
+    store::append(dir.path(), &delta).unwrap();
+    let path = dir.path().join("revision-00000001.json");
+    let mut legacy: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    legacy["schema"] = json!(LEGACY_PROMPT_VERSION);
+    let bytes = serde_json::to_vec(&legacy).unwrap();
+    std::fs::write(&path, &bytes).unwrap();
+    let old = read_state(dir.path()).unwrap();
+    assert_eq!(old.prompt_version(), LEGACY_PROMPT_VERSION);
+    assert_eq!(old.context.agenda, original.context.agenda);
+    assert!(WorkspaceRunner::open(dir.path()).is_err());
+    assert!(update_context(
+        dir.path(),
+        &WorkspaceContext {
+            revision: 1,
+            ..Default::default()
+        }
+    )
+    .is_err());
+    assert_eq!(std::fs::read(&path).unwrap(), bytes);
+    let mut mixed = old.clone();
+    mixed.revision = 2;
+    store::append(
+        dir.path(),
+        &store::Delta::between(&old, &mixed, vec![], vec![]),
+    )
+    .unwrap();
+    assert!(read_state(dir.path()).is_err());
+    assert_eq!(std::fs::read(&path).unwrap(), bytes);
+}
+
+#[test]
+fn compact_model_titles_keep_literal_quotes_and_reject_oversized_generated_text() {
+    let (mut state, mut request, mut answer) = setup();
+    request.compact_titles();
+    answer["changes"][0]["text"] = json!("Prüfung   durchführen\nund dokumentieren");
+    validate::apply(&mut state, &request, &answer.to_string()).unwrap();
+    assert_eq!(
+        state.entities[0].text,
+        "Prüfung durchführen und dokumentieren"
+    );
+    let (mut untouched, mut request, mut answer) = setup();
+    request.compact_titles();
+    answer["changes"][0]["text"] = json!("x".repeat(181));
+    assert!(validate::apply(&mut untouched, &request, &answer.to_string()).is_err());
+    assert!(untouched.entities.is_empty());
+}
+
+#[test]
+fn new_prompt_generation_has_its_own_run_and_preserves_legacy_identity() {
+    use crate::live::LiveRunner;
+    let root = tempfile::tempdir().unwrap();
+    let connection = || crate::Connection {
+        endpoint: "http://127.0.0.1:1/v1/".into(),
+        model: "synthetic".into(),
+        mode: "local".into(),
+        cloud_consent: false,
+        api_key: String::new(),
+    };
+    let legacy = LiveRunner::start(root.path(), "meeting-legacy", connection(), "de").unwrap();
+    let old_id = legacy.run().id.clone();
+    drop(legacy);
+    let old_folder = root.path().join(&old_id).join(LEGACY_WORKSPACE_FOLDER);
+    std::fs::create_dir(&old_folder).unwrap();
+    let state = WorkspaceState {
+        revision: 1,
+        ..Default::default()
+    };
+    let delta = store::Delta::between(&WorkspaceState::default(), &state, vec![], vec![]);
+    let mut value = serde_json::to_value(delta).unwrap();
+    value["schema"] = json!(LEGACY_PROMPT_VERSION);
+    let old_revision = old_folder.join("revision-00000001.json");
+    let old_bytes = serde_json::to_vec(&value).unwrap();
+    std::fs::write(&old_revision, &old_bytes).unwrap();
+    let metadata = root.path().join(&old_id).join("run.json");
+    let old_metadata = std::fs::read(&metadata).unwrap();
+    let current = LiveRunner::start_workspace(root.path(), "meeting-legacy", connection(), "de")
+        .unwrap()
+        .with_workspace(Default::default())
+        .unwrap();
+    let id = current.run().id.clone();
+    assert_ne!(id, old_id);
+    assert_eq!(current.run().prompt_version, PROMPT_VERSION);
+    assert!(root.path().join(&id).join(WORKSPACE_FOLDER).is_dir());
+    assert_eq!(std::fs::read(&old_revision).unwrap(), old_bytes);
+    assert_eq!(std::fs::read(&metadata).unwrap(), old_metadata);
+    assert_eq!(
+        read_state(&old_folder).unwrap().prompt_version(),
+        LEGACY_PROMPT_VERSION
+    );
+    drop(current);
+    let resumed = LiveRunner::start_workspace(root.path(), "meeting-legacy", connection(), "de")
+        .unwrap()
+        .with_workspace(Default::default())
+        .unwrap();
+    assert_eq!(resumed.run().id, id);
+    assert_eq!(std::fs::read(&old_revision).unwrap(), old_bytes);
+}
+
+#[test]
 fn durable_deltas_reopen_with_same_ids_and_no_text_duplication() {
     let dir = tempfile::tempdir().unwrap();
     let (lock, old) = store::load(dir.path()).unwrap();
