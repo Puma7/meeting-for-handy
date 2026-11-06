@@ -2,19 +2,53 @@
 
 Stand: 6. November 2026. Version **1.1.0-beta.1**, unverändert.
 
-Diese Nacharbeit verwendet dieselbe Satzteilabgrenzung für Beschlüsse und
-Erledigungen. Ein vorgeschlagener Abschluss oder ein beabsichtigter perfekter
-Infinitiv schließt keine Aufgabe. Gültige Abschlüsse, Fortschrittspräpositionen,
-Dezimal-/Versionspunkte und affirmative englische Adverbien bleiben zulässig.
+Diese Nacharbeit erhält Hilfsverbbezüge über Einschübe und Aufzählungskommas,
+ohne sie über eigenständige oder abhängige Satzteile zu übertragen. Auch eine
+Rücknahme braucht eine tatsächlich ausgesagte Handlung statt einer Planung.
+Ein vorgeschlagener Abschluss oder ein beabsichtigter perfekter Infinitiv
+schließt keine Aufgabe. Fortschrittspräpositionen, Dezimal-/Versionspunkte
+und affirmative englische Adverbien bleiben zulässig.
 Alle bisherigen UI-, Rücknahme-, Mengen- und Nichtstun-Korrekturen bleiben erhalten. Beide Referenzsprachen
 enthalten unverändert eine ausdrückliche Budgetfrage, wenn der Test einen Gesprächsimpuls verlangt.
 Die ursprünglichen Zusagen und unverbindlichen Aussagen bleiben erhalten.
 
-Die [bisherige ausführliche Fassung](https://github.com/Puma7/meeting-for-handy/blob/1ad859bfa1ff213cf54be7b7c5fd352feb5af11b/docs/validation/pr41-review-followup-20261104.md)
+Die [bisherige ausführliche Fassung](https://github.com/Puma7/meeting-for-handy/blob/9ddcdcefd648e6a09449a5abc5d2870fded9c260/docs/validation/pr41-review-followup-20261104.md)
 und deren Detailhistorie bleiben unveränderlich in Git.
 Private Rohbelege, alte Checkpoints und fehlgeschlagene Läufe bleiben erhalten.
 Der vollständige TEST_REPORT bleibt gegenüber dem PR-Basisstand byteunverändert.
 Dieser bereinigte Vermerk veröffentlicht keine Nutzermeetings oder privaten Sitzungsdaten.
+
+## Einschübe und tatsächliche Rücknahmen
+
+Die [erste Codex-Runde auf 9ddcdce](https://github.com/Puma7/meeting-for-handy/pull/41#pullrequestreview-5795564618)
+war nicht sauber. Die produktiven dauerhaften Regressionen reproduzierten
+drei zu Unrecht abgewiesene echte Abschlüsse mit Einschüben oder Aufzählungen,
+zwei gleichartige echte Beschlüsse und zwei falsch akzeptierte englische
+Entscheidungsabsichten. Kommas zwischen koordinierten Prädikaten und kurzen
+Einschüben erhalten jetzt das gemeinsame Hilfsverb; eine folgende finite
+oder abhängige Aussage bleibt eine getrennte Zuordnung. Negative Inhalte
+eines tatsächlich gefassten Beschlusses bleiben von dessen Verneinung getrennt.
+
+Der zweite gültige Befund betraf Rücknahmen: Sechs bloß geplante oder
+vorgeschlagene Aussagen wurden jeweils für eine Aufgabe und einen Beschluss
+angenommen. „We plan to cancel the report.“ und eine vorgeschlagene künftige
+Rücknahme entfernen jetzt keinen weiterhin gültigen Eintrag. Auch dieser
+Pfad verlangt ein tatsächliches finites oder vergangenes Rücknahmeprädikat
+im selben Satzteil. Perfekte Infinitive einer Absicht reichen nicht aus.
+Echte direkte Rücknahmen, Vergangenheit, affirmative Kontraktionen und
+Einschübe bleiben zulässig. Die bestehende ausdrückliche Nicht-mehr-benötigt-
+Form bleibt erhalten; Verneinungen und bloße Rückkehr zu einem Thema bleiben gesperrt.
+
+22 neue wörtliche Tabellenfälle ergeben 32 zusätzliche Szenarien in drei
+bestehenden Regressionen. Alle alten Fälle, Originalzitate, Checkpointbytes,
+mehrfachen Wiederöffnungen und Ablehnungen ohne neue Revision bestehen.
+Ein unveröffentlichter Zwischenstand wies einen echten englischen Satz mit
+„as agreed“ ab; dieser Fehlversuch bleibt erhalten und die finale Prüfung
+unterscheidet den Einschub vom Beschlussprädikat. Ein erster eingeschränkter
+Testversuch scheiterte beim Dateizugriff und zählt nicht als funktionaler Fehlernachweis.
+Die vollständige native Endprüfung erfolgte mit den nötigen lokalen Dateizugriffen.
+Dies bleibt eine konservative Belegprüfung, kein vollständiger Grammatik-
+oder Bedeutungsbeweis. Die Zahl der Testfunktionen wurde nicht erhöht.
 
 ## Erledigungsbehauptung statt vorgeschlagenem Abschluss
 
@@ -328,8 +362,8 @@ alte Fehlläufe werden dadurch nicht als bestanden umgedeutet.
 | --- | --- |
 | Rust-Workspace, alle Targets | Frisch **568 bestanden**, darunter **169 Notizenfälle** und **37 Providerprotokollfälle**; drei bestehende besondere Einstiege regulär ignoriert. |
 | Rustformat und Clippy | Frisch bestanden, gesperrte Abhängigkeiten und Warnungen als Fehler. |
-| Deutsch, tatsächliches lokales Modell | Frisch **143.5995061 s**; reguläre vollständig validierte Wiederholungen: **0**. |
-| Englisch, tatsächliches lokales Modell | Frisch **117.6821639 s**; reguläre vollständig validierte Wiederholungen: **0**. |
+| Deutsch, tatsächliches lokales Modell | Frisch **148.4528104 s**; reguläre vollständig validierte Wiederholungen: **0**. |
+| Englisch, tatsächliches lokales Modell | Frisch **122.4330133 s**; reguläre vollständig validierte Wiederholungen: **0**. |
 | Frontend | **416 Tests in 21 Dateien**, TypeScript, Produktionsbuild und Format auf dem hier bytegleichen b8b1ed8-UI-Stand bestanden; nicht erneut ausgeführt. |
 | Projektprüfung | Nach dem letzten Dokumentedit vor Upload erneut verify.ps1 erforderlich: 47 PCM-, 35 Notizen-, 28 Vorlagen-, acht Agenten- und Monitorprüfungen. |
 
@@ -466,6 +500,7 @@ Die Runde auf c8ffeed fand verneinte Rücknahmen und den mehrteiligen Operator o
 Die folgende Runde auf 35a9bee fand beabsichtigte deutsche Entscheidungen.
 Die Runde auf b8b1ed8 fand eine falsche Hilfsverb-Zuordnung über Satzteilgrenzen.
 Die Runde auf 1ad859b fand dieselbe Fehlerklasse im Erledigungspfad.
+Die folgende Runde auf 9ddcdce fand Einschübe und bloß beabsichtigte Rücknahmen.
 Diese Runden waren keine sauberen Abschlüsse.
 
 Die Projektionskorrektur wurde von CodeRabbit
@@ -513,7 +548,7 @@ sowie bestehende Speicher- und Verwaltungsschranken bleiben erhalten.
 
 Statische Produktprompts, statische Vertragsdateien, Belegbudget, Fristen und Transport,
 Aufnahme-/ASR-Logik, Modellreservierungen, Abhängigkeiten, Schutz-/Reviewerregeln,
-Version und vollständiger TEST_REPORT bleiben gegenüber 1ad859b unverändert.
+Version und vollständiger TEST_REPORT bleiben gegenüber 9ddcdce unverändert.
 Die bereits enger gefassten dynamischen Änderungszweige für zurückgenommene
 Beschlüsse bleiben hier ebenfalls byteunverändert.
 Auch der deutsche und englische synthetische Referenztext bleiben hier byteunverändert.

@@ -4,6 +4,22 @@ use super::*;
 fn perfect_decisions_validate_literal_sources_and_durable_reopen() {
     let mut mismatches = Vec::new();
     for (quote, allowed) in [
+        (
+            "Wir haben den Pilotstart, wie besprochen, beschlossen.",
+            true,
+        ),
+        (
+            "Wir haben beraten, abgestimmt und den Pilotstart beschlossen.",
+            true,
+        ),
+        ("Wir haben beschlossen, nichts mehr zu ändern.", true),
+        (
+            "Wir haben etwas vorgeschlagen, der Pilotstart wird morgen beschlossen.",
+            false,
+        ),
+        ("We propose that we decide to start the pilot.", false),
+        ("We want the plan to be agreed to.", false),
+        ("Agreed to start the pilot.", true),
         ("Wir haben vor den Pilotstart beschlossen zu haben.", false),
         ("Wir haben zu Punkt 1 den Pilotstart beschlossen.", true),
         ("We have decided to release on Friday.", true),
@@ -157,6 +173,20 @@ fn perfect_decisions_validate_literal_sources_and_durable_reopen() {
 #[test]
 fn contracted_perfect_completion_retains_literal_quotes_after_reopen() {
     let cases = [
+        ("Ich habe den Bericht, wie besprochen, verschickt.", true),
+        (
+            "Ich habe den Bericht geprüft, korrigiert und verschickt.",
+            true,
+        ),
+        ("Ich habe den Bericht, nach der Prüfung, verschickt.", true),
+        (
+            "Ich habe den Bericht geprüft, er wird morgen verschickt.",
+            false,
+        ),
+        (
+            "Ich habe vorgeschlagen, der Bericht wird nächste Woche verschickt.",
+            false,
+        ),
         (
             "Ich habe vorgeschlagen, dass der Bericht abgeschlossen wird.",
             false,
@@ -1115,6 +1145,12 @@ fn recorded_decisions_reject_negation_and_uncertainty_without_publishing_state()
 #[test]
 fn withdrawal_requires_explicit_current_intent_and_rejection_preserves_both_kinds() {
     let invalid = [
+        "We plan to cancel the report.",
+        "We have planned to cancel the report.",
+        "Ich habe vorgeschlagen, dass der Beschluss zurückgenommen wird.",
+        "Wir müssen den Beschluss widerrufen.",
+        "We plan to have cancelled the report.",
+        "Wir haben vor den Beschluss widerrufen zu haben.",
         "Wir nehmen den Beschluss nicht zurück.",
         "Wir widerrufen das nicht.",
         "Darauf kommen wir morgen zurück.",
@@ -1147,6 +1183,10 @@ fn withdrawal_requires_explicit_current_intent_and_rejection_preserves_both_kind
         "We revoked none of the decisions.",
     ];
     let valid = [
+        "We’ve withdrawn the decision.",
+        "I've cancelled the report.",
+        "Wir haben den Beschluss, wie besprochen, zurückgenommen.",
+        "We have, as agreed, cancelled the report.",
         "Wir nehmen den Beschluss zurück.",
         "Wir ziehen die Zusage zurück.",
         "Der Beschluss wurde zurückgenommen.",

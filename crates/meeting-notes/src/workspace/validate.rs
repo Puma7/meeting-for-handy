@@ -579,15 +579,34 @@ const ADDITIONAL_UNCERTAIN_TERMINAL_WORDS: &[&str] = &[
     "whether",
 ];
 
-/// Partition temporary word tokens at clause punctuation, preserving decimal/version separators.
+const SUBORDINATE_CLAUSE_MARKERS: &[&str] = &[
+    "dass", "ob", "weil", "damit", "wenn", "falls", "sofern", "that", "whether", "because", "when",
+    "if", "unless",
+];
+
+/// Temporary screening tokens never change the literal source or its quote.
+fn assertion_words(text: &str) -> Vec<&str> {
+    text.split(|c: char| !c.is_alphabetic() && c != '\'')
+        .flat_map(|token| match token {
+            "i've" => vec!["i", "have"],
+            "we've" => vec!["we", "have"],
+            _ => token.split('\'').filter(|word| !word.is_empty()).collect(),
+        })
+        .collect()
+}
+
+/// Preserve list/parenthetical commas and decimal/version separators, while
+/// isolating a following finite or dependent clause from an earlier auxiliary.
 fn assertion_clauses(text: &str) -> Vec<std::ops::Range<usize>> {
+    let boundaries: Vec<_> = text
+        .char_indices()
+        .filter(|(_, ch)| ['.', '!', '?', ';', ',', ':', '\n'].contains(ch))
+        .chain(std::iter::once((text.len(), '\n')))
+        .collect();
     let mut result = Vec::new();
     let mut segment = 0;
     let mut first_word = 0;
-    for (at, ch) in text
-        .char_indices()
-        .chain(std::iter::once((text.len(), '\n')))
-    {
+    for (boundary, &(at, ch)) in boundaries.iter().enumerate() {
         let numeric = ['.', ','].contains(&ch)
             && at
                 .checked_sub(1)
@@ -597,7 +616,49 @@ fn assertion_clauses(text: &str) -> Vec<std::ops::Range<usize>> {
                 .as_bytes()
                 .get(at + 1)
                 .is_some_and(|c| c.is_ascii_digit());
-        if ['.', '!', '?', ';', ',', ':', '\n'].contains(&ch) && !numeric {
+        if numeric {
+            continue;
+        }
+        if ch == ',' {
+            let next_end = boundaries.get(boundary + 1).map_or(text.len(), |v| v.0);
+            let next = assertion_words(&text[at + 1..next_end]);
+            let mut previous_words = text[segment..at]
+                .rsplit(|c: char| !c.is_alphabetic())
+                .filter(|word| !word.is_empty());
+            let previous = previous_words.next();
+            let parenthetical = previous_words
+                .next()
+                .is_some_and(|word| ["as", "wie"].contains(&word));
+            let decision_complement = !parenthetical
+                && previous.is_some_and(|word| {
+                    [
+                        "beschlossen",
+                        "entschieden",
+                        "beschließen",
+                        "entscheiden",
+                        "decided",
+                        "agreed",
+                    ]
+                    .contains(&word)
+                });
+            let dependent = next
+                .first()
+                .is_some_and(|word| SUBORDINATE_CLAUSE_MARKERS.contains(word));
+            let finite = next.iter().enumerate().any(|(index, word)| {
+                [
+                    "habe", "haben", "hat", "hatte", "hatten", "ist", "sind", "war", "waren",
+                    "wird", "werden", "wurde", "wurden", "muss", "müssen", "kann", "können", "am",
+                    "is", "are", "was", "were", "have", "has", "had", "will", "would", "can",
+                    "could", "should", "must",
+                ]
+                .contains(word)
+                    && !(index > 0 && ["to", "zu"].contains(&next[index - 1]))
+            });
+            if !decision_complement && !dependent && !finite {
+                continue;
+            }
+        }
+        {
             let count = text[segment..at]
                 .split(|c: char| !c.is_alphabetic())
                 .filter(|word| !word.is_empty())
@@ -614,7 +675,7 @@ fn assertion_clauses(text: &str) -> Vec<std::ops::Range<usize>> {
 fn subordinate_start(words: &[&str], start: usize, predicate: usize) -> Option<usize> {
     words[start..predicate]
         .iter()
-        .rposition(|word| ["dass", "ob", "weil", "damit", "wenn", "falls", "sofern"].contains(word))
+        .rposition(|word| SUBORDINATE_CLAUSE_MARKERS.contains(word))
         .map(|at| start + at + 1)
 }
 
@@ -635,19 +696,42 @@ fn perfect_infinitive_after(words: &[&str], predicate: usize, clause_end: usize)
         && ["haben", "sein"].contains(&words[predicate + 2])
 }
 
+fn infinitive_auxiliary_before(words: &[&str], start: usize, predicate: usize) -> bool {
+    (start..predicate).any(|index| {
+        if !["to", "zu"].contains(&words[index]) {
+            return false;
+        }
+        let mut auxiliary = index + 1;
+        while auxiliary < predicate && AFFIRMATIVE_PREDICATE_ADVERBS.contains(&words[auxiliary]) {
+            auxiliary += 1;
+        }
+        auxiliary < predicate && ["have", "be", "haben", "sein"].contains(&words[auxiliary])
+    })
+}
+
+fn finite_subject_before(words: &[&str], start: usize, predicate: usize) -> bool {
+    let mut subject = predicate;
+    while subject > start
+        && (AFFIRMATIVE_PREDICATE_ADVERBS.contains(&words[subject - 1])
+            || ["hereby", "hiermit", "jedenfalls"].contains(&words[subject - 1]))
+    {
+        subject -= 1;
+    }
+    subject > start
+        && [
+            "i", "we", "you", "they", "he", "she", "it", "ich", "wir", "du", "ihr", "er", "sie",
+            "es",
+        ]
+        .contains(&words[subject - 1])
+}
+
 /// Require an affirmative decision assertion. Its infinitive/that-clause may
 /// itself be negative ("decided not to ..."); that does not negate the decision.
 pub(super) fn recorded_decision_quote_allowed(quote: &str) -> bool {
     // Expand only the complete affirmative contraction, never haven/not forms.
     // These temporary tokens do not rewrite the literal source or its quote.
     let lower = quote.to_lowercase().replace('’', "'");
-    let words: Vec<_> = lower
-        .split(|c: char| !c.is_alphabetic() && c != '\'')
-        .flat_map(|token| match token {
-            "we've" => vec!["we", "have"],
-            _ => token.split('\'').filter(|w| !w.is_empty()).collect(),
-        })
-        .collect();
+    let words = assertion_words(&lower);
     // Bind German auxiliaries to the same clause, including ASR without commas.
     // Token counts also match the temporary two-token expansion of "we've".
     let clauses = assertion_clauses(&lower);
@@ -686,14 +770,23 @@ pub(super) fn recorded_decision_quote_allowed(quote: &str) -> bool {
     });
     let english = words.iter().enumerate().find_map(|(index, word)| {
         let next = words.get(index + 1).copied();
+        let clause = clauses.iter().find(|range| range.contains(&index))?;
+        let subordinate = subordinate_start(&words, clause.start, index);
+        let start = subordinate.unwrap_or(clause.start);
         if *word == "agreed" && matches!(next, Some("to" | "not")) {
-            return Some(index + 1);
+            let asserted = (subordinate.is_none() && index == start)
+                || finite_subject_before(&words, start, index)
+                || words[start..index]
+                    .iter()
+                    .any(|word| ["have", "has", "had", "is", "are", "was", "were"].contains(word));
+            return (asserted && !infinitive_auxiliary_before(&words, start, index))
+                .then_some(index + 1);
         }
         if *word != "we" {
             return None;
         }
         if matches!(next, Some("decide" | "decided")) {
-            return Some(index + 2);
+            return (next == Some("decided") || subordinate.is_none()).then_some(index + 2);
         }
         if !matches!(next, Some("have" | "had")) {
             return None;
@@ -769,7 +862,7 @@ pub(super) fn recorded_decision_quote_allowed(quote: &str) -> bool {
 /// Require explicit withdrawal wording in one literal quote, not a negation,
 /// conditional, question, unrelated return or a phrase assembled across sources.
 pub(super) fn withdrawal_quote_allowed(quote: &str) -> bool {
-    let lower = quote.to_lowercase();
+    let lower = quote.to_lowercase().replace('’', "'");
     let tokenize = |s: &str| {
         s.split(|c: char| !c.is_alphabetic())
             .filter(|w| !w.is_empty())
@@ -801,51 +894,50 @@ pub(super) fn withdrawal_quote_allowed(quote: &str) -> bool {
                     && p[p.len() - 1] == "mehr"
             });
     }
-    if words.iter().any(|word| {
-        [
-            "zurückgezogen",
-            "zurückgenommen",
-            "widerrufe",
-            "widerrufen",
-            "widerruft",
-            "widerrief",
-            "widerriefen",
-            "storniere",
-            "stornieren",
-            "storniert",
-            "stornierte",
-            "stornierten",
-            "withdraw",
-            "withdraws",
-            "withdrawn",
-            "withdrew",
-            "cancel",
-            "cancels",
-            "cancelled",
-            "canceled",
-            "revoke",
-            "revokes",
-            "revoked",
-            "rescind",
-            "rescinds",
-            "rescinded",
-        ]
-        .contains(&word.as_str())
-    }) {
-        return true;
-    }
-    clauses.iter().any(|p| {
-        p.last().is_some_and(|w| w == "zurück")
-            && p.iter().enumerate().any(|(index, word)| {
-                ["ziehen", "ziehe", "zieht", "nehmen", "nehme", "nimmt"].contains(&word.as_str())
-                    && !p[index + 1..].iter().any(|w| {
-                        [
-                            "kommen", "komme", "kommt", "gehen", "gehe", "geht", "kehre", "kehren",
-                            "kehrt",
-                        ]
-                        .contains(&w.as_str())
+    let words = assertion_words(&lower);
+    let clauses = assertion_clauses(&lower);
+    words.iter().enumerate().any(|(index, word)| {
+        let Some(clause) = clauses.iter().find(|range| range.contains(&index)) else {
+            return false;
+        };
+        let subordinate = subordinate_start(&words, clause.start, index);
+        let start = subordinate.unwrap_or(clause.start);
+        if perfect_infinitive_after(&words, index, clause.end)
+            || infinitive_auxiliary_before(&words, start, index)
+        {
+            return false;
+        }
+        let finite = subordinate.is_none() && finite_subject_before(&words, start, index);
+        let auxiliary = |v: &str| {
+            [
+                "habe", "haben", "hat", "hatte", "hatten", "ist", "sind", "war", "waren", "wurde",
+                "wurden", "have", "has", "had", "am", "is", "are", "was", "were",
+            ]
+            .contains(&v)
+        };
+        let past = words[start..index].iter().any(|v| auxiliary(v))
+            || (subordinate.is_some() && index + 2 == clause.end && auxiliary(words[index + 1]));
+        match *word {
+            "withdraw" | "withdraws" | "cancel" | "cancels" | "revoke" | "revokes" | "rescind"
+            | "rescinds" | "widerrufe" | "widerruft" | "widerrief" | "widerriefen"
+            | "storniere" | "stornieren" | "stornierte" | "stornierten" => finite,
+            "withdrawn" | "withdrew" | "cancelled" | "canceled" | "revoked" | "rescinded"
+            | "widerrufen" | "storniert" => finite || past,
+            "zurückgezogen" | "zurückgenommen" => past,
+            "ziehen" | "ziehe" | "zieht" | "nehmen" | "nehme" | "nimmt" => {
+                finite
+                    && words.get(clause.end.saturating_sub(1)) == Some(&"zurück")
+                    && !words[index + 1..clause.end].iter().any(|v| {
+                        SUBORDINATE_CLAUSE_MARKERS.contains(v)
+                            || [
+                                "kommen", "komme", "kommt", "gehen", "gehe", "geht", "kehre",
+                                "kehren", "kehrt",
+                            ]
+                            .contains(v)
                     })
-            })
+            }
+            _ => false,
+        }
     })
 }
 
