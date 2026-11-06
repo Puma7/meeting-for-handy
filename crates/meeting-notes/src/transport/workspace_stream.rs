@@ -287,6 +287,7 @@ mod idle_tests {
                 Err(error) => panic!("{error}"),
             };
             socket.set_nonblocking(false).unwrap();
+            socket.set_nodelay(true).unwrap();
             socket
                 .set_read_timeout(Some(Duration::from_secs(2)))
                 .unwrap();
@@ -441,18 +442,46 @@ mod idle_tests {
         listener.set_nonblocking(true).unwrap();
         let port = listener.local_addr().unwrap().port();
         let stopped = AtomicBool::new(false);
+        let client = TextClient::new(&connection(port)).unwrap();
+        let control = AnalysisControl::default();
+        let received = control.clone();
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let sent_events = Arc::clone(&events);
+        let (ready, started) = mpsc::channel();
         let server = thread::spawn(move || {
+            ready.send(()).unwrap();
             let (mut socket, body) = request(&listener, &stopped).unwrap();
             assert_eq!(body["stream"], true);
+            assert!(socket.nodelay().unwrap());
             socket.write_all(b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nConnection: close\r\n\r\n").unwrap();
-            for _ in 0..8 {
+            let began = std::time::Instant::now();
+            for index in 0..8 {
                 socket.write_all(b": progress\n").unwrap();
+                let expected = (index + 1) * b": progress\n".len() as u64;
+                let deadline = std::time::Instant::now() + Duration::from_secs(3);
+                while received.response_bytes() < expected
+                    && !received.is_cancelled()
+                    && std::time::Instant::now() < deadline
+                {
+                    thread::sleep(Duration::from_millis(2));
+                }
+                sent_events.lock().unwrap().push((
+                    index,
+                    began.elapsed().as_millis(),
+                    received.response_bytes(),
+                ));
+                if received.is_cancelled() {
+                    return;
+                }
+                assert!(
+                    received.response_bytes() >= expected,
+                    "Fixture progress frame was not received"
+                );
                 thread::sleep(Duration::from_millis(60));
             }
             socket.write_all(b"data: {\"choices\":[{\"delta\":{\"content\":\"{}\"},\"finish_reason\":\"stop\"}]}\n").unwrap();
         });
-        let client = TextClient::new(&connection(port)).unwrap();
-        let control = AnalysisControl::default();
+        started.recv_timeout(Duration::from_secs(3)).unwrap();
         let before = std::time::Instant::now();
         let result = client.workspace_json_with_idle(
             "synthetic",
@@ -461,9 +490,19 @@ mod idle_tests {
             &control,
             Duration::from_millis(200),
         );
+        if result.is_err() {
+            control.cancel();
+        }
         server.join().unwrap();
-        assert_eq!(result.unwrap(), "{}");
+        assert_eq!(
+            result.unwrap_or_else(|error| panic!(
+                "{error}; synthetic received-frame timings: {:?}",
+                events.lock().unwrap()
+            )),
+            "{}"
+        );
         assert!(before.elapsed() > Duration::from_millis(400));
         assert!(control.response_bytes() > 0);
+        assert_eq!(events.lock().unwrap().len(), 8);
     }
 }

@@ -5,7 +5,37 @@ Diese Notiz enthält bereinigte Nachweise mit synthetischen Eingaben, darunter
 ausdrücklich echte lokale Modellinferenz. Der ganze TEST_REPORT bleibt zur
 PR-Basis byteunverändert. Private Rohbelege und Nutzermeetings werden nicht veröffentlicht.
 
-## Aktuelle Korrekturen
+## Aktuelle Testfixture-Korrektur
+
+Die echten Intel- und ARM-Mac-Läufe auf 2118eb1 scheiterten in der neuen positiven
+Streamingfixture: jeweils 173 Notizenfälle bestanden, einer erhielt ein Zeitlimit.
+Beide Läufe bleiben erhalten. Das ist kein nachgewiesener Fehler der produktiven
+300-Sekunden-Grenze. Die alte Fixture protokollierte keine Empfängerzeitpunkte;
+die genaue frühere Kernel-/Schedulingursache ist rückwirkend nicht bewiesen.
+
+Winzige write_all-Aufrufe im 60-ms-Abstand belegen allein keinen entsprechenden
+Byteempfang. Die Fixture aktiviert deshalb TCP_NODELAY auf ihren eigenen
+angenommenen Sockets, wartet vor dem Messbeginn auf den bereiten Server und
+bestätigt jedes der acht Fortschrittspakete über den tatsächlichen
+AnalysisControl-Bytezähler. Bei einem neuen Fehler stehen synthetische
+Empfangszähler/Zeitpunkte für die Diagnose bereit. Es gibt keine fremden Prozesse
+oder echten Modelldienste in dieser Fixture.
+
+Die produktiven **300 Sekunden**, internen **200 Millisekunden**, acht
+**60-ms-Abstände**, die ursprünglichen Assertions einschließlich **mehr als
+400 ms Gesamtdauer** und sämtliche bisherigen Testfristen bleiben erhalten.
+Acht bestätigte Empfangsschritte sind zusätzlich verlangt. Es wird kein alter
+Head erneut ausgeführt, um seinen Fehllauf zu ersetzen. Ein neuer erfolgreicher
+Intel-/ARM-Lauf auf diesem Stand bleibt erforderlich.
+
+**Nur cfg(test)-Code und diese Notiz ändern sich.** Der gesamte produktiv
+kompilierte Präfix von workspace_stream.rs ist zu 2118eb1 tatsächlich
+raw-bytegleich; andere produktive Quellen, Oberfläche, Prompts, Abhängigkeiten
+und ganzer TEST_REPORT ebenfalls unverändert. Damit sind die unten genannten
+Browser- und Modellreferenzen ausdrücklich erhaltene Nachweise von 2118eb1,
+keine neu ausgeführten Läufe dieses Teststands.
+
+## Erhaltene produktive Korrekturen
 
 Die [vollständige CodeRabbit-Runde auf fb03a76](https://github.com/Puma7/meeting-for-handy/pull/41#pullrequestreview-5804343551)
 fand zwei weitere gültige Fehler. Die vorherigen sieben Korrekturen für
@@ -53,18 +83,18 @@ schließen. Vorher blieb die Höhe bei 500 statt 350 Pixeln. Danach werden auch
 die neuen Observer-Ziele und ihre Bereinigung bestätigt. Private Notizen werden
 weiterhin nicht als freigegebener Kontext übertragen.
 
-## Frisch ausgeführte Prüfungen
+## Frische native Prüfung und erhaltene Nachweise
 
 | Prüfung | Ergebnis dieses Stands |
 | --- | --- |
 | Rust Workspace/All-Targets unter Windows | **576 bestanden**, darunter **172 Notizen- und 40 Providerfälle**; drei bestehende besondere Einstiege regulär ignoriert. |
-| Frontend | **435 Tests in 21 Dateien** bestanden. |
-| TypeScript und Produktionsbuild | Bestanden, vorhandene gesperrte Pakete. |
+| Frontend | **435 Tests in 21 Dateien** auf 2118eb1 bestanden; alle Frontendbytes unverändert, nicht erneut ausgeführt. |
+| TypeScript und Produktionsbuild | Auf 2118eb1 bestanden, unveränderte Frontend-/Paketbytes; nicht erneut ausgeführt. |
 | Rust-/Frontendformat und Clippy | Bestanden, Warnungen als Fehler. |
 | Projektprüfung | verify.ps1: 47 PCM-, 35 Notizen-, 28 Vorlagen-, acht Agenten- und Monitorprüfungen. |
-| Browser | Vier tatsächliche Vorherfehler, danach alle vier Konfigurationen bestanden. |
-| Echtes kleines lokales Modell, Deutsch | **124.1641588 s**, **0** reguläre Validierungswiederholung(en), alle fünf Kriterien bestanden. |
-| Echtes kleines lokales Modell, Englisch | **110.2912457 s**, **0** reguläre Validierungswiederholung(en), alle fünf Kriterien bestanden. |
+| Browser | Vier tatsächliche Vorherfehler und vier bestandene Konfigurationen auf 2118eb1; unveränderte UI-Quellen, nicht erneut ausgeführt. |
+| Erhaltene echte lokale Referenz von 2118eb1, Deutsch | **124.1641588 s**, **0** reguläre Validierungswiederholung(en), alle fünf Kriterien bestanden. |
+| Erhaltene echte lokale Referenz von 2118eb1, Englisch | **110.2912457 s**, **0** reguläre Validierungswiederholung(en), alle fünf Kriterien bestanden. |
 
 Browser: vorhandenes Playwright **1.57.0**, Edge **156.0.4314.58**,
 Deutsch hell/Englisch dunkel, **390/1280 Pixel**, echte WorkspaceBridge-/Notes-
@@ -95,26 +125,23 @@ englische Referenzpatch 93335102 bleibt Bestandteil des PR.
 
 ## Reviewreichweite und Zuordnung
 
-Alle 16 ursprünglichen Sourcery- und 85 älteren CodeRabbit-Threads wurden
-individuell menschlich beantwortet und geschlossen. Die beiden aktuellen
-Hinweise werden nach Veröffentlichung dieser geprüften Korrekturen beantwortet.
-Auf fb03a76 bestanden zwei frische CODE-Runden und alle **22 aktuellen CI-Checks:
-16 erfolgreich, sechs regulär übersprungen**. Dessen tatsächliche generierte
-CPU-Sprachprüfungen: Linux **10.991787566 s**, Mac ARM **15.798759417 s**, Intel
-**32.676829649 s**; eigener Worker-Neustart und Audio-/Journalerhaltung bestanden.
-Linux-Quellen waren private virtuelle Geräte, ausdrücklich
-**passed-with-startup-gaps / completeCapture=false**. Das ist kein lückenloser
-physischer Aufnahmenachweis und wird dem neuen Stand nicht als frisch zugeordnet.
+Alle 16 ursprünglichen Sourcery-, 87 bisherigen CodeRabbit- und 73 bisherigen
+Codex-Threads wurden individuell menschlich beantwortet und geschlossen. Die
+beiden letzten CodeRabbit-Abhilfen wurden am veröffentlichten 2118eb1 bestätigt.
+Dessen erste frische CODE-Runde war sauber; eine zweite wurde wegen des
+tatsächlichen Mac-CI-Fehlers nicht mehr auf diesem alten Stand angefordert.
+Der neue Teststand braucht zwei eigene saubere CODE-Runden, eine vollständige
+CodeRabbit-Runde und seine eigene grüne aktuelle CI. Die Mac-Fehlläufe werden
+ausdrücklich nicht als erfolgreich ausgegeben.
 
-Die vollständige CodeRabbit-Runde auf fb03a76 war wegen der beiden Hinweise
-**nicht sauber**, Risiko Low. Alle **100** ausgewählten Dateien entsprachen dem
-vollständig paginierten tatsächlichen **102-Dateien-Diff** mit den unveränderten
-zwei Lockdateifiltern; keine unverfügbaren Änderungen. Dokumentation **82.71 %**
-bei unveränderter **80-%-Grenze**. Sämtliche Risiko-, Architektur-, Zusatz-,
-Nitpick-, Outside-diff- und operativen Texte wurden gelesen. Der neue Stand
-benötigt eigene saubere Reviews und eigene aktuelle grüne CI. Alte/null
-Security-Flags sind kein aktueller formaler Securitynachweis. Keine neue
-Filterausnahme, Kauf oder abgeschwächte Prüfregel.
+Die letzte vollständige CodeRabbit-Runde auf fb03a76 war wegen der beiden
+in 2118eb1 korrigierten Hinweise nicht sauber, Risiko Low. Alle 100 ausgewählten
+Dateien entsprachen dem vollständig paginierten tatsächlichen 102-Dateien-Diff
+mit den unveränderten zwei Lockdateifiltern; keine unverfügbaren Änderungen.
+Dokumentation 82.71 % bei unveränderter 80-%-Grenze. Sämtliche Risiko-,
+Architektur-, Zusatz-, Nitpick-, Outside-diff- und operativen Texte wurden gelesen.
+Alte/null Security-Flags sind kein aktueller formaler Securitynachweis. Keine
+neue Filterausnahme, Kauf oder abgeschwächte Prüfregel.
 
 ## Grenzen
 
@@ -135,6 +162,6 @@ Unbelegte Zuständige/Termine bleiben unbekannt; Abschnittszeiten sind keine
 Wortzeiten. Technische Belegprüfung beweist keine inhaltliche Deutung. Ergebnisse
 bleiben überprüfbare KI-Entwürfe.
 
-[Unveränderliche vorige Validierung und historische Nachweise](https://github.com/Puma7/meeting-for-handy/blob/fb03a768256486d5a721a442a94fe9d520766eb9/docs/validation/pr41-review-followup-20261104.md).
+[Unveränderliche vorige Validierung und historische Nachweise](https://github.com/Puma7/meeting-for-handy/blob/2118eb1cf8e98b34a7b53e144988115bc6aa3cc2/docs/validation/pr41-review-followup-20261104.md).
 Frühere Fehlläufe und Testvorbereitungen bleiben erhalten. Diese Nacharbeit
 erstellt keinen installierten Programmstand oder Release.
