@@ -2,17 +2,101 @@
 
 Stand: 6. November 2026. Version **1.1.0-beta.1**, unverändert.
 
-Diese Nacharbeit unterscheidet verneinte Rücknahmen von tatsächlichen Rücknahmen
-und erkennt „out of“ als zusammenhängende Teilmengenangabe. Gültige Beschlüsse
-über bewusstes Nichtstun bleiben zulässig, auch ohne Komma im Transkript. Beide Referenzsprachen
+Diese Nacharbeit unterscheidet beabsichtigte Entscheidungen von ausdrücklichen
+Beschlussaussagen. Ein deutscher Infinitiv allein ist kein Beschlussprädikat.
+Alle bisherigen Rücknahme-, Mengen- und Nichtstun-Gegenfälle bleiben erhalten.
+Zusätzlich werden doppelte Notizstände und fehlende Schaltflächen-Hervorhebungen korrigiert. Beide Referenzsprachen
 enthalten unverändert eine ausdrückliche Budgetfrage, wenn der Test einen Gesprächsimpuls verlangt.
 Die ursprünglichen Zusagen und unverbindlichen Aussagen bleiben erhalten.
 
-Die [bisherige ausführliche Fassung](https://github.com/Puma7/meeting-for-handy/blob/c8ffeedc73b3d55659317b7d83df5eecbd4908cd/docs/validation/pr41-review-followup-20261104.md)
+Die [bisherige ausführliche Fassung](https://github.com/Puma7/meeting-for-handy/blob/35a9beebda90ebf930fb5b32579a539c98e3df37/docs/validation/pr41-review-followup-20261104.md)
 und deren Detailhistorie bleiben unveränderlich in Git.
 Private Rohbelege, alte Checkpoints und fehlgeschlagene Läufe bleiben erhalten.
 Der vollständige TEST_REPORT bleibt gegenüber dem PR-Basisstand byteunverändert.
 Dieser bereinigte Vermerk veröffentlicht keine Nutzermeetings oder privaten Sitzungsdaten.
+
+## Notizstände und sichtbare Schaltflächenzustände
+
+Der [vollständige CodeRabbit-Lauf auf 35a9bee](https://github.com/Puma7/meeting-for-handy/pull/41#pullrequestreview-5794845322)
+fand zwei weitere gültige UI-Fehler. Die Hervorhebung benutzte eine nicht
+definierte CSS-Variable. „Gemerkt“, „Wieder öffnen“ und die Kompatibilitätsregel
+für ausgewählte Layoutschaltflächen verwenden jetzt die vorhandene Themenfarbe
+--tint. Farben und Auswahlverhalten bleiben sonst erhalten.
+
+Die Notizsicherung verglich nur den letzten gemeinsamen Verlaufseintrag.
+Wechsel zwischen privater und Protokollnotiz erzeugten dadurch identische
+Kopien; auch unveränderte leere Notizen erhielten einen Stand. Zwei echte
+Komponentenregressionen reproduzierten beide Fehler. Jetzt wird rückwärts der
+letzte Stand derselben Notizart gesucht, ohne den Verlauf zu verändern oder
+zu kopieren. Ein fehlender Stand entspricht leerem Text. Tatsächliche Änderungen
+und das spätere bewusste Leeren bleiben versioniert; alte Stände werden weder
+gekürzt noch automatisch gelöscht. Ein beliebig langer tatsächlicher Verlauf
+ist damit nicht zugesichert; die vorhandene sichtbare Speicherfehlerbehandlung bleibt erhalten.
+
+Frisch bestanden 416 UI-Tests in 21 Dateien, TypeScript, Produktionsbuild und
+Format. Die zusätzlichen Tests prüfen leere Notizen, wechselnde Notizarten,
+echte Änderungen, Leeren, gespeicherte Originalstände, Wiederöffnung und dass
+private Texte nicht an die synthetische native Adaptergrenze gelangen.
+Der erste private Testversuch hatte für den zweiten Fall noch einen absichtlich
+belegten Auswertungszustand; er zählt nicht als Nachweis des Duplikatfehlers.
+Der getrennte finale Vorherlauf verwendete eine freie synthetische Auswertung
+und zeigte beide tatsächlichen Fehler. Beide Läufe bleiben erhalten.
+
+Die Browserprüfung verwendet die tatsächliche LiveWorkspace-Komponente in
+Edge 156.0.4314.58 mit dem vorhandenen Playwright 1.57.0: 390/1280 Pixel,
+Deutsch/Englisch und hell/dunkel, insgesamt acht Konfigurationen. Die drei
+Hervorhebungsregeln waren vorher in allen 24 Messungen transparent und stimmen
+nachher mit der Themenfarbe überein. Die Kompatibilitätsregel verwendet eine
+zusätzliche synthetische Schaltfläche; Gemerkt/Wieder öffnen sind die echten
+Komponentenaktionen. Leere Notizen, zwei Notizarten, echte Änderungen, Leeren,
+Reload und private Adaptertrennung bestehen in allen acht Konfigurationen.
+Seitenidentität, sichtbarer Inhalt, fehlendes Framework-Fehleroverlay, keine
+relevanten Konsolen-/Seitenfehler und kein horizontaler Überlauf wurden geprüft.
+Desktop- und schmale Screenshots wurden visuell gelesen; keine fremden Requests.
+Browser-Plugin nicht verfügbar, daher vorhandenes Playwright ohne Installation.
+Eigener Browser und eigener lokaler Server wurden beendet.
+Das ist eine synthetische Browser-/Adapterprüfung, kein nativer IPC-, Modell-,
+Audio-, Screenreader- oder Tauri-WebView-Nachweis.
+
+## Vollständigkeit der nächsten Reviewrunde
+
+Der genannte CodeRabbit-Lauf wählte alle 100 zulässigen Dateien aus, meldete aber
+validation_01.rs als nicht vollständig verfügbar. Er ist deshalb ausdrücklich
+keine saubere vollständige Runde. Die tatsächlichen GitHub-Patches waren separat
+vollständig paginiert und byte-/zeilengeprüft; die Ursache der Anbieter-Prüflücke
+ist damit nicht bewiesen. Zwei vorhandene, zusammengehörige Runner-/Replaytests
+wurden mit exakt unverändertem Funktionsinhalt nach inference_02.rs verschoben.
+Beide Dateien waren bereits Teil desselben PR; keine neue Datei, kein Filter,
+kein Timeout und kein Testfall wurde entfernt oder abgeschwächt.
+Die bisherige Testdatei sinkt von 83049 auf 62611 Bytes. Erst eine frische
+vollständige Runde ohne unverfügbare Datei darf die Prüflücke als geschlossen bestätigen.
+AudioSources.tsx enthielt in dieser Runde nur die bereits manuell nachgelesene
+Entfernung des sichtbaren Pegel-Hilfetexts; die zugängliche Pegelerklärung bleibt erhalten.
+
+## Deutsche Beschlussaussage statt bloßer Absicht
+
+Die [Codex-Runde auf 35a9bee](https://github.com/Puma7/meeting-for-handy/pull/41#discussion_r4488211575)
+fand einen gültigen Fehler: „Wir müssen entscheiden, ob wir am Freitag
+veröffentlichen.“ und „Wir möchten beschließen, den Bericht freizugeben.“
+konnten als bereits gefasste Beschlüsse erscheinen. Die bestehende
+Validator-/Checkpoint-Regression reproduzierte diese beiden und zwei weitere
+Absichtssätze mit wollen und versuchen als vier tatsächliche falsche Annahmen.
+
+Die deutsche Prüfung verlangt jetzt eine ausdrückliche finite Konstruktion
+für entscheiden/beschließen oder ein passendes Hilfsverb vor dem Partizip
+beschlossen/entschieden. Ein modaler oder beabsichtigter bloßer Infinitiv
+genügt nicht; ein zwischen Hilfsverb und Partizip stehendes zu wird nicht
+als affirmative Vergangenheit behandelt. Gegenbeispiele erhalten die
+tatsächlich ausgesagte Entscheidung in der Vergangenheit sowie die
+umgestellte finite Form „Heute beschließen wir den Pilotstart.“.
+
+Sechs zusätzliche dauerhafte Tabellenfälle prüfen die vier Ablehnungen und
+zwei gültigen Aussagen mit Originalzitaten und mehrfacher Wiederöffnung.
+Alle bisherigen finiten, vergangenen, passiven, negierten und bedingten
+Gegenfälle bleiben erhalten, einschließlich der gültigen Entscheidung über
+bewusstes Nichtstun mit und ohne ASR-Komma. Abgelehnte Antworten schreiben
+keine Revision und verändern keinen bestätigten Stand.
+Die Regeln bleiben begrenzt und ersetzen keine inhaltliche Überprüfung.
 
 ## Verneinte Rücknahmen und mehrteilige Mengenangaben
 
@@ -176,9 +260,9 @@ alte Fehlläufe werden dadurch nicht als bestanden umgedeutet.
 | --- | --- |
 | Rust-Workspace, alle Targets | Frisch **568 bestanden**, darunter **169 Notizenfälle** und **37 Providerprotokollfälle**; drei bestehende besondere Einstiege regulär ignoriert. |
 | Rustformat und Clippy | Frisch bestanden, gesperrte Abhängigkeiten und Warnungen als Fehler. |
-| Deutsch, tatsächliches lokales Modell | Frisch **238.9431324 s**; reguläre vollständig validierte Wiederholungen: **2**. |
-| Englisch, tatsächliches lokales Modell | Frisch **119.9836872 s**; reguläre vollständig validierte Wiederholungen: **0**. |
-| Frontend | **414 Tests in 21 Dateien**, TypeScript, Produktionsbuild und Format auf den hier bytegleichen Komponenten von 8d0ba21 bestanden; hier nicht erneut ausgeführt. |
+| Deutsch, tatsächliches lokales Modell | Frisch **141.1924193 s**; reguläre vollständig validierte Wiederholungen: **1**. |
+| Englisch, tatsächliches lokales Modell | Frisch **114.708746 s**; reguläre vollständig validierte Wiederholungen: **0**. |
+| Frontend | Frisch **416 Tests in 21 Dateien**, TypeScript, Produktionsbuild und Format bestanden. |
 | Projektprüfung | Nach dem letzten Dokumentedit vor Upload erneut verify.ps1 erforderlich: 47 PCM-, 35 Notizen-, 28 Vorlagen-, acht Agenten- und Monitorprüfungen. |
 
 Beide frischen Modellreferenzen auf dem unveränderten Korpus bestehen für positive
@@ -295,6 +379,7 @@ Prozentprüfung auf 94b3ee6 sowie die nachgestellten Adverbien auf 9da4d6d. Eine
 6170d4a war sauber; dessen zweite Runde fand die zu breite Verhältnisprüfung.
 Die folgende Runde auf e502c91 fand Mengenadverbien und zurückgenommene Beschlüsse.
 Die Runde auf c8ffeed fand verneinte Rücknahmen und den mehrteiligen Operator out of.
+Die folgende Runde auf 35a9bee fand beabsichtigte deutsche Entscheidungen.
 Diese Runden waren keine sauberen Abschlüsse.
 
 Die Projektionskorrektur wurde von CodeRabbit
@@ -340,9 +425,9 @@ benötigt weiterhin die bisherige Programmversion.
 Fremde Modellreservierungen bleiben fremd; TTL 300 s und Erneuerung 60 s
 sowie bestehende Speicher- und Verwaltungsschranken bleiben erhalten.
 
-Statische Produktprompts, statische Vertragsdateien, Belegbudget, Fristen, UI, Transport,
+Statische Produktprompts, statische Vertragsdateien, Belegbudget, Fristen und Transport,
 Aufnahme-/ASR-Logik, Modellreservierungen, Abhängigkeiten, Schutz-/Reviewerregeln,
-Version und vollständiger TEST_REPORT bleiben gegenüber c8ffeed unverändert.
+Version und vollständiger TEST_REPORT bleiben gegenüber 35a9bee unverändert.
 Die bereits enger gefassten dynamischen Änderungszweige für zurückgenommene
 Beschlüsse bleiben hier ebenfalls byteunverändert.
 Auch der deutsche und englische synthetische Referenztext bleiben hier byteunverändert.

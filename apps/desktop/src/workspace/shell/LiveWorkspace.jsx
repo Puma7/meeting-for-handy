@@ -554,6 +554,14 @@ function WorkspaceContents({
       })),
     commitNote: (kind) => {
       const v = current.current;
+      // Switching note kinds does not edit either stream's last saved text.
+      let previous = "";
+      for (let index = v.history.length - 1; index >= 0; index--) {
+        if (v.history[index].noteKind === kind) {
+          previous = v.history[index].content ?? "";
+          break;
+        }
+      }
       const saved = {
         ...v,
         ...(kind === "protocol"
@@ -566,8 +574,7 @@ function WorkspaceContents({
             }
           : {}),
         history:
-          v.history.at(-1)?.content === v.notes[kind] &&
-          v.history.at(-1)?.noteKind === kind
+          previous === v.notes[kind]
             ? v.history
             : [
                 ...v.history,

@@ -692,6 +692,87 @@ function fixture() {
   return { adapter, meeting, status };
 }
 describe("Native workspace boundary", () => {
+  it("does not create note snapshots when unchanged empty notes lose focus", async () => {
+    const f = fixture();
+    f.status.workspaceContext.sharedNotes = [];
+    render(
+      <LiveWorkspace
+        adapter={f.adapter}
+        meeting={f.meeting}
+        onBack={() => {}}
+      />,
+    );
+    await screen.findAllByText("Welche Freigabe fehlt?");
+    fireEvent.blur(screen.getByRole("textbox", { name: "Private Notiz" }));
+    fireEvent.click(screen.getByRole("button", { name: "Fürs Protokoll" }));
+    fireEvent.blur(screen.getByRole("textbox", { name: "Protokollnotiz" }));
+    const saved = JSON.parse(
+      localStorage.getItem(`handymeeting.workspace.v1.${f.meeting.id}`)!,
+    );
+    expect(
+      saved.history.filter((entry: { noteKind?: string }) => entry.noteKind),
+    ).toEqual([]);
+    expect(saved.notes).toEqual({ private: "", protocol: "" });
+  });
+  it("versions real note edits once per kind and preserves clearing and private text across reopen", async () => {
+    const f = fixture();
+    f.status.status = "waiting";
+    f.status.workspaceContext.sharedNotes = [];
+    const props = {
+      adapter: f.adapter,
+      meeting: f.meeting,
+      onBack: () => {},
+    };
+    const mounted = render(<LiveWorkspace {...props} />);
+    await screen.findAllByText("Welche Freigabe fehlt?");
+    const saved = () =>
+      JSON.parse(
+        localStorage.getItem(`handymeeting.workspace.v1.${f.meeting.id}`)!,
+      );
+    const history = () =>
+      saved().history.filter((entry: { noteKind?: string }) => entry.noteKind);
+    const privateNote = screen.getByRole("textbox", { name: "Private Notiz" });
+    fireEvent.change(privateNote, { target: { value: "PRIVATE_FIRST" } });
+    fireEvent.blur(privateNote);
+    fireEvent.click(screen.getByRole("button", { name: "Fürs Protokoll" }));
+    const protocol = screen.getByRole("textbox", { name: "Protokollnotiz" });
+    fireEvent.change(protocol, { target: { value: "Public protocol" } });
+    fireEvent.blur(protocol);
+    await waitFor(() =>
+      expect(f.status.workspaceContext.sharedNotes[0]?.text).toBe(
+        "Public protocol",
+      ),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Privat" }));
+    fireEvent.blur(screen.getByRole("textbox", { name: "Private Notiz" }));
+    fireEvent.click(screen.getByRole("button", { name: "Fürs Protokoll" }));
+    fireEvent.blur(screen.getByRole("textbox", { name: "Protokollnotiz" }));
+    expect(history()).toMatchObject([
+      { noteKind: "private", content: "PRIVATE_FIRST" },
+      { noteKind: "protocol", content: "Public protocol" },
+    ]);
+    expect(history()).toHaveLength(2);
+    fireEvent.click(screen.getByRole("button", { name: "Privat" }));
+    const changed = screen.getByRole("textbox", { name: "Private Notiz" });
+    fireEvent.change(changed, { target: { value: "PRIVATE_SECOND" } });
+    fireEvent.blur(changed);
+    fireEvent.change(changed, { target: { value: "" } });
+    fireEvent.blur(changed);
+    fireEvent.blur(changed);
+    expect(history()).toHaveLength(4);
+    expect(
+      history().map((entry: { content: string }) => entry.content),
+    ).toEqual(["PRIVATE_FIRST", "Public protocol", "PRIVATE_SECOND", ""]);
+    const retained = history();
+    mounted.unmount();
+    render(<LiveWorkspace {...props} />);
+    await screen.findAllByText("Welche Freigabe fehlt?");
+    expect(history()).toEqual(retained);
+    expect(saved().notes).toEqual({ private: "", protocol: "Public protocol" });
+    expect(JSON.stringify(f.adapter.context.mock.calls)).not.toContain(
+      "PRIVATE_",
+    );
+  });
   it("keeps the card menu closed after native pointer light-dismiss and preserves keyboard toggles", async () => {
     const f = fixture();
     const opened = new WeakSet<Element>();

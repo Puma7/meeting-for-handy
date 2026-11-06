@@ -8,7 +8,7 @@
 }
 .live-workspace .prototype-choices button[aria-pressed="true"] {
   color: var(--accent);
-  background: var(--accent-soft);
+  background: var(--tint);
 }
 .live-update-bar {
   display: flex;
@@ -261,7 +261,7 @@
 .impulse-actions .is-reopen,
 .impulse-actions .impulse-save[aria-pressed="true"] {
   color: var(--accent);
-  background: var(--accent-soft);
+  background: var(--tint);
 }
 .changes-hint {
   margin: 4px 10px;

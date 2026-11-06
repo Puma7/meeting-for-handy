@@ -592,8 +592,27 @@ pub(super) fn recorded_decision_quote_allowed(quote: &str) -> bool {
             _ => token.split('\'').filter(|w| !w.is_empty()).collect(),
         })
         .collect();
-    let german = words.iter().position(|word| {
-        ["entscheiden", "beschließen", "beschlossen", "entschieden"].contains(word)
+    let german = words.iter().enumerate().find_map(|(index, word)| {
+        let asserted = match *word {
+            // These spellings can be finite plural verbs or bare infinitives.
+            // A modal/intention followed by an infinitive is not a decision.
+            "entscheiden" | "beschließen" => {
+                index.checked_sub(1).and_then(|i| words.get(i)) == Some(&"wir")
+                    || words.get(index + 1) == Some(&"wir")
+            }
+            "beschlossen" | "entschieden" => words[..index]
+                .iter()
+                .rposition(|w| {
+                    [
+                        "habe", "haben", "hat", "hatte", "hatten", "ist", "war", "waren", "wurde",
+                        "wurden",
+                    ]
+                    .contains(w)
+                })
+                .is_some_and(|auxiliary| !words[auxiliary + 1..index].contains(&"zu")),
+            _ => false,
+        };
+        asserted.then_some(index)
     });
     let english = words.iter().enumerate().find_map(|(index, word)| {
         let next = words.get(index + 1).copied();
