@@ -38,12 +38,7 @@ export function Notes({ ctx }) {
   const [availableHeight, setAvailableHeight] = useState(Infinity);
   useLayoutEffect(() => {
     const host = dock.current.parentElement;
-    const fixed = Array.from(host.children).filter(
-      (element) =>
-        element !== dock.current &&
-        !element.classList.contains("workspace-content") &&
-        getComputedStyle(element).position !== "absolute",
-    );
+    let fixed = [];
     /** Recalculate the available notes-pane limit without treating viewport changes as user preferences. */
     function measure() {
       const room =
@@ -56,10 +51,26 @@ export function Notes({ ctx }) {
       setAvailableHeight(Math.floor(room));
     }
     const observer = new ResizeObserver(measure);
-    observer.observe(host);
-    fixed.forEach((element) => observer.observe(element));
-    measure();
-    return () => observer.disconnect();
+    /** Replace observer targets when notices join or leave the fixed workspace siblings. */
+    function refreshSiblings() {
+      fixed = Array.from(host.children).filter(
+        (element) =>
+          element !== dock.current &&
+          !element.classList.contains("workspace-content") &&
+          getComputedStyle(element).position !== "absolute",
+      );
+      observer.disconnect();
+      observer.observe(host);
+      fixed.forEach((element) => observer.observe(element));
+      measure();
+    }
+    const mutations = new MutationObserver(refreshSiblings);
+    mutations.observe(host, { childList: true });
+    refreshSiblings();
+    return () => {
+      mutations.disconnect();
+      observer.disconnect();
+    };
   }, [ctx.snapshot, ctx.format]);
   const viewportHeight = ctx.viewportHeight ?? window.innerHeight;
   const height = clampNotesHeight(

@@ -1,4 +1,4 @@
-//! Local progress stream without an elapsed-time cutoff; no deadlines change elsewhere.
+//! Local progress stream without a total-duration cutoff; silence between response reads is bounded.
 use super::*;
 use serde_json::{json, Value};
 use std::{
@@ -6,6 +6,8 @@ use std::{
     sync::{Arc, Mutex, MutexGuard, OnceLock},
 };
 static ROUTES: OnceLock<Mutex<HashMap<String, Arc<Mutex<()>>>>> = OnceLock::new();
+/// Allow slow prefill and active generation; recover after five minutes without response bytes.
+const RESPONSE_IDLE_LIMIT: Duration = Duration::from_secs(300);
 /// Share a bounded per-server queue across loopback aliases; discard unused route entries.
 pub(super) fn route_gate(base: &Url) -> Result<Arc<Mutex<()>>> {
     let host = base.host_str().unwrap_or_default();
@@ -55,6 +57,18 @@ impl TextClient {
         schema: Value,
         control: &AnalysisControl,
     ) -> Result<String> {
+        self.workspace_json_with_idle(system, user, schema, control, RESPONSE_IDLE_LIMIT)
+    }
+
+    /// Apply the same stream contract with a per-read idle limit, without a total request deadline.
+    fn workspace_json_with_idle(
+        &self,
+        system: &str,
+        user: &str,
+        schema: Value,
+        control: &AnalysisControl,
+        idle: Duration,
+    ) -> Result<String> {
         ensure!(
             self.local,
             "Automatische Meetingaktualisierung ist ausschließlich lokal verfügbar."
@@ -65,6 +79,7 @@ impl TextClient {
             .no_proxy()
             .redirect(reqwest::redirect::Policy::none())
             .connect_timeout(Duration::from_secs(10))
+            .read_timeout(idle)
             .dns_resolver(Arc::new(NoDns))
             .resolve_to_addrs("localhost", &LOCALHOST_ADDRESSES)
             .tcp_keepalive(Duration::from_secs(30))
@@ -243,5 +258,212 @@ mod gate_tests {
         let guard = enter(&gate, &AnalysisControl::default()).unwrap();
         drop(guard);
         assert!(enter(&gate, &AnalysisControl::default()).is_ok());
+    }
+}
+
+#[cfg(test)]
+mod idle_tests {
+    use super::*;
+    use std::{
+        io::{Read, Write},
+        net::{TcpListener, TcpStream},
+        sync::{
+            atomic::{AtomicBool, Ordering},
+            mpsc,
+        },
+        thread,
+    };
+
+    /// Accept only this fixture's bounded JSON request while allowing cleanup to stop its listener.
+    fn request(listener: &TcpListener, stopped: &AtomicBool) -> Option<(TcpStream, Value)> {
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        while !stopped.load(Ordering::Acquire) && std::time::Instant::now() < deadline {
+            let mut socket = match listener.accept() {
+                Ok((socket, _)) => socket,
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                    thread::sleep(Duration::from_millis(2));
+                    continue;
+                }
+                Err(error) => panic!("{error}"),
+            };
+            socket.set_nonblocking(false).unwrap();
+            socket
+                .set_read_timeout(Some(Duration::from_secs(2)))
+                .unwrap();
+            socket
+                .set_write_timeout(Some(Duration::from_secs(2)))
+                .unwrap();
+            let mut bytes = Vec::new();
+            let mut buf = [0; 4096];
+            let (end, size) = loop {
+                let n = socket.read(&mut buf).unwrap();
+                assert!(n > 0);
+                bytes.extend_from_slice(&buf[..n]);
+                assert!(bytes.len() < 16_384);
+                if let Some(end) = bytes
+                    .windows(4)
+                    .position(|w| w == b"\r\n\r\n")
+                    .map(|i| i + 4)
+                {
+                    let head = String::from_utf8_lossy(&bytes[..end]);
+                    let size: usize = head
+                        .lines()
+                        .filter_map(|l| l.split_once(':'))
+                        .find(|(k, _)| k.eq_ignore_ascii_case("content-length"))
+                        .unwrap()
+                        .1
+                        .trim()
+                        .parse()
+                        .unwrap();
+                    assert!(size < 8192);
+                    break (end, size);
+                }
+            };
+            while bytes.len() < end + size {
+                let n = socket.read(&mut buf).unwrap();
+                assert!(n > 0);
+                bytes.extend_from_slice(&buf[..n]);
+            }
+            return Some((
+                socket,
+                serde_json::from_slice(&bytes[end..end + size]).unwrap(),
+            ));
+        }
+        None
+    }
+    /// Use independent clients on the same local route, without real models, audio, keys or cloud.
+    fn connection(port: u16) -> crate::Connection {
+        crate::Connection {
+            endpoint: format!("http://127.0.0.1:{port}/v1/"),
+            model: "synthetic-idle".into(),
+            mode: "local".into(),
+            cloud_consent: false,
+            api_key: String::new(),
+        }
+    }
+
+    #[test]
+    fn silent_headers_body_and_error_body_release_the_route_for_classic_analysis() {
+        for phase in ["headers", "body", "error-body"] {
+            let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+            listener.set_nonblocking(true).unwrap();
+            let port = listener.local_addr().unwrap().port();
+            let stopped = Arc::new(AtomicBool::new(false));
+            let stop = Arc::clone(&stopped);
+            let (entered, started) = mpsc::channel();
+            let server = thread::spawn(move || {
+                let Some((mut held, body)) = request(&listener, &stop) else {
+                    return;
+                };
+                assert_eq!(body["stream"], true);
+                if phase == "body" {
+                    held.write_all(b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nConnection: close\r\n\r\n: first bytes\n").unwrap();
+                }
+                if phase == "error-body" {
+                    held.write_all(b"HTTP/1.1 400 Bad Request\r\nContent-Type: application/json\r\nConnection: close\r\n\r\n{\"error\":\"synthetic-private-error").unwrap();
+                }
+                entered.send(()).unwrap();
+                if let Some((mut classic, body)) = request(&listener, &stop) {
+                    assert_eq!(body["stream"], false);
+                    let response =
+                        json!({"choices":[{"finish_reason":"stop","message":{"content":"{}"}}]})
+                            .to_string();
+                    write!(classic,"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{response}",response.len()).unwrap();
+                }
+                drop(held);
+            });
+            let control = AnalysisControl::default();
+            let owned = control.clone();
+            let (sent, result) = mpsc::channel();
+            let worker = thread::spawn(move || {
+                let client = TextClient::new(&connection(port)).unwrap();
+                let value = client.workspace_json_with_idle(
+                    "synthetic",
+                    "synthetic",
+                    json!({}),
+                    &owned,
+                    Duration::from_millis(200),
+                );
+                let _ = sent.send(value);
+            });
+            let saw_first = started.recv_timeout(Duration::from_secs(3)).is_ok();
+            let classic_control = AnalysisControl::default();
+            let classic_owned = classic_control.clone();
+            let (sent, classic_result) = mpsc::channel();
+            let classic = thread::spawn(move || {
+                let client = TextClient::new(&connection(port)).unwrap();
+                let value = client.chat_json_inner(
+                    "synthetic",
+                    "synthetic",
+                    "test",
+                    json!({}),
+                    32,
+                    &classic_owned,
+                );
+                let _ = sent.send(value);
+            });
+            let stalled = result.recv_timeout(Duration::from_secs(3)).ok();
+            let recovered = if stalled.is_some() {
+                classic_result.recv_timeout(Duration::from_secs(3)).ok()
+            } else {
+                None
+            };
+            control.cancel();
+            classic_control.cancel();
+            stopped.store(true, Ordering::Release);
+            worker.join().unwrap();
+            classic.join().unwrap();
+            server.join().unwrap();
+            assert!(saw_first, "First {phase} request never reached the fixture");
+            let error = stalled
+                .expect("Silent stream retained its route until explicit cancellation")
+                .unwrap_err();
+            assert!(
+                matches!(
+                    error.downcast_ref::<TransportFailure>(),
+                    Some(TransportFailure::Timeout)
+                ),
+                "{error}"
+            );
+            assert!(!error.to_string().contains("synthetic-private-error"));
+            assert_eq!(
+                recovered
+                    .expect("Classic request did not recover the route")
+                    .unwrap(),
+                "{}"
+            );
+        }
+    }
+
+    #[test]
+    fn active_response_reads_can_exceed_the_entire_idle_budget() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let stopped = AtomicBool::new(false);
+        let server = thread::spawn(move || {
+            let (mut socket, body) = request(&listener, &stopped).unwrap();
+            assert_eq!(body["stream"], true);
+            socket.write_all(b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nConnection: close\r\n\r\n").unwrap();
+            for _ in 0..8 {
+                socket.write_all(b": progress\n").unwrap();
+                thread::sleep(Duration::from_millis(60));
+            }
+            socket.write_all(b"data: {\"choices\":[{\"delta\":{\"content\":\"{}\"},\"finish_reason\":\"stop\"}]}\n").unwrap();
+        });
+        let client = TextClient::new(&connection(port)).unwrap();
+        let control = AnalysisControl::default();
+        let before = std::time::Instant::now();
+        let result = client.workspace_json_with_idle(
+            "synthetic",
+            "synthetic",
+            json!({}),
+            &control,
+            Duration::from_millis(200),
+        );
+        server.join().unwrap();
+        assert_eq!(result.unwrap(), "{}");
+        assert!(before.elapsed() > Duration::from_millis(400));
+        assert!(control.response_bytes() > 0);
     }
 }

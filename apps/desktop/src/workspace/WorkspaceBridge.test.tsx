@@ -598,6 +598,123 @@ beforeEach(() => {
     this.removeAttribute("open");
   };
 });
+
+it("reclaims notes space when fixed banners appear, change size, and disappear without losing the saved preference", async () => {
+  const f = fixture();
+  f.status.status = "waiting";
+  const key = `handymeeting.workspace.v1.${f.meeting.id}`;
+  const saved = JSON.stringify({ version: 1, height: 500 });
+  localStorage.setItem(`${key}.notes-height.v1`, saved);
+  const observers: {
+    targets: Set<Element>;
+    notify: () => void;
+    disconnect: ReturnType<typeof vi.fn>;
+  }[] = [];
+  const previous = globalThis.ResizeObserver;
+  const previousHeight = Object.getOwnPropertyDescriptor(window, "innerHeight");
+  Object.defineProperty(window, "innerHeight", {
+    configurable: true,
+    value: 900,
+  });
+  vi.stubGlobal(
+    "ResizeObserver",
+    class {
+      targets = new Set<Element>();
+      disconnect = vi.fn(() => this.targets.clear());
+      constructor(public notify: () => void) {
+        observers.push(this);
+      }
+      observe(target: Element) {
+        this.targets.add(target);
+      }
+    },
+  );
+  const disconnectMutations = vi.spyOn(
+    MutationObserver.prototype,
+    "disconnect",
+  );
+  const rectangles = vi
+    .spyOn(HTMLElement.prototype, "getBoundingClientRect")
+    .mockImplementation(function (this: HTMLElement) {
+      const height = this.classList.contains("meeting-workspace")
+        ? 900
+        : this.classList.contains("tabs")
+          ? 150
+          : this.classList.contains("workspace-native-notices")
+            ? Number(
+                (this.firstElementChild as HTMLElement)?.dataset.height || 0,
+              )
+            : this.classList.contains("state-banner")
+              ? Number(this.dataset.height || 250)
+              : 0;
+      return new DOMRect(0, 0, 900, height);
+    });
+  function frame(banner: string | null, size = 200) {
+    return (
+      <LiveWorkspace
+        adapter={f.adapter}
+        meeting={f.meeting}
+        onBack={() => {}}
+        notices={
+          banner === "poll-banner" ? (
+            <div data-testid={banner} data-height={size}>
+              Synthetic notice
+            </div>
+          ) : null
+        }
+        captureError={
+          banner === "replacement-notice"
+            ? "Synthetic replacement notice"
+            : null
+        }
+      />
+    );
+  }
+  const mounted = render(frame(null));
+  try {
+    await screen.findAllByText("Welche Freigabe fehlt?");
+    fireEvent.change(screen.getByRole("textbox", { name: "Private Notiz" }), {
+      target: { value: "Retained private note" },
+    });
+    const grip = screen.getByRole("separator", {
+      name: "Notizbereich Höhe ändern",
+    });
+    expect(grip.getAttribute("aria-valuenow")).toBe("500");
+    mounted.rerender(frame("poll-banner"));
+    await waitFor(() => expect(grip.getAttribute("aria-valuenow")).toBe("350"));
+    const first = screen.getByTestId("poll-banner").parentElement!;
+    expect(observers.some((o) => o.targets.has(first))).toBe(true);
+    mounted.rerender(frame("replacement-notice", 250));
+    await waitFor(() => expect(grip.getAttribute("aria-valuenow")).toBe("300"));
+    const replacement = screen.getByRole("alert");
+    expect(observers.every((o) => !o.targets.has(first))).toBe(true);
+    expect(observers.some((o) => o.targets.has(replacement))).toBe(true);
+    replacement.dataset.height = "100";
+    act(() => observers.forEach((o) => o.notify()));
+    expect(grip.getAttribute("aria-valuenow")).toBe("450");
+    mounted.rerender(frame(null));
+    await waitFor(() => expect(grip.getAttribute("aria-valuenow")).toBe("500"));
+    expect(localStorage.getItem(`${key}.notes-height.v1`)).toBe(saved);
+    expect(f.adapter.context).not.toHaveBeenCalled();
+    expect(
+      (
+        screen.getByRole("textbox", {
+          name: "Private Notiz",
+        }) as HTMLTextAreaElement
+      ).value,
+    ).toBe("Retained private note");
+    mounted.unmount();
+    expect(observers.every((o) => o.targets.size === 0)).toBe(true);
+    expect(disconnectMutations).toHaveBeenCalled();
+  } finally {
+    mounted.unmount();
+    rectangles.mockRestore();
+    disconnectMutations.mockRestore();
+    vi.stubGlobal("ResizeObserver", previous);
+    if (previousHeight)
+      Object.defineProperty(window, "innerHeight", previousHeight);
+  }
+});
 function fixture() {
   const context = {
     revision: 7,
