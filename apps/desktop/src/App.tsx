@@ -429,6 +429,10 @@ export default function App({ api = desktopApi }: { api?: DesktopApi }) {
       api.cancelMaintenance,
   );
   const recording = app?.recording ?? false;
+  const agentOwnsCapture = Boolean(
+    app?.agent?.activeCapture &&
+      app.agent.ownedSessionId === app.activeMeeting?.id,
+  );
   const catchingUp =
     !recording &&
     ["catching-up", "streaming"].includes(app?.activeMeeting?.status ?? "");
@@ -2128,7 +2132,11 @@ export default function App({ api = desktopApi }: { api?: DesktopApi }) {
             page === "meeting" && recording ? () => void stop() : undefined
           }
           onTogglePause={
-            page === "meeting" && recording && api.setCapturePaused
+            page === "meeting" &&
+            recording &&
+            connected &&
+            !agentOwnsCapture &&
+            api.setCapturePaused
               ? () => changeCapturePause(!app?.captureControl?.paused)
               : undefined
           }
@@ -2136,6 +2144,8 @@ export default function App({ api = desktopApi }: { api?: DesktopApi }) {
           onToggleMute={
             page === "meeting" &&
             recording &&
+            connected &&
+            !agentOwnsCapture &&
             micEnabled &&
             api.setMicrophoneMuted
               ? () =>

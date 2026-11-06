@@ -453,6 +453,152 @@ async function ready() {
 }
 beforeEach(() => localStorage.clear());
 
+it.each(
+  (["de", "en"] as const).flatMap((locale) =>
+    (["manual", "agent-other", "agent-owned", "disconnected"] as const).map(
+      (scenario) => ({ locale, scenario }),
+    ),
+  ),
+)(
+  "offers workspace capture controls only for connected manual ownership ($locale/$scenario)",
+  async ({ locale, scenario }) => {
+    await import("./workspace/WorkspaceBridge");
+    localStorage.setItem(
+      "handymeeting.rust.beta.preferences.v1",
+      JSON.stringify({ locale }),
+    );
+    localStorage.setItem(
+      "handymeeting.meeting-view.full-window.v1",
+      "workspace",
+    );
+    const t = locale === "de" ? de : en;
+    const active = { ...meeting, status: "recording" };
+    let current: AppState = state();
+    let disconnected = false;
+    const api = fakeApi(active);
+    api.getAppState = vi.fn(async () => {
+      if (disconnected) throw "Synthetic disconnected core";
+      return current;
+    });
+    api.getLiveNotes = vi
+      .fn()
+      .mockResolvedValue({ status: "off", running: false });
+    api.startLiveNotes = vi.fn();
+    api.setWorkspaceContext = vi.fn();
+    api.stopLiveNotes = vi.fn();
+    api.refreshLiveNotes = vi.fn();
+    api.setLiveNotesInterval = vi.fn();
+    api.localModelSetup = vi.fn();
+    api.setCapturePaused = vi.fn(async (_id: string, paused: boolean) => {
+      current = {
+        ...current,
+        captureControl: { ...current.captureControl!, paused },
+      };
+      return current;
+    });
+    api.setMicrophoneMuted = vi.fn(
+      async (_id: string, microphoneMuted: boolean) => {
+        current = {
+          ...current,
+          captureControl: { ...current.captureControl!, microphoneMuted },
+        };
+        return current;
+      },
+    );
+    const restoreObserver = installWorkspaceObserver();
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+    const mounted = render(<App api={api} />);
+    try {
+      // Choose a microphone before the synthetic recording starts, as in the real flow.
+      const microphone = await screen.findByRole("checkbox", {
+        name: t.microphone,
+      });
+      fireEvent.click(microphone);
+      current = {
+        ...state(active),
+        recording: true,
+        captureControl: {
+          paused: false,
+          microphoneMuted: false,
+          hasMicrophone: true,
+        },
+        agent: scenario.startsWith("agent")
+          ? {
+              connected: true,
+              label: "Synthetic agent",
+              ownerId: "synthetic-owner",
+              revoked: false,
+              pending: null,
+              expiresAtUnixMs: null,
+              activeCapture: true,
+              ownedSessionId:
+                scenario === "agent-owned" ? active.id : "another-session",
+            }
+          : null,
+      };
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1500);
+      });
+      const root = () =>
+        mounted.container.querySelector(".native-workspace-host")?.shadowRoot;
+      await waitFor(() =>
+        expect(root()?.querySelector('[role="tablist"]')).toBeTruthy(),
+      );
+      if (scenario === "disconnected") {
+        disconnected = true;
+        await act(async () => {
+          await vi.advanceTimersByTimeAsync(1500);
+        });
+        await waitFor(() =>
+          expect(root()?.textContent).toContain("Synthetic disconnected core"),
+        );
+      }
+      const shadow = within(root()!.querySelector(".prototype") as HTMLElement);
+      const pause = locale === "de" ? "Aufnahme pausieren" : "Pause recording";
+      const mute =
+        locale === "de" ? "Mikrofon stummschalten" : "Mute microphone";
+      if (scenario === "agent-owned" || scenario === "disconnected") {
+        expect.soft(shadow.queryByRole("button", { name: pause })).toBeNull();
+        expect.soft(shadow.queryByRole("button", { name: mute })).toBeNull();
+        expect(api.setCapturePaused).not.toHaveBeenCalled();
+        expect(api.setMicrophoneMuted).not.toHaveBeenCalled();
+      } else {
+        fireEvent.click(shadow.getByRole("button", { name: pause }));
+        await waitFor(() =>
+          expect(api.setCapturePaused).toHaveBeenCalledWith(active.id, true),
+        );
+        await waitFor(() =>
+          expect(
+            shadow.getByRole("button", {
+              name:
+                locale === "de" ? "Aufnahme fortsetzen" : "Resume recording",
+            }),
+          ).toBeTruthy(),
+        );
+        fireEvent.click(shadow.getByRole("button", { name: mute }));
+        await waitFor(() =>
+          expect(api.setMicrophoneMuted).toHaveBeenCalledWith(active.id, true),
+        );
+        await waitFor(() =>
+          expect(
+            shadow.getByRole("button", {
+              name:
+                locale === "de" ? "Mikrofon aktivieren" : "Enable microphone",
+            }),
+          ).toBeTruthy(),
+        );
+      }
+      expect(api.startMeeting).not.toHaveBeenCalled();
+      expect(api.stopMeeting).not.toHaveBeenCalled();
+      expect(api.startLiveNotes).not.toHaveBeenCalled();
+    } finally {
+      mounted.unmount();
+      vi.useRealTimers();
+      restoreObserver();
+    }
+  },
+);
+
 /** Scope the observer fixture without undoing the test environment's storage globals. */
 function installWorkspaceObserver() {
   const previous = Object.getOwnPropertyDescriptor(
