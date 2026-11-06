@@ -698,6 +698,20 @@ fn oversized_legacy_shared_context_remains_readable_and_can_be_shortened() {
 #[test]
 fn withdrawal_requires_explicit_current_intent_and_rejection_preserves_both_kinds() {
     let invalid = [
+        "Das Team musste widerrufen.",
+        "Wir hatten den Beschluss widerrufen wollen.",
+        "Wir haben den Beschluss widerrufen müssen.",
+        "Das Team konnte widerrufen.",
+        "Das Team wollte stornieren.",
+        "Das Team durfte widerrufen.",
+        "Das Team mochte stornieren.",
+        "Die Teams mussten widerrufen.",
+        "Die Teams konnten widerrufen.",
+        "Die Teams wollten stornieren.",
+        "We hope the team has withdrawn the decision.",
+        "Wir haben gehofft, dass wir den Beschluss zurückgenommen haben.",
+        "We expect that the report has been cancelled.",
+        "We wished we had withdrawn the decision.",
         "The team can cancel the report.",
         "Our team must cancel the report.",
         "The team may cancel the report.",
@@ -751,6 +765,8 @@ fn withdrawal_requires_explicit_current_intent_and_rejection_preserves_both_kind
         "We revoked none of the decisions.",
     ];
     let valid = [
+        "We hoped, but the decision has been withdrawn.",
+        "Wir hofften, aber der Beschluss wurde zurückgenommen.",
         "May cancelled the report.",
         "Anna cancelled the report.",
         "Anna withdrew the decision.",

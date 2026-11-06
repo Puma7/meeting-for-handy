@@ -4,6 +4,20 @@ use super::*;
 fn perfect_decisions_validate_literal_sources_and_durable_reopen() {
     let mut mismatches = Vec::new();
     for (quote, allowed) in [
+        ("We hope that we have decided to start the pilot.", false),
+        ("We hope that we agreed to start the pilot.", false),
+        (
+            "Wir haben gehofft, dass der Pilotstart beschlossen wurde.",
+            false,
+        ),
+        ("We proposed that the plan is agreed to.", false),
+        ("We hoped, but we have decided to start the pilot.", true),
+        ("Hope agreed to start the pilot.", true),
+        ("The proposed plan is agreed to.", true),
+        (
+            "We have confirmed that we have decided to start the pilot.",
+            true,
+        ),
         ("Anna agreed to start the pilot.", true),
         ("The team agreed to start the pilot.", true),
         ("Anna plans to have agreed to start the pilot.", false),
@@ -180,6 +194,31 @@ fn perfect_decisions_validate_literal_sources_and_durable_reopen() {
 #[test]
 fn contracted_perfect_completion_retains_literal_quotes_after_reopen() {
     let cases = [
+        ("We hope the report is complete.", false),
+        ("We hope that the report is done.", false),
+        ("We are hoping the report is complete.", false),
+        ("The team hopes that the report is done.", false),
+        ("We hoped the report has been approved.", false),
+        ("Wir hoffen, der Bericht ist erledigt.", false),
+        ("Ich habe gehofft, der Bericht ist abgeschlossen.", false),
+        ("We expect the report is complete.", false),
+        ("We want to confirm that the report is done.", false),
+        ("We plan to declare that the report is complete.", false),
+        ("We hope we have sent the report.", false),
+        (
+            "Ich habe gehofft, dass ich den Bericht abgeschlossen habe.",
+            false,
+        ),
+        ("We believe the report is done.", false),
+        ("We have confirmed that the report is done.", true),
+        ("We hoped, but the report is done.", true),
+        ("We hoped. The report is complete.", true),
+        ("The hope report is complete.", true),
+        ("Hope's report is complete.", true),
+        ("I have completed the proposed report.", true),
+        ("I have sent the report, as expected.", true),
+        ("The expected report is done.", true),
+        ("Wir hofften, aber der Bericht ist erledigt.", true),
         (
             "Ich habe vorgeschlagen, den Bericht als abgeschlossen zu betrachten.",
             false,

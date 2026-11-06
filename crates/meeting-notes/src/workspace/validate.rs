@@ -598,6 +598,11 @@ fn assertion_words(text: &str) -> Vec<&str> {
 /// Preserve list/parenthetical commas and decimal/version separators, while
 /// isolating a following finite or dependent clause from an earlier auxiliary.
 fn assertion_clauses(text: &str) -> Vec<std::ops::Range<usize>> {
+    assertion_ranges(text, true)
+}
+
+/// Keep matrix verbs in scope across commas when checking dependent assertions.
+fn assertion_ranges(text: &str, split_commas: bool) -> Vec<std::ops::Range<usize>> {
     let boundaries: Vec<_> = text
         .char_indices()
         .filter(|(_, ch)| ['.', '!', '?', ';', ',', ':', '\n'].contains(ch))
@@ -616,7 +621,7 @@ fn assertion_clauses(text: &str) -> Vec<std::ops::Range<usize>> {
                 .as_bytes()
                 .get(at + 1)
                 .is_some_and(|c| c.is_ascii_digit());
-        if numeric {
+        if numeric || (ch == ',' && !split_commas) {
             continue;
         }
         if ch == ',' {
@@ -705,10 +710,86 @@ fn infinitive_after(words: &[&str], predicate: usize, clause_end: usize) -> bool
 }
 
 const MODAL_PREDICATE_WORDS: &[&str] = &[
-    "can", "could", "may", "might", "must", "shall", "should", "will", "would", "kann", "können",
-    "könnte", "könnten", "muss", "müssen", "müsste", "müssten", "darf", "dürfen", "dürfte",
-    "dürften", "soll", "sollen", "sollte", "sollten", "wollen", "möchte", "möchten",
+    "can",
+    "could",
+    "may",
+    "might",
+    "must",
+    "shall",
+    "should",
+    "will",
+    "would",
+    "kann",
+    "können",
+    "könnte",
+    "könnten",
+    "muss",
+    "müssen",
+    "müsste",
+    "müssten",
+    "darf",
+    "dürfen",
+    "dürfte",
+    "dürften",
+    "soll",
+    "sollen",
+    "sollte",
+    "sollten",
+    "wollen",
+    "möchte",
+    "möchten",
+    "kannst",
+    "könnt",
+    "konnte",
+    "konntest",
+    "konnten",
+    "konntet",
+    "könntest",
+    "könntet",
+    "musst",
+    "müsst",
+    "musste",
+    "musstest",
+    "mussten",
+    "musstet",
+    "müsstest",
+    "müsstet",
+    "darfst",
+    "dürft",
+    "durfte",
+    "durftest",
+    "durften",
+    "durftet",
+    "dürftest",
+    "dürftet",
+    "sollst",
+    "sollt",
+    "solltest",
+    "solltet",
+    "willst",
+    "wollt",
+    "wollte",
+    "wolltest",
+    "wollten",
+    "wolltet",
+    "mag",
+    "magst",
+    "mögen",
+    "mögt",
+    "mochte",
+    "mochtest",
+    "mochten",
+    "mochtet",
+    "möchtest",
+    "möchtet",
 ];
+
+/// German perfect modal constructions use a following replacement infinitive.
+fn modal_after(words: &[&str], predicate: usize, end: usize) -> bool {
+    predicate + 1 < end
+        && ["wollen", "müssen", "sollen", "können", "dürfen", "mögen"]
+            .contains(&words[predicate + 1])
+}
 
 fn modal_before(words: &[&str], start: usize, predicate: usize) -> bool {
     // The initial token can be a name ("May cancelled"); an auxiliary follows
@@ -801,6 +882,194 @@ fn finite_subject_before(
                 .contains(&nominal[0])))
 }
 
+/// Reject a desired, expected or believed outcome even when its dependent
+/// clause uses a completed tense. A separate finite assertion remains eligible.
+fn unasserted_embedding(
+    words: &[&str],
+    original: &[&str],
+    sentences: &[std::ops::Range<usize>],
+    predicate: usize,
+) -> bool {
+    let Some(sentence) = sentences.iter().find(|range| range.contains(&predicate)) else {
+        return true;
+    };
+    let mut start = sentence.start;
+    for conjunction in sentence.start..predicate {
+        if !["and", "but", "und", "aber"].contains(&words[conjunction]) {
+            continue;
+        }
+        let mut next = conjunction + 1;
+        while next < predicate
+            && [
+                "now",
+                "today",
+                "yesterday",
+                "heute",
+                "jetzt",
+                "gestern",
+                "nun",
+            ]
+            .contains(&words[next])
+        {
+            next += 1;
+        }
+        let shared_perfect = next == predicate
+            && !words[start..conjunction]
+                .iter()
+                .any(|word| SUBORDINATE_CLAUSE_MARKERS.contains(word))
+            && (start..conjunction).any(|index| {
+                ["habe", "haben", "have", "has", "had"].contains(&words[index])
+                    && finite_subject_before(words, original, start, index)
+            });
+        if shared_perfect
+            || (next..=predicate).any(|index| {
+                (index == predicate
+                    || [
+                        "habe", "haben", "hast", "hat", "habt", "hatte", "hatten", "ist", "sind",
+                        "war", "waren", "wurde", "wurden", "have", "has", "had", "am", "is", "are",
+                        "was", "were",
+                    ]
+                    .contains(&words[index]))
+                    && finite_subject_before(words, original, next, index)
+            })
+        {
+            start = next;
+        }
+    }
+    (start..predicate).any(|index| {
+        if ![
+            "hope",
+            "hopes",
+            "hoped",
+            "hoping",
+            "wish",
+            "wishes",
+            "wished",
+            "wishing",
+            "want",
+            "wants",
+            "wanted",
+            "wanting",
+            "plan",
+            "plans",
+            "planned",
+            "planning",
+            "propose",
+            "proposes",
+            "proposed",
+            "proposing",
+            "suggest",
+            "suggests",
+            "suggested",
+            "suggesting",
+            "expect",
+            "expects",
+            "expected",
+            "expecting",
+            "assume",
+            "assumes",
+            "assumed",
+            "assuming",
+            "guess",
+            "guesses",
+            "guessed",
+            "guessing",
+            "believe",
+            "believes",
+            "believed",
+            "believing",
+            "think",
+            "thinks",
+            "thought",
+            "thinking",
+            "hoffe",
+            "hoffst",
+            "hofft",
+            "hoffen",
+            "hoffte",
+            "hofftest",
+            "hofften",
+            "hofftet",
+            "gehofft",
+            "wünsche",
+            "wünschst",
+            "wünscht",
+            "wünschen",
+            "wünschte",
+            "wünschtest",
+            "wünschten",
+            "wünschtet",
+            "gewünscht",
+            "plane",
+            "planst",
+            "plant",
+            "planen",
+            "plante",
+            "plantest",
+            "planten",
+            "plantet",
+            "geplant",
+            "erwarte",
+            "erwartest",
+            "erwartet",
+            "erwarten",
+            "erwartete",
+            "erwarteten",
+            "glaube",
+            "glaubst",
+            "glaubt",
+            "glauben",
+            "glaubte",
+            "glaubten",
+            "geglaubt",
+            "vermute",
+            "vermutest",
+            "vermutet",
+            "vermuten",
+            "vermutete",
+            "vermuteten",
+            "vorgeschlagen",
+        ]
+        .contains(&words[index])
+        {
+            return false;
+        }
+        // An adjective or noun in the actual subject/object is not a matrix
+        // predicate ("the proposed plan", "the hope report").
+        if index > start
+            && [
+                "the", "a", "an", "this", "that", "our", "your", "their", "his", "her", "my",
+                "its", "der", "die", "das", "den", "dem", "des", "ein", "eine", "einen", "einem",
+                "einer", "eines", "unser", "unsere", "mein", "meine", "ihr", "ihre",
+            ]
+            .contains(&words[index - 1])
+        {
+            return false;
+        }
+        // Modifiers can separate a determiner from the noun "plan". Use the
+        // same bounded nominal-subject proof as the terminal predicate.
+        if (index + 1..predicate).any(|auxiliary| {
+            [
+                "is", "are", "was", "were", "has", "have", "ist", "sind", "wurde", "wurden",
+            ]
+            .contains(&words[auxiliary])
+                && finite_subject_before(words, original, start, auxiliary)
+        }) {
+            return false;
+        }
+        // Preserve a proper name or its possessive rather than blacklisting
+        // names such as Hope when the following action really is asserted.
+        let proper_name = original[index]
+            .chars()
+            .next()
+            .is_some_and(char::is_uppercase)
+            && (words.get(index + 1) == Some(&"s")
+                || (index + 1 == predicate
+                    && finite_subject_before(words, original, start, predicate)));
+        !proper_name
+    })
+}
+
 /// Require an affirmative decision assertion. Its infinitive/that-clause may
 /// itself be negative ("decided not to ..."); that does not negate the decision.
 pub(super) fn recorded_decision_quote_allowed(quote: &str) -> bool {
@@ -813,11 +1082,17 @@ pub(super) fn recorded_decision_quote_allowed(quote: &str) -> bool {
     // Bind German auxiliaries to the same clause, including ASR without commas.
     // Token counts also match the temporary two-token expansion of "we've".
     let clauses = assertion_clauses(&lower);
+    let sentences = assertion_ranges(&lower, false);
     let german = words.iter().enumerate().find_map(|(index, word)| {
         if !["entscheiden", "beschließen", "beschlossen", "entschieden"].contains(word) {
             return None;
         }
         let clause = clauses.iter().find(|range| range.contains(&index))?;
+        if unasserted_embedding(&words, &original_words, &sentences, index)
+            || modal_after(&words, index, clause.end)
+        {
+            return None;
+        }
         let subordinate = subordinate_start(&words, clause.start, index);
         let start = subordinate.unwrap_or(clause.start);
         let finite = subordinate.is_none()
@@ -857,14 +1132,18 @@ pub(super) fn recorded_decision_quote_allowed(quote: &str) -> bool {
                 || words[start..index]
                     .iter()
                     .any(|word| ["have", "has", "had", "is", "are", "was", "were"].contains(word));
-            return (asserted && !unasserted_auxiliary_before(&words, start, index))
-                .then_some(index + 1);
+            return (asserted
+                && !unasserted_auxiliary_before(&words, start, index)
+                && !unasserted_embedding(&words, &original_words, &sentences, index))
+            .then_some(index + 1);
         }
         if *word != "we" {
             return None;
         }
         if matches!(next, Some("decide" | "decided")) {
-            return (next == Some("decided") || subordinate.is_none()).then_some(index + 2);
+            return ((next == Some("decided") || subordinate.is_none())
+                && !unasserted_embedding(&words, &original_words, &sentences, index + 1))
+            .then_some(index + 2);
         }
         if !matches!(next, Some("have" | "had")) {
             return None;
@@ -877,7 +1156,9 @@ pub(super) fn recorded_decision_quote_allowed(quote: &str) -> bool {
         {
             predicate += 1;
         }
-        (words.get(predicate) == Some(&"decided")).then_some(predicate + 1)
+        (words.get(predicate) == Some(&"decided")
+            && !unasserted_embedding(&words, &original_words, &sentences, predicate))
+        .then_some(predicate + 1)
     });
     let assertion_end = if let Some((index, clause_end)) = german {
         if clause_end < words.len() {
@@ -976,6 +1257,7 @@ pub(super) fn withdrawal_quote_allowed(quote: &str) -> bool {
     let original = quote.replace('’', "'");
     let original_words = assertion_words(&original);
     let clauses = assertion_clauses(&lower);
+    let sentences = assertion_ranges(&lower, false);
     words.iter().enumerate().any(|(index, word)| {
         let Some(clause) = clauses.iter().find(|range| range.contains(&index)) else {
             return false;
@@ -984,6 +1266,8 @@ pub(super) fn withdrawal_quote_allowed(quote: &str) -> bool {
         let start = subordinate.unwrap_or(clause.start);
         if infinitive_after(&words, index, clause.end)
             || unasserted_auxiliary_before(&words, start, index)
+            || modal_after(&words, index, clause.end)
+            || unasserted_embedding(&words, &original_words, &sentences, index)
         {
             return false;
         }
@@ -1326,14 +1610,9 @@ pub(super) fn completion_quote_allowed(quote: &str) -> bool {
     // Other apostrophe tokens still split as before, preserving haven/not guards;
     // original sources and evidence are never normalized or rewritten.
     let lower = quote.to_lowercase().replace('’', "'");
-    let words: Vec<_> = lower
-        .split(|c: char| !c.is_alphabetic() && c != '\'')
-        .flat_map(|token| match token {
-            "i've" => vec!["i", "have"],
-            "we've" => vec!["we", "have"],
-            _ => token.split('\'').filter(|word| !word.is_empty()).collect(),
-        })
-        .collect();
+    let words = assertion_words(&lower);
+    let original = quote.replace('’', "'");
+    let original_words = assertion_words(&original);
     // German "fast" means almost; English "fast" can describe a fully
     // completed action. Require a German predicate before treating it as partial.
     let german_partial = words.contains(&"fast")
@@ -1363,11 +1642,21 @@ pub(super) fn completion_quote_allowed(quote: &str) -> bool {
         return false;
     }
     let clauses = assertion_clauses(&lower);
+    let sentences = assertion_ranges(&lower, false);
     let phrase = |sequence: &[&str]| {
         clauses.iter().any(|range| {
             words[range.clone()]
                 .windows(sequence.len())
-                .any(|part| part == sequence)
+                .enumerate()
+                .any(|(offset, part)| {
+                    part == sequence
+                        && !unasserted_embedding(
+                            &words,
+                            &original_words,
+                            &sentences,
+                            range.start + offset + sequence.len() - 1,
+                        )
+                })
         })
     };
     if [
@@ -1412,7 +1701,9 @@ pub(super) fn completion_quote_allowed(quote: &str) -> bool {
                 predicate += 1;
             }
         }
-        predicate < clause.end && english.contains(&words[predicate])
+        predicate < clause.end
+            && english.contains(&words[predicate])
+            && !unasserted_embedding(&words, &original_words, &sentences, predicate)
     }) {
         return true;
     }
@@ -1435,7 +1726,10 @@ pub(super) fn completion_quote_allowed(quote: &str) -> bool {
             return false;
         };
         // A perfect infinitive states an intention, not its completion.
-        if infinitive_after(&words, index, clause.end) {
+        if infinitive_after(&words, index, clause.end)
+            || modal_after(&words, index, clause.end)
+            || unasserted_embedding(&words, &original_words, &sentences, index)
+        {
             return false;
         }
         let subordinate = subordinate_start(&words, clause.start, index);
