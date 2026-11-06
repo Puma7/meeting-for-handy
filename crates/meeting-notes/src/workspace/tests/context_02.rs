@@ -951,3 +951,125 @@ fn withdrawal_requires_explicit_current_intent_and_rejection_preserves_both_kind
         "Invalid withdrawal accepted: {accepted_invalid:?}"
     );
 }
+
+#[test]
+fn invalid_model_answer_gets_one_fully_validated_retry_and_never_a_partial_save() {
+    use std::{
+        io::{Read, Write},
+        net::TcpListener,
+        thread,
+        time::{Duration, Instant},
+    };
+    for always_bad in [false, true] {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let endpoint = format!("http://{}/v1/", listener.local_addr().unwrap());
+        let dir = tempfile::tempdir().unwrap();
+        let folder = dir.path().to_owned();
+        let server = thread::spawn(move || {
+            let expected = if always_bad { 2 } else { 4 };
+            let end = Instant::now() + Duration::from_secs(5);
+            let mut phases = Vec::new();
+            while phases.len() < expected && Instant::now() < end {
+                let (mut stream, _) = match listener.accept() {
+                    Ok(v) => v,
+                    Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                        thread::sleep(Duration::from_millis(2));
+                        continue;
+                    }
+                    Err(e) => panic!("{e}"),
+                };
+                stream.set_nonblocking(false).unwrap();
+                stream
+                    .set_read_timeout(Some(Duration::from_secs(2)))
+                    .unwrap();
+                let mut bytes = Vec::new();
+                let mut buf = [0; 8192];
+                let header;
+                loop {
+                    let n = stream.read(&mut buf).unwrap();
+                    assert!(n > 0 && bytes.len() < 1_000_000);
+                    bytes.extend_from_slice(&buf[..n]);
+                    if let Some(p) = bytes.windows(4).position(|v| v == b"\r\n\r\n") {
+                        header = p + 4;
+                        break;
+                    }
+                }
+                let text = String::from_utf8_lossy(&bytes[..header]);
+                let size = text
+                    .lines()
+                    .filter_map(|l| l.split_once(':'))
+                    .find(|(k, _)| k.eq_ignore_ascii_case("content-length"))
+                    .unwrap()
+                    .1
+                    .trim()
+                    .parse::<usize>()
+                    .unwrap();
+                while bytes.len() < header + size {
+                    let n = stream.read(&mut buf).unwrap();
+                    assert!(n > 0);
+                    bytes.extend_from_slice(&buf[..n]);
+                }
+                let body: serde_json::Value =
+                    serde_json::from_slice(&bytes[header..header + size]).unwrap();
+                let input: serde_json::Value =
+                    serde_json::from_str(body["messages"][1]["content"].as_str().unwrap()).unwrap();
+                let index = phases.len();
+                phases.push(input["purpose"].as_str().unwrap().to_owned());
+                assert!(
+                    !folder.join("revision-00000001.json").exists(),
+                    "No intermediate or invalid answer may be published"
+                );
+                let change = json!({"proposalId":"p_one","kind":"task","targetId":null,"targetRevision":null,"text":"Entwurf freigeben","status":"open","attention":"current","owner":null,"due":"morgen","evidence":[{"sourceId":input["transcriptSources"][0]["id"],"quote":"Ich gebe den Entwurf morgen frei."}],"relatedEntityIds":[]});
+                let changes = if always_bad || index == 0 {
+                    json!([change.clone(), change])
+                } else if index == 1 {
+                    json!([change])
+                } else {
+                    json!([])
+                };
+                let answer=json!({"contractVersion":CONTRACT_VERSION,"requestId":input["requestId"],"changes":changes,"overviewRefs":if index<=1{json!(["p_one"])}else{json!([])},"unresolvedContextIds":[],"moreChangesPossible":false}).to_string();
+                let payload = format!(
+                    "data: {}\n\ndata: {}\n\n",
+                    json!({"choices":[{"delta":{"content":answer},"finish_reason":null}]}),
+                    json!({"choices":[{"delta":{},"finish_reason":"stop"}]})
+                );
+                write!(stream,"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{payload}",payload.len()).unwrap();
+            }
+            phases
+        });
+        let mut runner = WorkspaceRunner::open(dir.path()).unwrap();
+        runner.set_context(Default::default()).unwrap();
+        let client = TextClient::new(&crate::Connection {
+            endpoint,
+            model: "synthetic".into(),
+            mode: "local".into(),
+            cloud_consent: false,
+            api_key: String::new(),
+        })
+        .unwrap();
+        let texts = vec![LiveText {
+            key: "generated".into(),
+            track: "system".into(),
+            start_ms: 0,
+            end_ms: 3000,
+            text: "Ich gebe den Entwurf morgen frei.".into(),
+        }];
+        let pending = runner.pending(&texts);
+        let control = AnalysisControl::default();
+        let result = runner.update(&client, &pending, &control, "de");
+        assert_eq!(control.validation_retries(), 1);
+        let phases = server.join().unwrap();
+        if always_bad {
+            assert!(result.is_err());
+            assert_eq!(runner.state.revision, 0);
+            assert!(!dir.path().join("revision-00000001.json").exists());
+            assert_eq!(phases, ["tasks", "tasks"]);
+        } else {
+            result.unwrap();
+            assert_eq!(runner.state.entities.len(), 1);
+            assert_eq!(runner.state.revision, 1);
+            assert_eq!(phases, ["tasks", "tasks", "facts", "reconcile"]);
+        }
+    }
+}

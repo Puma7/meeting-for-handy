@@ -11,6 +11,40 @@ Private Rohbelege und Nutzermeetings werden nicht veröffentlicht.
 
 ## Aktuelle Korrektur und Regressionen
 
+Die [vollständige CodeRabbit-Runde auf 078d710](https://github.com/Puma7/meeting-for-handy/pull/41#pullrequestreview-5799080244)
+enthielt keinen neuen nachgewiesenen Produktfehler, aber einen berechtigten
+Testhinweis. Der native Kontext-Test hält jetzt gleichzeitig Recording-,
+LiveNotes- und gemeinsame OS-Publikationsreservierungen. Ein tatsächlich belegter
+Active-Slot mit eigenem wartenden Testworker bleibt während aller Änderungen
+aktiv. Gemeinsamer Text wird bei synthetisch auf updating gesetzter Auswertung zurückgestellt;
+menschliche Statusänderungen werden dabei dauerhaft gespeichert. Nach der
+Inferenz wird die gemeinsame Notiz dauerhaft übernommen. Aufnahmeslot, Stoppsignal,
+Worker und ursprüngliche Manifestbytes bleiben durchgehend erhalten. Ausschließlich
+synthetischer Worker und Sitzung, kein Gerät, Audio oder Modellzugriff.
+
+Die verstärkte Regression besteht mit unverändertem Produktverhalten. Eine nur
+lokale, absichtlich falsche zusätzliche Aufnahmesperre ließ sie tatsächlich
+fehlschlagen. Diese Kontrollmutation wurde bytegenau zurückgenommen und niemals
+veröffentlicht. Das belegt einen aussagekräftigen Test für eine bisherige
+Abdeckungslücke; es wird kein zuvor nachgewiesener Produktfehler behauptet.
+
+Dieselbe Runde konnte validate.rs nicht vollständig prüfen. Die Ursache der
+Anbietermeldung ist nicht belegt. Die reinen Belegbedingungen stehen jetzt in
+assertions.rs, getrennt von der dauerhaften Zustandsvalidierung. Sämtliche
+Funktionskörper, Literale und Bedingungen sind bytegleich; nur Import,
+gleichrangige Weitergabe und ein abschließender Zeilentrenner ändern die Struktur.
+Der Hauptteil schrumpft von 72.581 Bytes auf rund 24 kB, der reine Belegteil hat
+rund 49 kB. Weitere vollständige Testblöcke wurden ohne Inhaltsänderung in
+verwandte bestehende Module eingeordnet: alle 80 Namen und vollständigen
+Test-/Hilfsblöcke bleiben bytegleich, abgesehen von abschließenden Modultrennern.
+Diese vollständige Zählung schließt den unveränderten Unix-only-Fall ein;
+die zuvor ausgewiesenen 79 zählten nur die ohne zusätzliches cfg-Attribut.
+Weiterhin 102 tatsächliche PR-Dateien, 100 unter den unveränderten zwei
+Lockdatei-Filtern prüfbar. Keine neue Ausnahme und keine abgesenkte Prüfschwelle.
+Erst eine neue vollständige Anbieterrunde kann die Reichweitenlücke schließen.
+
+### Erhaltene Updaterkorrektur
+
 Die [Codex-Runde auf 5644ec0](https://github.com/Puma7/meeting-for-handy/pull/41#pullrequestreview-5798412142)
 fand einen gültigen Updaterfehler: Der bisherige Zahlenparser wies die eigene
 Vorabversion 1.1.0-beta.1 ab. Eine neue Regression reproduzierte tatsächlich
@@ -68,8 +102,8 @@ Zwischenstand vor dieser Ergänzung. Sie bleiben erhalten und werden dem
 abschließenden Stand nicht zugerechnet. Das unten ausgewiesene Paar wurde
 getrennt vorab auf dem vollständig geprüften ergänzten Stand festgelegt.
 Lange tatsächlich bestätigende Sätze, bestätigte Folgesätze, Namen und
-Themenbezeichnungen wie The denied report bleiben zulässig. Keine neue
-Testfunktion, keine neue Datei und keine abgesenkte Schwelle. Die Erkennung
+Themenbezeichnungen wie The denied report bleiben zulässig. Diese vorige Korrektur ergänzte keine neue
+Testfunktion oder Datei und senkte keine Schwelle. Die Erkennung
 ist begrenzt und konservativ, kein vollständiger Grammatik- oder Wahrheitsbeweis.
 
 Die vorherige Wiederaufnahmekorrektur bleibt vollständig erhalten: Nach dem
@@ -85,15 +119,16 @@ ausgeblendete KI-Entwürfe werden nicht erneut an das Modell gesendet.
 
 | Prüfung | Ergebnis und Zuordnung |
 | --- | --- |
-| Rust, Workspace, alle Targets | Frisch **569 bestanden**, darunter **169 Notizenfälle** und **37 Providerprotokollfälle**; drei bestehende besondere Einstiege regulär ignoriert. |
+| Rust lokal unter Windows, Workspace, alle Targets | Frisch **569 bestanden**, darunter **169 Notizenfälle** und **37 Providerprotokollfälle**; drei bestehende besondere Einstiege regulär ignoriert. |
 | Format und Clippy | Frisch bestanden, gesperrte Abhängigkeiten, Warnungen als Fehler. |
 | Frontend | Bytegleich zu f7fc62c; dessen **417 Tests in 21 Dateien**, TypeScript, Build und Format wurden hierfür nicht erneut ausgeführt. |
 | Browser | Bytegleich zur tatsächlichen vorherigen **16er-Matrix**, nicht erneut ausgeführt. |
 | Projektprüfung | Frisch verify.ps1: 47 PCM-, 35 Notizen-, 28 Vorlagen-, acht Agenten- und Monitorprüfungen bestanden. |
-| Deutsch, echtes lokales Modell | Auf 5644ec0: **117.8902805 s**, **0** reguläre Validierungswiederholungen; unveränderte Modellanbindung, nicht erneut ausgeführt. |
-| Englisch, echtes lokales Modell | Auf 5644ec0: **115.0313873 s**, **0** reguläre Validierungswiederholungen; unveränderte Modellanbindung, nicht erneut ausgeführt. |
+| Deutsch, echtes lokales Modell | Frisch nach der Modulaufteilung: **147.1481294 s**, **0** reguläre Validierungswiederholungen; alle fünf Kriterien bestanden. |
+| Englisch, echtes lokales Modell | Frisch nach der Modulaufteilung: **114.8688505 s**, **0** reguläre Validierungswiederholungen; alle fünf Kriterien bestanden. |
 
-Beide Modellreferenzen nutzen den unveränderten synthetischen Gesprächskorpus.
+Beide frischen Modellreferenzen liefen nach beendeten eigenen nativen Prüfungen
+auf der neuen Modulstruktur und nutzen den unveränderten synthetischen Gesprächskorpus.
 Englisch einschließlich I’ll und der ursprüngliche englische Referenzpatch
 93335102ed bleiben erhalten. Die fünf Kriterien bestehen: positive Aufgabe,
 unverbindliche Aussage nicht als Aufgabe, erhaltene Impulse, menschlicher
@@ -113,6 +148,21 @@ isoliert. Working Set, Private Bytes und Grafikspeicher wurden nicht neu
 gemessen. Modell-Dateigröße ist keine RAM-Messung.
 
 ## Reviews und erhaltene Nachweise
+
+Zwei frische Codex-Codeprüfungen auf dem vorherigen unveränderten 078d710 waren
+sauber: [erste Quittung](https://github.com/Puma7/meeting-for-handy/pull/41#issuecomment-6682766893),
+[zweite Quittung](https://github.com/Puma7/meeting-for-handy/pull/41#issuecomment-6682865939).
+Die anschließende volle CodeRabbit-Runde 6eb3e1b5-6522-4f39-9403-ac930f0181c7
+prüfte Basis bis 078d710 und wählte alle tatsächlichen 100 zulässigen Dateien aus,
+ließ aber validate.rs unverfügbar und enthielt den oben ergänzten Testhinweis.
+Sie zählt ausdrücklich nicht als saubere vollständige Runde. Dokumentation
+83.21 Prozent bei unveränderter 80-Prozent-Grenze; 131 Funktionen in 50 Dateien,
+48 ausgelassen (19 nicht unterstützt, 29 über dem Limit des Dokumentationstools).
+LanguageTool prüfte nicht alle Textstücke der Notiz, Ursache unbekannt.
+Keine gesonderte aktuelle Risiko-/Architektureinstufung in diesem Snapshot.
+Alle Risiko-, Zusatz-, Nitpick-, Outside-diff- und operativen Texte wurden gelesen.
+Die neue Quellstruktur benötigt neue Prüfungen auf ihrem eigenen finalen Head;
+vorherige CODE-/CI-Ergebnisse werden ihr nicht zugerechnet.
 
 Der [vollständige CodeRabbit-Lauf auf f7fc62c](https://github.com/Puma7/meeting-for-handy/pull/41#issuecomment-6678669089)
 endete ohne neue Befunde. Alle 100 zulässigen Dateien wurden unabhängig mit

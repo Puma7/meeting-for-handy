@@ -1,4 +1,5 @@
 //! Stable, source-backed workspace updates. Models receive only explicit text DTOs.
+mod assertions;
 mod context_store;
 pub(crate) mod memory;
 mod model;

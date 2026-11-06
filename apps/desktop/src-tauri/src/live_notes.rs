@@ -1136,7 +1136,49 @@ mod tests {
     fn protocol_edits_are_deferred_at_native_publication_gate_until_inference_finishes() {
         let root = fixture_root("deferred-protocol");
         let service = Arc::new(Service::new(root.clone()).unwrap());
-        let meeting_id = "e".repeat(32);
+        let store = meeting_core::SessionStore::create(
+            &root.join("sessions"),
+            "Synthetic active meeting",
+            "synthetic",
+            "synthetic-system",
+            None,
+        )
+        .unwrap();
+        let meeting_id = store.snapshot().unwrap().id;
+        let manifest = store.folder().join("session.json");
+        let original_manifest = std::fs::read(&manifest).unwrap();
+        let recording_lease = service
+            .reserve_operation(crate::operations::Kind::Recording)
+            .unwrap();
+        let live_lease = service
+            .reserve_operation(crate::operations::Kind::LiveNotes)
+            .unwrap();
+        let publication = meeting_core::archive::source_publication_lease(&root).unwrap();
+        let (finish, wait) = std::sync::mpsc::channel();
+        // A live synthetic worker keeps the Active slot through admission reaping.
+        // Dropping the sender during unwinding also releases this owned worker.
+        let worker = thread::spawn(move || {
+            let _ = wait.recv();
+        });
+        service.lock().unwrap().active = Some(crate::Active {
+            _operation: Some(recording_lease),
+            owner: None,
+            store,
+            capture: None,
+            stop: Arc::new(AtomicBool::new(false)),
+            workers: vec![crate::asr::RecognitionWorker {
+                source: "system".into(),
+                handle: worker,
+            }],
+        });
+        let assert_recording_untouched = || {
+            let inner = service.lock().unwrap();
+            let active = inner.active.as_ref().unwrap();
+            assert_eq!(active.store.snapshot().unwrap().id, meeting_id);
+            assert!(!active.stop.load(Ordering::Acquire));
+            assert!(!active.workers[0].handle.is_finished());
+            assert_eq!(std::fs::read(&manifest).unwrap(), original_manifest);
+        };
         let connection = meeting_notes::Connection {
             endpoint: "http://127.0.0.1:1235/v1/".into(),
             model: "synthetic".into(),
@@ -1199,6 +1241,7 @@ mod tests {
             .unwrap());
         assert_eq!(*handle.lock().unwrap(), context);
         assert_eq!(std::fs::read_dir(&folder).unwrap().count(), before);
+        assert_recording_untouched();
         let mut human = context.clone();
         human.overrides.push(meeting_notes::workspace::Override {
             id: "e_topic".into(),
@@ -1217,6 +1260,14 @@ mod tests {
                 .status,
             "discussed"
         );
+        assert_eq!(
+            meeting_notes::workspace::read_state(&folder)
+                .unwrap()
+                .context
+                .overrides,
+            handle.lock().unwrap().overrides
+        );
+        assert_recording_untouched();
         edit.revision = handle.lock().unwrap().revision;
         edit.overrides = handle.lock().unwrap().overrides.clone();
         service
@@ -1237,6 +1288,7 @@ mod tests {
             handle.lock().unwrap().shared_notes[0].text,
             "Synthetic committed edit"
         );
+        assert_recording_untouched();
         service.live_notes.stop().unwrap();
         drop(runner);
         assert_eq!(
@@ -1247,6 +1299,17 @@ mod tests {
                 .text,
             "Synthetic committed edit"
         );
+        assert_recording_untouched();
+        assert!(service
+            .reserve_operation(crate::operations::Kind::Maintenance)
+            .is_err());
+        let mut active = service.lock().unwrap().active.take().unwrap();
+        finish.send(()).unwrap();
+        for worker in active.workers.drain(..) {
+            worker.handle.join().unwrap();
+        }
+        drop(active);
+        drop((live_lease, publication));
         drop(service);
         remove_fixture_root(root);
     }

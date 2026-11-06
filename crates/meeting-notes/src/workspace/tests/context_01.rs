@@ -1041,3 +1041,283 @@ fn a_human_only_append_during_inference_rebases_without_losing_model_publication
         assert_eq!(saved.events.iter().filter(|event| event.human).count(), 1);
     }
 }
+
+#[test]
+fn contracted_promises_reach_the_tasks_phase_with_literal_reopen_state() {
+    use std::{
+        io::{Read, Write},
+        net::TcpListener,
+        thread,
+        time::{Duration, Instant},
+    };
+    let mut phase_mismatches = Vec::new();
+    for (quote, allowed) in [
+        ("I'll email the report tomorrow.", true),
+        ("We'll send the report tomorrow.", true),
+        ("I’ll email the report tomorrow.", true),
+        ("We’ll send the report tomorrow.", true),
+        ("I'll not email the report tomorrow.", false),
+        ("We'll not send the report tomorrow.", false),
+        ("I’ll not email the report tomorrow.", false),
+        ("We’ll not send the report tomorrow.", false),
+        ("I will check if the report is ready.", true),
+        ("I’ll ask if the budget is approved.", true),
+        ("I will check whether the report is ready.", true),
+        ("I’ll ask whether the budget is approved.", true),
+        (
+            "I will ask if the report is ready and check if the pilot can start.",
+            true,
+        ),
+        ("I will email the report if the budget is approved.", false),
+        (
+            "I will check if the report is ready if the budget is approved.",
+            false,
+        ),
+        (
+            "If the budget is approved, I'll ask if the report is ready.",
+            false,
+        ),
+        (
+            "I'll check if the report is ready unless the owner objects.",
+            false,
+        ),
+        ("I will not check if the report is ready.", false),
+        ("I’ll not ask if the budget is approved.", false),
+        ("I will check that the report is not public.", true),
+        (
+            "Ich übernehme die Prüfung, ob der Bericht nicht öffentlich ist.",
+            true,
+        ),
+        ("I will check if the report is not public.", true),
+        ("I’ll ask whether there is no commitment yet.", true),
+        ("Ich prüfe, ob der Bericht nicht öffentlich ist.", true),
+        ("I will ensure that the report is not public.", true),
+        ("Robin prüft, ob der Bericht nicht öffentlich ist.", true),
+        ("Robin prüft, ob der Bericht öffentlich ist.", true),
+        ("I will check that nobody has published the report.", true),
+        (
+            "Ich prüfe, ob niemand den Bericht veröffentlicht hat.",
+            true,
+        ),
+        ("I will not check that the report is public.", false),
+        (
+            "Ich übernehme die Prüfung nicht, ob der Bericht öffentlich ist.",
+            false,
+        ),
+        ("Ich prüfe nicht, ob der Bericht öffentlich ist.", false),
+        (
+            "I will check that the report is not public, but I will not do the check.",
+            false,
+        ),
+        (
+            "Ich prüfe, ob der Bericht nicht öffentlich ist, aber ich prüfe nicht.",
+            false,
+        ),
+        (
+            "I will check that the report is not public; no commitment.",
+            false,
+        ),
+        (
+            "I will check that the report is not public and I will not do the check.",
+            false,
+        ),
+        (
+            "I will check if the report is not public if approval arrives.",
+            false,
+        ),
+        (
+            "I won’t forget to check that the report is not public.",
+            true,
+        ),
+        ("I won’t forget to check if the report is ready.", true),
+        ("I won’t forget to not check the report.", false),
+        (
+            "I won’t forget to check that the report is not public, but I won’t do the check.",
+            false,
+        ),
+        ("Robin will check if the report is ready.", true),
+        ("Robin will check that the report is not public.", true),
+        ("Robin will ask if the report is ready.", true),
+        ("Robin will not check if the report is ready.", false),
+        ("Robin will check the report if approval arrives.", false),
+        ("No one will check the report.", false),
+        ("None of us will send the report.", false),
+        ("Neither Robin nor Casey will send the report.", false),
+        (
+            "I will check that none of us has published the report.",
+            true,
+        ),
+        ("I will check whether neither copy is public.", true),
+        ("No employee will send the report.", false),
+        ("Today no participant will prepare the report.", false),
+        ("Not a problem, no employee will send the report.", false),
+        ("I will check that no one has published the report.", true),
+        (
+            "I will ask whether no employee has published the report.",
+            true,
+        ),
+        (
+            "No problem, I will check that no one has published the report.",
+            true,
+        ),
+        ("No later than Friday, I will send the report.", true),
+        ("I will send the report no later than Friday.", true),
+        ("Das Protokoll wurde erstellt.", false),
+        ("Der Bericht ist erstellt.", false),
+        ("Das Protokoll wurde bereits erstellt.", false),
+        ("Der Bericht war heute schon vollständig erstellt.", false),
+        ("Das Protokoll ist bereits erstellt, wie besprochen.", false),
+        ("Robin ist bereit und erstellt den Bericht.", true),
+        ("Robin war krank, erstellt jetzt den Bericht.", true),
+        (
+            "Ich übernehme die Prüfung, ob das Protokoll bereits erstellt ist.",
+            true,
+        ),
+        ("Der Bericht wurde erstellt .", false),
+        ("Das Protokoll ist erstellt, wie besprochen.", false),
+        ("Robin erstellt, wie vereinbart, den Bericht.", true),
+        ("Robin erstellt den Bericht.", true),
+        (
+            "Ich übernehme die Prüfung, ob das Protokoll erstellt ist.",
+            true,
+        ),
+        (
+            "Das Protokoll wurde erstellt, ich übernehme die Prüfung.",
+            true,
+        ),
+    ] {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let endpoint = format!("http://{}/v1/", listener.local_addr().unwrap());
+        let original = quote.to_owned();
+        let server = thread::spawn(move || {
+            let end = Instant::now() + Duration::from_secs(5);
+            let mut phases = Vec::new();
+            while Instant::now() < end {
+                let (mut stream, _) = match listener.accept() {
+                    Ok(value) => value,
+                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                        thread::sleep(Duration::from_millis(2));
+                        continue;
+                    }
+                    Err(error) => panic!("{error}"),
+                };
+                stream.set_nonblocking(false).unwrap();
+                stream
+                    .set_read_timeout(Some(Duration::from_secs(2)))
+                    .unwrap();
+                let mut bytes = Vec::new();
+                let mut buffer = [0; 8192];
+                let header = loop {
+                    let count = stream.read(&mut buffer).unwrap();
+                    assert!(count > 0 && bytes.len() < 1_000_000);
+                    bytes.extend_from_slice(&buffer[..count]);
+                    if let Some(at) = bytes.windows(4).position(|part| part == b"\r\n\r\n") {
+                        break at + 4;
+                    }
+                };
+                let size = String::from_utf8_lossy(&bytes[..header])
+                    .lines()
+                    .filter_map(|line| line.split_once(':'))
+                    .find(|(key, _)| key.eq_ignore_ascii_case("content-length"))
+                    .unwrap()
+                    .1
+                    .trim()
+                    .parse::<usize>()
+                    .unwrap();
+                assert!(size < 1_000_000);
+                while bytes.len() < header + size {
+                    let count = stream.read(&mut buffer).unwrap();
+                    assert!(count > 0);
+                    bytes.extend_from_slice(&buffer[..count]);
+                }
+                let body: serde_json::Value =
+                    serde_json::from_slice(&bytes[header..header + size]).unwrap();
+                let req: serde_json::Value =
+                    serde_json::from_str(body["messages"][1]["content"].as_str().unwrap()).unwrap();
+                assert_eq!(req["transcriptSources"][0]["text"], original);
+                let phase = req["purpose"].as_str().unwrap().to_owned();
+                phases.push(phase.clone());
+                let changes = if phase == "tasks" {
+                    json!([{"proposalId":"p_promise","kind":"task","targetId":null,
+                        "targetRevision":null,"text":if original.to_lowercase().contains("prüf") { "Bericht prüfen" } else if original.contains("check") || original.contains("ensure") { "Check the report" } else if original.contains("ask") { "Ask about the budget" } else if original.contains("send") { "Send the report" } else { "Email the report" },"status":"open",
+                        "attention":"current","owner":null,"due":null,
+                        "evidence":[{"sourceId":req["transcriptSources"][0]["id"],
+                            "quote":original}],"relatedEntityIds":[]}])
+                } else {
+                    json!([])
+                };
+                let answer = json!({"contractVersion":CONTRACT_VERSION,
+                    "requestId":req["requestId"],"changes":changes,"overviewRefs":[],
+                    "unresolvedContextIds":[],"moreChangesPossible":false})
+                .to_string();
+                let payload = format!(
+                    "data: {}\n\ndata: {}\n\n",
+                    json!({"choices":[{"delta":{"content":answer},"finish_reason":null}]}),
+                    json!({"choices":[{"delta":{},"finish_reason":"stop"}]})
+                );
+                write!(stream,"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{payload}",payload.len()).unwrap();
+                if phase == "reconcile" {
+                    break;
+                }
+            }
+            phases
+        });
+        let folder = tempfile::tempdir().unwrap();
+        let mut runner = WorkspaceRunner::open(folder.path()).unwrap();
+        runner.set_context(Default::default()).unwrap();
+        let client = TextClient::new(&crate::Connection {
+            endpoint,
+            model: "synthetic".into(),
+            mode: "local".into(),
+            cloud_consent: false,
+            api_key: String::new(),
+        })
+        .unwrap();
+        let texts = vec![LiveText {
+            key: "promise".into(),
+            track: "system".into(),
+            start_ms: 0,
+            end_ms: 3000,
+            text: quote.into(),
+        }];
+        let pending = runner.pending(&texts);
+        let language = if quote.to_lowercase().contains("prüf") {
+            "de"
+        } else {
+            "en"
+        };
+        let result = runner.update(&client, &pending, &AnalysisControl::default(), language);
+        let phases = server.join().unwrap();
+        result.unwrap_or_else(|error| panic!("{quote}: {error}"));
+        let expected_phases = if allowed {
+            vec!["tasks", "facts", "reconcile"]
+        } else {
+            vec!["facts", "reconcile"]
+        };
+        if phases != expected_phases || runner.state.entities.len() != usize::from(allowed) {
+            phase_mismatches.push(format!(
+                "{quote}: phases={phases:?}, tasks={}, source_processed={}",
+                runner.state.entities.len(),
+                runner.pending(&texts).is_empty()
+            ));
+        }
+        if allowed && runner.state.entities.len() == 1 {
+            assert_eq!(runner.state.entities[0].evidence[0].quote, quote);
+        }
+        assert_eq!(runner.state.originals[0].text, quote);
+        assert!(runner.pending(&texts).is_empty());
+        let before = serde_json::to_vec(&runner.state).unwrap();
+        drop(runner);
+        let reopened = WorkspaceRunner::open(folder.path()).unwrap();
+        assert_eq!(
+            serde_json::to_vec(&reopened.state).unwrap(),
+            before,
+            "{quote}"
+        );
+    }
+    assert!(
+        phase_mismatches.is_empty(),
+        "Task admission lost an unconditional pledge or admitted a condition: {phase_mismatches:?}"
+    );
+}
