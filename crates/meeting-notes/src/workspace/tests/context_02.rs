@@ -1,6 +1,62 @@
 use super::*;
 
 #[test]
+fn damaged_classic_runs_without_workspace_do_not_block_new_shared_context() {
+    for marker in ["absent", "directory", "file", "non-directory-run"] {
+        let root = tempfile::tempdir().unwrap();
+        let connection = |model: &str| crate::Connection {
+            endpoint: "http://127.0.0.1:1/v1/".into(),
+            model: model.into(),
+            mode: "local".into(),
+            cloud_consent: false,
+            api_key: String::new(),
+        };
+        let classic = crate::live::LiveRunner::start(
+            root.path(),
+            "unrelated-classic-meeting",
+            connection("old-model"),
+            "en",
+        )
+        .unwrap();
+        let folder = root.path().join(&classic.run().id);
+        drop(classic);
+        let damaged = b"{damaged synthetic classic identity";
+        if marker == "non-directory-run" {
+            std::fs::write(
+                root.path().join("abcdef0123456789abcdef0123456789"),
+                damaged,
+            )
+            .unwrap();
+        } else {
+            std::fs::write(folder.join("run.json"), damaged).unwrap();
+        }
+        match marker {
+            "directory" => std::fs::create_dir(folder.join("workspace-v9")).unwrap(),
+            "file" => std::fs::write(folder.join("workspace-v9"), b"synthetic marker").unwrap(),
+            _ => (),
+        }
+        let result =
+            crate::live::LiveRunner::start(root.path(), "meeting", connection("new-model"), "en")
+                .unwrap()
+                .with_workspace(Default::default());
+        assert_eq!(
+            result.is_ok(),
+            marker == "absent",
+            "Damaged run classification: {marker}"
+        );
+        if marker != "non-directory-run" {
+            assert_eq!(std::fs::read(folder.join("run.json")).unwrap(), damaged);
+        }
+        if marker == "file" {
+            assert_eq!(
+                std::fs::read(folder.join("workspace-v9")).unwrap(),
+                b"synthetic marker"
+            );
+        }
+    }
+}
+
+#[test]
 fn resumed_model_uses_latest_durable_shared_inputs_instead_of_old_cache() {
     use std::{
         io::{Read, Write},

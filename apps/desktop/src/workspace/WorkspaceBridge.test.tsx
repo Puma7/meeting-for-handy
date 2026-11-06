@@ -10,6 +10,7 @@ import {
 } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import WorkspaceBridge from "./WorkspaceBridge";
+import SourceAudioPreview from "./SourceAudioPreview";
 import type { DesktopApi, Meeting } from "../types";
 import { LiveWorkspace } from "./shell/LiveWorkspace.jsx";
 import { fitColumn } from "./shell/fitOverview.mjs";
@@ -1518,6 +1519,165 @@ it("requests WAV bytes only on demand and revokes them when the source closes", 
     else Reflect.deleteProperty(URL, "revokeObjectURL");
   }
 });
+
+it.each(["success", "failure"] as const)(
+  "ignores stale %s when an audio-preview file changes",
+  async (outcome) => {
+    const requests = new Map<
+      string,
+      { resolve: (bytes: ArrayBuffer) => void; reject: (error: Error) => void }
+    >();
+    const load = vi.fn(
+      (file: string) =>
+        new Promise<ArrayBuffer>((resolve, reject) =>
+          requests.set(file, { resolve, reject }),
+        ),
+    );
+    const createDescriptor = Object.getOwnPropertyDescriptor(
+        URL,
+        "createObjectURL",
+      ),
+      revokeDescriptor = Object.getOwnPropertyDescriptor(
+        URL,
+        "revokeObjectURL",
+      );
+    const create = vi.fn(() => "blob:synthetic-current"),
+      revoke = vi.fn();
+    Object.defineProperty(URL, "createObjectURL", {
+      configurable: true,
+      value: create,
+    });
+    Object.defineProperty(URL, "revokeObjectURL", {
+      configurable: true,
+      value: revoke,
+    });
+    const mounted = render(
+      <SourceAudioPreview file="first" load={load} offsetSeconds={0} />,
+    );
+    try {
+      fireEvent.click(
+        screen.getByRole("button", { name: "Audiovorschau laden" }),
+      );
+      mounted.rerender(
+        <SourceAudioPreview file="second" load={load} offsetSeconds={0} />,
+      );
+      const next = screen.getByRole("button", { name: "Audiovorschau laden" });
+      expect(next.hasAttribute("disabled")).toBe(false);
+      fireEvent.click(next);
+      await act(async () => {
+        if (outcome === "success")
+          requests.get("first")!.resolve(new ArrayBuffer(44));
+        else requests.get("first")!.reject(new Error("Synthetic old failure"));
+      });
+      expect(create).not.toHaveBeenCalled();
+      expect(screen.queryByRole("status")).toBeNull();
+      expect(
+        screen
+          .getByRole("button", { name: "Audio wird geladen …" })
+          .hasAttribute("disabled"),
+      ).toBe(true);
+      await act(async () =>
+        requests.get("second")!.resolve(new ArrayBuffer(88)),
+      );
+      await screen.findByLabelText("Audiovorschau des Originalabschnitts");
+      expect(create).toHaveBeenCalledOnce();
+      expect((create.mock.calls[0] as unknown as [Blob])[0].size).toBe(88);
+      mounted.rerender(
+        <SourceAudioPreview file="third" load={load} offsetSeconds={0} />,
+      );
+      expect(
+        screen.queryByLabelText("Audiovorschau des Originalabschnitts"),
+      ).toBeNull();
+      expect(revoke).toHaveBeenCalledExactlyOnceWith("blob:synthetic-current");
+      fireEvent.click(
+        screen.getByRole("button", { name: "Audiovorschau laden" }),
+      );
+      mounted.unmount();
+      await act(async () =>
+        requests.get("third")!.resolve(new ArrayBuffer(132)),
+      );
+      expect(create).toHaveBeenCalledOnce();
+      expect(load.mock.calls.map(([file]) => file)).toEqual([
+        "first",
+        "second",
+        "third",
+      ]);
+    } finally {
+      mounted.unmount();
+      if (createDescriptor)
+        Object.defineProperty(URL, "createObjectURL", createDescriptor);
+      else Reflect.deleteProperty(URL, "createObjectURL");
+      if (revokeDescriptor)
+        Object.defineProperty(URL, "revokeObjectURL", revokeDescriptor);
+      else Reflect.deleteProperty(URL, "revokeObjectURL");
+    }
+  },
+);
+
+it.each(["stop", "override", "interval-only", "unmounted"] as const)(
+  "coalesces mutation refresh after an active workspace status read (%s)",
+  async (operation) => {
+    const polling = controlWorkspacePolling();
+    const f = fixture();
+    f.status.status = "waiting";
+    const mounted = render(
+      <LiveWorkspace
+        adapter={f.adapter}
+        meeting={f.meeting}
+        onBack={() => {}}
+      />,
+    );
+    try {
+      fireEvent.click(await screen.findByRole("tab", { name: "Impulse" }));
+      await screen.findByRole("button", { name: "Besprochen" });
+      const old = structuredClone(f.status);
+      let release!: (status: typeof f.status) => void;
+      f.adapter.status.mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            release = resolve;
+          }),
+      );
+      await polling.advance(2000);
+      expect(f.adapter.status).toHaveBeenCalledTimes(2);
+      await polling.advance(6000);
+      expect(f.adapter.status).toHaveBeenCalledTimes(2);
+      if (operation === "stop" || operation === "unmounted") {
+        f.adapter.stop.mockImplementation(async () => {
+          f.status.running = false;
+          f.status.status = "off";
+        });
+        fireEvent.click(
+          screen.getByRole("button", { name: "Nur Auswertung beenden" }),
+        );
+        await waitFor(() => expect(f.adapter.stop).toHaveBeenCalledOnce());
+      } else if (operation === "override") {
+        fireEvent.click(screen.getByRole("button", { name: "Besprochen" }));
+        await waitFor(() => expect(f.adapter.context).toHaveBeenCalledOnce());
+      }
+      if (operation === "unmounted") mounted.unmount();
+      await act(async () => release(old));
+      if (operation === "interval-only" || operation === "unmounted") {
+        expect(f.adapter.status).toHaveBeenCalledTimes(2);
+        if (operation === "interval-only")
+          expect(f.adapter.stop).not.toHaveBeenCalled();
+        expect(f.adapter.context).not.toHaveBeenCalled();
+      } else {
+        await waitFor(() => expect(f.adapter.status).toHaveBeenCalledTimes(3));
+        await screen.findByRole("button", {
+          name:
+            operation === "stop"
+              ? "Lokale Auswertung starten"
+              : "Wieder öffnen",
+        });
+      }
+      expect(f.adapter.start).not.toHaveBeenCalled();
+    } finally {
+      mounted.unmount();
+      polling.restore();
+    }
+  },
+);
 
 it("uses the current shared model configuration and blocks cloud starts in the workspace", async () => {
   const f = fixture();

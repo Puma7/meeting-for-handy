@@ -49,6 +49,7 @@ enum Loaded {
     },
     LmStudio {
         instance: String,
+        context_length: Option<u64>,
     },
 }
 
@@ -178,40 +179,49 @@ impl ModelLease {
             .map_err(|_| anyhow::anyhow!("Lokales Modell ist gesperrt."))?;
         control.check()?;
         ensure!(!state.lm_load_uncertain, "Die vorherige Modellladung wurde nicht eindeutig bestätigt. Keine weitere Instanz wird geladen. In LM Studio den Ladezustand prüfen; erst nach abgeschlossenem oder abgebrochenem Laden und manueller Bereinigung eigener Instanzen die Anwendung neu starten. Fremde Modelle nicht entladen.");
-        if let (
-            Some(Loaded::Ollama {
-                context_length: current,
-                ..
-            }),
-            Some(requested),
-        ) = (&mut state.loaded, context_length)
-        {
-            if *current != Some(requested) {
-                *current = Some(requested);
-                // A previously classic-only reservation must acknowledge the workspace
-                // budget before use. Failure stays visible and can be retried explicitly.
-                state.refresh_failed = true;
-            }
-        }
         if state.loaded.is_some() {
-            if let Some(Loaded::Ollama {
-                context_length: Some(length),
-                ..
-            }) = &state.loaded
-            {
-                // A cached app policy is not proof that another client left the
-                // runner's context unchanged since the last renewal.
-                if check_ollama_context_change(
-                    &state.client,
-                    *length,
-                    control,
-                    Duration::from_secs(10),
-                )? {
-                    state.refresh_failed = true;
+            match &state.loaded {
+                Some(Loaded::LmStudio {
+                    context_length: current,
+                    ..
+                }) => {
+                    if let Some(requested) = context_length {
+                        ensure!(*current == Some(requested), "Die eigene LM-Studio-Instanz wurde mit einem anderen Kontext geladen. Für die Meetingbegleitung zuerst die eigene bisherige Auswertung abschließen; fremde Instanzen nicht entladen.");
+                    }
                 }
-            }
-            if state.refresh_failed {
-                renew_ollama(&mut state, Duration::from_secs(300))?;
+                Some(Loaded::Ollama {
+                    context_length: current,
+                    ..
+                }) => {
+                    // Check the intended allocation before changing the established
+                    // lease. A rejected workspace admission leaves classic users usable.
+                    let desired = context_length.or(*current);
+                    let policy_changed = desired != *current;
+                    let runner_changed = if let Some(length) = desired {
+                        check_ollama_context_change(
+                            &state.client,
+                            length,
+                            control,
+                            Duration::from_secs(10),
+                        )?
+                    } else {
+                        false
+                    };
+                    if policy_changed || runner_changed || state.refresh_failed {
+                        if let Some(Loaded::Ollama {
+                            context_length: current,
+                            ..
+                        }) = &mut state.loaded
+                        {
+                            *current = desired;
+                        }
+                        // Once a renewal may be submitted, keep its intended policy
+                        // and uncertainty until its bounded acknowledgement succeeds.
+                        state.refresh_failed = true;
+                        submit_ollama_renewal(&mut state, Duration::from_secs(300))?;
+                    }
+                }
+                None => unreachable!(),
             }
             if ollama_keep_alive(&state).is_some_and(|seconds| seconds > 0) {
                 self.ensure_refresher()?;
@@ -339,6 +349,7 @@ impl ModelLease {
                 ensure!(!existing.contains(&instance), "Der Dienst hat eine bereits vorhandene Modellinstanz zurückgegeben; deren dauerhafte Reservierung ist nicht bestätigt und sie wird nicht entladen.");
                 Loaded::LmStudio {
                     instance: instance.to_owned(),
+                    context_length,
                 }
             }
         };
@@ -392,7 +403,10 @@ impl ModelLease {
             .context("Lokales Modell wurde noch nicht geladen.")?
         {
             Loaded::Ollama { context_length, .. } => (state.client.model.clone(), *context_length),
-            Loaded::LmStudio { instance } => (instance.clone(), None),
+            Loaded::LmStudio {
+                instance,
+                context_length,
+            } => (instance.clone(), *context_length),
         };
         ensure!(!state.refresh_failed, "Die lokale Modellreservierung konnte nicht erneuert werden. Modelldienst prüfen und Auswertung fortsetzen.");
         Ok((
@@ -468,7 +482,7 @@ impl Slot {
             return;
         };
         let expected_instance = match &loaded {
-            Loaded::LmStudio { instance } => Some(instance.clone()),
+            Loaded::LmStudio { instance, .. } => Some(instance.clone()),
             _ => None,
         };
         let control = AnalysisControl::default();
@@ -481,7 +495,7 @@ impl Slot {
                 self.cleanup_failed.store(false, Ordering::Release);
                 return;
             }
-            Loaded::LmStudio { instance } => state.client.model_request(
+            Loaded::LmStudio { instance, .. } => state.client.model_request(
                 "api/v1/models/unload",
                 Some(&json!({"instance_id":instance})),
                 &control,
@@ -522,7 +536,6 @@ fn ollama_keep_alive(state: &State) -> Option<i64> {
 
 /// Refresh only the existing slot's policy; failed renewal is surfaced before inference.
 fn renew_ollama(state: &mut State, timeout: Duration) -> Result<()> {
-    let seconds = ollama_keep_alive(state).context("Lokale Modellreservierung fehlt.")?;
     let context_length = match state.loaded {
         Some(Loaded::Ollama { context_length, .. }) => context_length,
         _ => None,
@@ -535,6 +548,16 @@ fn renew_ollama(state: &mut State, timeout: Duration) -> Result<()> {
             timeout.min(Duration::from_secs(10)),
         )?;
     }
+    submit_ollama_renewal(state, timeout)
+}
+
+/// Submit only after admission succeeded; preserve the intended policy on an uncertain acknowledgement.
+fn submit_ollama_renewal(state: &mut State, timeout: Duration) -> Result<()> {
+    let seconds = ollama_keep_alive(state).context("Lokale Modellreservierung fehlt.")?;
+    let context_length = match state.loaded {
+        Some(Loaded::Ollama { context_length, .. }) => context_length,
+        _ => None,
+    };
     let response = state.client.model_request(
         "api/generate",
         Some(&ollama_reservation(

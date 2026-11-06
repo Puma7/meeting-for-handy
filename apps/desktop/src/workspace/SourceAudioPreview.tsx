@@ -1,23 +1,33 @@
 import { useWorkspaceText } from "./shell/workspaceLocale.jsx";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 type PreviewState =
   | { status: "idle" | "loading" | "unavailable" }
   | { status: "ready"; bytes: ArrayBuffer };
 
-/** Request a bounded verified audio excerpt for one original source, cancelling stale preview results. */
-export default function SourceAudioPreview({
-  file,
-  load,
-  offsetSeconds,
-}: {
+type PreviewProps = {
   file: string;
   load: (file: string) => Promise<ArrayBuffer>;
   offsetSeconds: number;
-}) {
+};
+
+/** Reset the complete preview lifetime when its source file changes. */
+export default function SourceAudioPreview(props: PreviewProps) {
+  return <FileAudioPreview key={props.file} {...props} />;
+}
+
+/** Request one bounded verified excerpt on demand and ignore stale results without cancelling transport. */
+function FileAudioPreview({ file, load, offsetSeconds }: PreviewProps) {
   const t = useWorkspaceText();
   const [preview, setPreview] = useState<PreviewState>({ status: "idle" });
   const [url, setUrl] = useState<string | null>(null);
+  const alive = useRef(true);
+  useEffect(() => {
+    alive.current = true;
+    return () => {
+      alive.current = false;
+    };
+  }, []);
 
   useEffect(() => {
     if (preview.status !== "ready") {
@@ -58,11 +68,13 @@ export default function SourceAudioPreview({
         type="button"
         disabled={preview.status === "loading"}
         onClick={async () => {
+          const requestedFile = file;
           setPreview({ status: "loading" });
           try {
-            setPreview({ status: "ready", bytes: await load(file) });
+            const bytes = await load(requestedFile);
+            if (alive.current) setPreview({ status: "ready", bytes });
           } catch {
-            setPreview({ status: "unavailable" });
+            if (alive.current) setPreview({ status: "unavailable" });
           }
         }}
       >

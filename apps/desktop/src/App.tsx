@@ -1306,7 +1306,13 @@ export default function App({ api = desktopApi }: { api?: DesktopApi }) {
         if (key === base || key?.startsWith(base + ".")) keys.push(key);
       }
       // Enumerate first so removals cannot shift the next key past the cursor.
-      for (const key of keys) localStorage.removeItem(key);
+      for (const key of keys) {
+        try {
+          localStorage.removeItem(key);
+        } catch {
+          workspaceCleanupFailed = true;
+        }
+      }
     } catch {
       workspaceCleanupFailed = true;
     }

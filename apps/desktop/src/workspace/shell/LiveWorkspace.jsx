@@ -235,6 +235,7 @@ function WorkspaceContents({
     contextQueue = useRef(Promise.resolve()),
     latestStatus = useRef(null),
     polling = useRef(false),
+    mutationRefreshPending = useRef(false),
     alive = useRef(true);
   current.current = state;
   const workspace = status?.view?.workspace;
@@ -248,8 +249,12 @@ function WorkspaceContents({
     0,
   );
   /** Hydrate authoritative native progress and context, then synchronize only committed inputs when idle. */
-  async function poll() {
-    if (polling.current) return;
+  async function poll(afterMutation = false) {
+    if (!alive.current) return;
+    if (polling.current) {
+      if (afterMutation) mutationRefreshPending.current = true;
+      return;
+    }
     polling.current = true;
     try {
       let next;
@@ -290,6 +295,10 @@ function WorkspaceContents({
       if (alive.current) setError(workspaceErrorMessage(e));
     } finally {
       polling.current = false;
+      if (mutationRefreshPending.current && alive.current) {
+        mutationRefreshPending.current = false;
+        void poll();
+      }
     }
   }
   /** Publish released inputs using the current native revision, preserving concurrent edits. */
@@ -426,6 +435,7 @@ function WorkspaceContents({
     window.addEventListener("resize", resize);
     return () => {
       alive.current = false;
+      mutationRefreshPending.current = false;
       clearInterval(timer);
       window.removeEventListener("resize", resize);
     };
@@ -460,7 +470,7 @@ function WorkspaceContents({
     setError(null);
     try {
       await fn();
-      await poll();
+      await poll(true);
     } catch (e) {
       setError(workspaceErrorMessage(e));
     } finally {
@@ -490,7 +500,7 @@ function WorkspaceContents({
           ),
         );
       else setError(null);
-      await poll();
+      await poll(true);
     } catch (e) {
       setError(workspaceErrorMessage(e));
     }

@@ -279,11 +279,11 @@ it.each(["failed", "cancelled", "workspace cache failure"] as const)(
     const cache = `handymeeting.workspace.v1.${meeting.id}`;
     const otherCache = `handymeeting.workspace.v1.${retained[0].id}`;
     const heightKey = cache + ".notes-height.v1";
+    localStorage.setItem(cache, "synthetic private workspace");
     localStorage.setItem(
       heightKey,
       JSON.stringify({ version: 1, height: 200 }),
     );
-    localStorage.setItem(cache, "synthetic private workspace");
     localStorage.setItem(otherCache, "synthetic retained workspace");
     render(<App api={api} />);
     await userEvent.click(
@@ -329,7 +329,7 @@ it.each(["failed", "cancelled", "workspace cache failure"] as const)(
     expect(localStorage.getItem(cache)).toBe(
       failCache ? "synthetic private workspace" : null,
     );
-    if (!failCache) expect(localStorage.getItem(heightKey)).toBeNull();
+    expect(localStorage.getItem(heightKey)).toBeNull();
     localStorage.removeItem(cache);
     localStorage.removeItem(heightKey);
     expect(localStorage.getItem(otherCache)).toBe(

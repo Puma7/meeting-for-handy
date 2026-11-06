@@ -33,7 +33,10 @@ fn read_closed_audio_bounded(
         || part.confirmed_sample_count == 0
         || part.confirmed_sample_count > u64::from(SAMPLE_RATE) * max_seconds
     {
-        return Err("Speaker analysis needs a closed audio section of at most two minutes".into());
+        return Err(format!(
+            "Audio analysis needs a closed, non-empty section of at most {max_seconds} seconds"
+        )
+        .into());
     }
     let path = safe_audio_path(folder, &part.file)?;
     crate::pcm::verify_confirmed(&path, part)?;
@@ -1554,6 +1557,50 @@ mod tests {
 #[cfg(test)]
 mod preview_regressions {
     use super::*;
+    #[test]
+    fn rejected_audio_sections_describe_the_reader_limit_and_closed_nonempty_requirement() {
+        let dir = tempfile::tempdir().unwrap();
+        let store =
+            SessionStore::create(dir.path(), "Synthetic reader limits", "m", "out", None).unwrap();
+        let mut writer = crate::PcmWriter::new(store.clone(), "system").unwrap();
+        writer.append(&[1234_i16; 1600]).unwrap();
+        writer.finish().unwrap();
+        let part = store.snapshot().unwrap().parts[0].clone();
+        type Reader = fn(&Path, &AudioPart) -> Result<Vec<f32>>;
+        for (seconds, reader) in [
+            (120, read_closed_audio as Reader),
+            (300, read_closed_audio_preview as Reader),
+        ] {
+            assert_eq!(reader(store.folder(), &part).unwrap().len(), 1600);
+            for empty in [false, true] {
+                let mut invalid = part.clone();
+                if empty {
+                    invalid.confirmed_sample_count = 0;
+                } else {
+                    invalid.audio_closed = false;
+                }
+                let error = reader(store.folder(), &invalid).unwrap_err().to_string();
+                assert!(error.contains(&format!("{seconds} seconds")), "{error}");
+                assert!(
+                    error.contains("closed") && error.contains("non-empty"),
+                    "{error}"
+                );
+            }
+        }
+        let mut long = part.clone();
+        long.sample_count = u64::from(SAMPLE_RATE) * 121;
+        long.confirmed_sample_count = long.sample_count;
+        assert!(read_closed_audio(store.folder(), &long)
+            .unwrap_err()
+            .to_string()
+            .contains("120 seconds"));
+        long.sample_count = u64::from(SAMPLE_RATE) * 301;
+        long.confirmed_sample_count = long.sample_count;
+        assert!(read_closed_audio_preview(store.folder(), &long)
+            .unwrap_err()
+            .to_string()
+            .contains("Unsafe or inconsistent"));
+    }
     #[test]
     fn preview_of_a_three_minute_section_checks_even_the_unreturned_tail() {
         let dir = tempfile::tempdir().unwrap();

@@ -596,7 +596,7 @@ fn read_latest_shared_context(
     meeting_id: &str,
 ) -> Result<Option<crate::workspace::WorkspaceContext>> {
     let (runs, damaged) = list_runs(root)?;
-    anyhow::ensure!(damaged == 0, "Ein gespeicherter Auswertungslauf ist beschädigt. Meetingkontext prüfen; vorhandene Dateien bleiben erhalten.");
+    confirm_damaged_runs_have_no_workspace(root, &runs, damaged)?;
     let mut newest: Option<(
         chrono::DateTime<chrono::FixedOffset>,
         crate::workspace::WorkspaceContext,
@@ -635,6 +635,43 @@ fn read_latest_shared_context(
             "Die Reihenfolge älterer freigegebener Eingaben ist unbekannt. Gewünschten Meetingkontext ausdrücklich prüfen; vorhandene Dateien bleiben erhalten.");
     }
     Ok(authority)
+}
+
+/// Ignore damaged classic-only runs only after positively confirming workspace absence.
+/// Existing, unreadable or linked entries keep shared-context recovery blocked.
+fn confirm_damaged_runs_have_no_workspace(
+    root: &Path,
+    runs: &[LoadedRun],
+    damaged: usize,
+) -> Result<()> {
+    if damaged == 0 {
+        return Ok(());
+    }
+    let error = "Ein gespeicherter Auswertungslauf mit möglichem Meetingkontext ist beschädigt. Meetingkontext prüfen; vorhandene Dateien bleiben erhalten.";
+    let healthy: std::collections::HashSet<_> =
+        runs.iter().map(|run| run.run.id.as_str()).collect();
+    let mut confirmed = 0;
+    for entry in std::fs::read_dir(root)? {
+        let entry = entry?;
+        let name = entry.file_name();
+        let Some(name) = name.to_str() else {
+            continue;
+        };
+        if !store::is_hex_id(name) || healthy.contains(name) {
+            continue;
+        }
+        let metadata = std::fs::symlink_metadata(entry.path()).context(error)?;
+        anyhow::ensure!(
+            metadata.is_dir() && !crate::service::is_linked(&metadata),
+            "{error}"
+        );
+        match std::fs::symlink_metadata(entry.path().join("workspace-v9")) {
+            Err(failure) if failure.kind() == std::io::ErrorKind::NotFound => confirmed += 1,
+            _ => anyhow::bail!(error),
+        }
+    }
+    anyhow::ensure!(confirmed == damaged, "{error}");
+    Ok(())
 }
 fn read_latest_workspace_excluding(
     root: &Path,

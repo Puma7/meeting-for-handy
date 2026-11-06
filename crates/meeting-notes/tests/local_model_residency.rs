@@ -1801,3 +1801,151 @@ fn workspace_cached_context_change_requires_headroom_before_inference() {
         .iter()
         .any(|(p, b)| p == "/api/generate" && b["keep_alive"] == 0));
 }
+
+/// A refused context allocation must not poison a still-usable classic reservation.
+#[test]
+fn workspace_admission_failure_preserves_classic_ollama_use() {
+    let server = Server::new(|path, body| {
+        if path == "/api/ps" {
+            return (
+                200,
+                json!({"models":[{"name":"synthetic","size":0,"context_length":4096,"expires_at":(chrono::Utc::now()+chrono::Duration::seconds(300)).to_rfc3339()}]}),
+            );
+        }
+        ollama(path, body)
+    });
+    let pool = LocalModelPool::default();
+    let connection = server.connection();
+    let lease = pool.reserve(&connection, LocalProvider::Ollama).unwrap();
+    lease.prepare(&AnalysisControl::default()).unwrap();
+    assert!(lease
+        .prepare_workspace(&AnalysisControl::default())
+        .is_err());
+    lease
+        .prepare(&AnalysisControl::default())
+        .expect("Rejected workspace admission poisoned the prior classic lease");
+    let client = TextClient::new(&connection)
+        .unwrap()
+        .with_residency(Arc::clone(&lease))
+        .unwrap();
+    generate(&client).unwrap();
+    let requests = server.seen();
+    assert_eq!(
+        requests
+            .iter()
+            .filter(|(p, _)| p == "/api/generate")
+            .count(),
+        1
+    );
+    assert!(requests
+        .iter()
+        .filter(|(p, _)| p == "/api/generate" || p == "/api/chat")
+        .all(|(_, b)| b["options"].get("num_ctx").is_none()));
+    drop(client);
+    drop(lease);
+    assert!(!server
+        .seen()
+        .iter()
+        .any(|(p, b)| p == "/api/generate" && b["keep_alive"] == 0));
+}
+
+/// A classic-owned default-context instance stays usable but cannot be reused as an 8k workspace load.
+#[test]
+fn workspace_reuse_refuses_classic_lm_context_without_mutating_instance() {
+    let server = Server::new(lm);
+    let pool = LocalModelPool::default();
+    let connection = server.connection();
+    let lease = pool.reserve(&connection, LocalProvider::LmStudio).unwrap();
+    lease.prepare(&AnalysisControl::default()).unwrap();
+    assert!(
+        lease
+            .prepare_workspace(&AnalysisControl::default())
+            .is_err(),
+        "Classic default-context instance was accepted as a workspace load"
+    );
+    lease.prepare(&AnalysisControl::default()).unwrap();
+    let client = TextClient::new(&connection)
+        .unwrap()
+        .with_residency(Arc::clone(&lease))
+        .unwrap();
+    generate(&client).unwrap();
+    assert_eq!(
+        server
+            .seen()
+            .iter()
+            .filter(|(p, _)| p == "/api/v1/models/load")
+            .count(),
+        1
+    );
+    assert!(!server
+        .seen()
+        .iter()
+        .any(|(p, _)| p == "/api/v1/models/unload"));
+    drop(client);
+    drop(lease);
+    let unloads: Vec<_> = server
+        .seen()
+        .into_iter()
+        .filter(|(p, _)| p == "/api/v1/models/unload")
+        .collect();
+    assert_eq!(unloads.len(), 1);
+    assert_eq!(unloads[0].1["instance_id"], "owned");
+}
+
+/// Once an 8k renewal was submitted, an uncertain acknowledgement must not roll back to defaults.
+#[test]
+fn submitted_workspace_renewal_keeps_context_and_blocks_inference_until_confirmed() {
+    let mut loads = 0;
+    let server = Server::new(move |path, body| {
+        if path == "/api/ps" {
+            return (
+                200,
+                json!({"models":[{"name":"synthetic","size":0,"context_length":8192,"expires_at":(chrono::Utc::now()+chrono::Duration::seconds(300)).to_rfc3339()}]}),
+            );
+        }
+        if path == "/api/generate" {
+            loads += 1;
+            if loads == 2 || loads == 3 {
+                return (500, json!({"error":"synthetic uncertain renewal"}));
+            }
+        }
+        ollama(path, body)
+    });
+    let pool = LocalModelPool::default();
+    let connection = server.connection();
+    let lease = pool.reserve(&connection, LocalProvider::Ollama).unwrap();
+    lease.prepare(&AnalysisControl::default()).unwrap();
+    assert!(lease
+        .prepare_workspace(&AnalysisControl::default())
+        .is_err());
+    let client = TextClient::new(&connection)
+        .unwrap()
+        .with_residency(Arc::clone(&lease))
+        .unwrap();
+    assert!(
+        generate(&client).is_err(),
+        "Unconfirmed submitted renewal allowed inference"
+    );
+    assert!(!server.seen().iter().any(|(p, _)| p == "/api/chat"));
+    lease.prepare(&AnalysisControl::default()).unwrap();
+    generate(&client).unwrap();
+    let requests = server.seen();
+    let renewals: Vec<_> = requests
+        .iter()
+        .filter(|(p, _)| p == "/api/generate")
+        .collect();
+    assert_eq!(renewals.len(), 4);
+    assert!(renewals[0].1["options"].get("num_ctx").is_none());
+    assert!(renewals[1..]
+        .iter()
+        .all(|(_, b)| b["options"]["num_ctx"] == 8192));
+    assert!(requests
+        .iter()
+        .any(|(p, b)| p == "/api/chat" && b["options"]["num_ctx"] == 8192));
+    drop(client);
+    drop(lease);
+    assert!(!server
+        .seen()
+        .iter()
+        .any(|(p, b)| p == "/api/generate" && b["keep_alive"] == 0));
+}
