@@ -2,21 +2,56 @@
 
 Stand: 6. November 2026. Version **1.1.0-beta.1**, unverändert.
 
-Diese Nacharbeit erhält Hilfsverbbezüge über Einschübe und Aufzählungskommas,
-ohne sie über eigenständige oder abhängige Satzteile zu übertragen. Auch eine
-Rücknahme braucht eine tatsächlich ausgesagte Handlung statt einer Planung.
-Ein vorgeschlagener Abschluss oder ein beabsichtigter perfekter Infinitiv
-schließt keine Aufgabe. Fortschrittspräpositionen, Dezimal-/Versionspunkte
-und affirmative englische Adverbien bleiben zulässig.
+Diese Nacharbeit erkennt auch namentliche und kurze nominale Subjekte bei
+tatsächlichen Rücknahmen und Vereinbarungen. Ein vorgeschlagener Infinitivsatz
+schließt keine Aufgabe. Großschreibung macht aus einem Wunsch keine Handlung.
+Hilfsverbbezüge über Einschübe und Aufzählungskommas bleiben erhalten, ohne
+über eigenständige oder abhängige Satzteile übertragen zu werden.
+Fortschrittspräpositionen, Dezimal-/Versionspunkte und affirmative englische
+Adverbien bleiben zulässig.
 Alle bisherigen UI-, Rücknahme-, Mengen- und Nichtstun-Korrekturen bleiben erhalten. Beide Referenzsprachen
 enthalten unverändert eine ausdrückliche Budgetfrage, wenn der Test einen Gesprächsimpuls verlangt.
 Die ursprünglichen Zusagen und unverbindlichen Aussagen bleiben erhalten.
 
-Die [bisherige ausführliche Fassung](https://github.com/Puma7/meeting-for-handy/blob/9ddcdcefd648e6a09449a5abc5d2870fded9c260/docs/validation/pr41-review-followup-20261104.md)
+Die [bisherige ausführliche Fassung](https://github.com/Puma7/meeting-for-handy/blob/8f4d815b356a5252402384627904abdcc9df2d99/docs/validation/pr41-review-followup-20261104.md)
 und deren Detailhistorie bleiben unveränderlich in Git.
 Private Rohbelege, alte Checkpoints und fehlgeschlagene Läufe bleiben erhalten.
 Der vollständige TEST_REPORT bleibt gegenüber dem PR-Basisstand byteunverändert.
 Dieser bereinigte Vermerk veröffentlicht keine Nutzermeetings oder privaten Sitzungsdaten.
+
+## Namentliche Akteure und vorgeschlagene Infinitivsätze
+
+Die [erste Codex-Runde auf 8f4d815](https://github.com/Puma7/meeting-for-handy/pull/41#pullrequestreview-5795842264)
+war nicht sauber. Echte Rücknahmen wie „Anna cancelled the report.“ und
+„Robin widerruft die Zusage.“ wurden abgewiesen, weil nur Pronomen als
+Subjekt galten. Der erweiterte produktive Vorherlauf erfasste sieben echte
+Rücknahmen jeweils für Aufgaben und Beschlüsse: 14 falsche Ablehnungen.
+Der erste kleinere Lauf hielt bereits beim ersten solchen Fehler an und bleibt erhalten.
+Auch zwei echte Vereinbarungen mit Namen oder Team als Subjekt wurden reproduzierbar abgewiesen.
+
+Die gemeinsame Prüfung erkennt jetzt kurze Namen und nominale Subjekte
+im tatsächlichen Satzanfang. Sie überspringt keine Planungsverbphrase,
+kein Objekt und keinen Infinitivmarker, um nachträglich einen Namen zu finden.
+Ein Objektpronomen in „we want it cancelled“ gilt nicht als handelndes Subjekt.
+Kleinschreibung dient weiterhin der Polaritätsprüfung; Originalschreibweise
+und wörtliche Belege bleiben unverändert. Dies ist eine begrenzte Konstruktionserkennung,
+keine vollständige grammatische Analyse beliebig langer Subjekte.
+
+Der zweite gültige Befund reproduzierte vier falsche Aufgabenabschlüsse:
+„Ich habe vorgeschlagen, den Bericht als abgeschlossen zu betrachten.“ und
+die Variante mit erledigt/markieren, jeweils mit und ohne ASR-Komma.
+Die Infinitivprüfung berücksichtigt jetzt auch den nachgestellten tatsächlichen
+Infinitiv dieser Konstruktion, statt ausschließlich haben/sein zu erkennen.
+Echte koordinierte Handlungen, Einschübe, „zu den Akten“, Fortschrittspräpositionen
+und alle bisherigen perfekten Infinitiv-Gegenfälle bleiben erhalten.
+
+21 neue Literale ergeben 32 Szenarien in drei bestehenden dauerhaften Regressionen.
+Zusätzliche Großschreibungs-Gegenproben deckten im unveröffentlichten Zwischenstand
+fünf falsche Annahmen von Plänen/Wünschen auf; ein anschließender noch fehlgeschlagener
+nativer Lauf isolierte das Objektpronomen. Beide Fehlversuche bleiben erhalten.
+Die finale Satzanfangsprüfung korrigiert sie. Alle alten Fälle, Checkpointbytes,
+Originalzitate, mehrfachen Wiederöffnungen und Ablehnungen ohne neue Revision bestehen.
+Die Testfunktionszahl bleibt unverändert; keine Prüfschwelle wurde abgesenkt.
 
 ## Einschübe und tatsächliche Rücknahmen
 
@@ -362,8 +397,8 @@ alte Fehlläufe werden dadurch nicht als bestanden umgedeutet.
 | --- | --- |
 | Rust-Workspace, alle Targets | Frisch **568 bestanden**, darunter **169 Notizenfälle** und **37 Providerprotokollfälle**; drei bestehende besondere Einstiege regulär ignoriert. |
 | Rustformat und Clippy | Frisch bestanden, gesperrte Abhängigkeiten und Warnungen als Fehler. |
-| Deutsch, tatsächliches lokales Modell | Frisch **148.4528104 s**; reguläre vollständig validierte Wiederholungen: **0**. |
-| Englisch, tatsächliches lokales Modell | Frisch **122.4330133 s**; reguläre vollständig validierte Wiederholungen: **0**. |
+| Deutsch, tatsächliches lokales Modell | Frisch **135.8919394 s**; reguläre vollständig validierte Wiederholungen: **0**. |
+| Englisch, tatsächliches lokales Modell | Frisch **143.648547 s**; reguläre vollständig validierte Wiederholungen: **1**. |
 | Frontend | **416 Tests in 21 Dateien**, TypeScript, Produktionsbuild und Format auf dem hier bytegleichen b8b1ed8-UI-Stand bestanden; nicht erneut ausgeführt. |
 | Projektprüfung | Nach dem letzten Dokumentedit vor Upload erneut verify.ps1 erforderlich: 47 PCM-, 35 Notizen-, 28 Vorlagen-, acht Agenten- und Monitorprüfungen. |
 
@@ -501,6 +536,7 @@ Die folgende Runde auf 35a9bee fand beabsichtigte deutsche Entscheidungen.
 Die Runde auf b8b1ed8 fand eine falsche Hilfsverb-Zuordnung über Satzteilgrenzen.
 Die Runde auf 1ad859b fand dieselbe Fehlerklasse im Erledigungspfad.
 Die folgende Runde auf 9ddcdce fand Einschübe und bloß beabsichtigte Rücknahmen.
+Die folgende Runde auf 8f4d815 fand namentliche Subjekte und vorgeschlagene Infinitivsätze.
 Diese Runden waren keine sauberen Abschlüsse.
 
 Die Projektionskorrektur wurde von CodeRabbit
@@ -548,7 +584,7 @@ sowie bestehende Speicher- und Verwaltungsschranken bleiben erhalten.
 
 Statische Produktprompts, statische Vertragsdateien, Belegbudget, Fristen und Transport,
 Aufnahme-/ASR-Logik, Modellreservierungen, Abhängigkeiten, Schutz-/Reviewerregeln,
-Version und vollständiger TEST_REPORT bleiben gegenüber 9ddcdce unverändert.
+Version und vollständiger TEST_REPORT bleiben gegenüber 8f4d815 unverändert.
 Die bereits enger gefassten dynamischen Änderungszweige für zurückgenommene
 Beschlüsse bleiben hier ebenfalls byteunverändert.
 Auch der deutsche und englische synthetische Referenztext bleiben hier byteunverändert.

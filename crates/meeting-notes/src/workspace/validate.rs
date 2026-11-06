@@ -689,11 +689,19 @@ const AFFIRMATIVE_PREDICATE_ADVERBS: &[&str] = &[
     "explicitly",
 ];
 
-/// A perfect infinitive belongs to an intention, not an asserted terminal state.
-fn perfect_infinitive_after(words: &[&str], predicate: usize, clause_end: usize) -> bool {
-    predicate + 2 < clause_end
-        && words[predicate + 1] == "zu"
-        && ["haben", "sein"].contains(&words[predicate + 2])
+/// A following infinitive can make the participle part of a proposal rather
+/// than its asserted outcome. Distinguish it from "zu den Akten"/"zu 100 Prozent".
+fn infinitive_after(words: &[&str], predicate: usize, clause_end: usize) -> bool {
+    predicate + 2 < clause_end && words[predicate + 1] == "zu" && {
+        let verb = words[predicate + 2];
+        ["sein", "tun"].contains(&verb)
+            || ((verb.ends_with("en") || verb.ends_with("ern") || verb.ends_with("eln"))
+                && ![
+                    "den", "dem", "der", "des", "einen", "einem", "einer", "ihnen", "meinen",
+                    "deinen", "seinen", "unseren", "euren",
+                ]
+                .contains(&verb))
+    }
 }
 
 fn infinitive_auxiliary_before(words: &[&str], start: usize, predicate: usize) -> bool {
@@ -709,7 +717,12 @@ fn infinitive_auxiliary_before(words: &[&str], start: usize, predicate: usize) -
     })
 }
 
-fn finite_subject_before(words: &[&str], start: usize, predicate: usize) -> bool {
+fn finite_subject_before(
+    words: &[&str],
+    original: &[&str],
+    start: usize,
+    predicate: usize,
+) -> bool {
     let mut subject = predicate;
     while subject > start
         && (AFFIRMATIVE_PREDICATE_ADVERBS.contains(&words[subject - 1])
@@ -717,12 +730,54 @@ fn finite_subject_before(words: &[&str], start: usize, predicate: usize) -> bool
     {
         subject -= 1;
     }
-    subject > start
-        && [
-            "i", "we", "you", "they", "he", "she", "it", "ich", "wir", "du", "ihr", "er", "sie",
-            "es",
-        ]
-        .contains(&words[subject - 1])
+    if subject <= start {
+        return false;
+    }
+    if [
+        "i", "we", "you", "they", "he", "she", "it", "ich", "wir", "du", "ihr", "er", "sie", "es",
+    ]
+    .contains(&words[subject - 1])
+    {
+        // A pronoun can also be an object ("we want it cancelled"). Only
+        // the subject prefix, optionally after a time adverb, is finite here.
+        return words[start..subject - 1].iter().all(|word| {
+            [
+                "today",
+                "now",
+                "yesterday",
+                "heute",
+                "jetzt",
+                "gestern",
+                "hereby",
+                "hiermit",
+            ]
+            .contains(word)
+        });
+    }
+    // A bounded nominal subject occupies the same finite-clause prefix; it
+    // cannot skip a planning verb, object, or infinitive marker to find a name.
+    let nominal = &words[start..subject];
+    let names = &original[start..subject];
+    if nominal.iter().any(|word| ["to", "zu"].contains(word))
+        || (nominal.len() > 1
+            && [
+                "i", "we", "you", "they", "he", "she", "it", "ich", "wir", "du", "ihr", "er",
+                "sie", "es",
+            ]
+            .contains(&nominal[0]))
+    {
+        return false;
+    }
+    nominal.len() <= 3
+        && (names
+            .iter()
+            .all(|word| word.chars().next().is_some_and(char::is_uppercase))
+            || (nominal.len() >= 2
+                && [
+                    "the", "our", "your", "their", "his", "her", "der", "die", "das", "unser",
+                    "unsere", "ihr", "ihre",
+                ]
+                .contains(&nominal[0])))
 }
 
 /// Require an affirmative decision assertion. Its infinitive/that-clause may
@@ -732,6 +787,8 @@ pub(super) fn recorded_decision_quote_allowed(quote: &str) -> bool {
     // These temporary tokens do not rewrite the literal source or its quote.
     let lower = quote.to_lowercase().replace('’', "'");
     let words = assertion_words(&lower);
+    let original = quote.replace('’', "'");
+    let original_words = assertion_words(&original);
     // Bind German auxiliaries to the same clause, including ASR without commas.
     // Token counts also match the temporary two-token expansion of "we've".
     let clauses = assertion_clauses(&lower);
@@ -756,7 +813,7 @@ pub(super) fn recorded_decision_quote_allowed(quote: &str) -> bool {
             // A modal/intention followed by an infinitive is not a decision.
             "entscheiden" | "beschließen" => finite,
             "beschlossen" | "entschieden" => {
-                !perfect_infinitive_after(&words, index, clause.end)
+                !infinitive_after(&words, index, clause.end)
                     && (finite
                         || words[start..index].iter().any(|w| auxiliary(w))
                         // A finite subordinate auxiliary ends that same clause.
@@ -775,7 +832,7 @@ pub(super) fn recorded_decision_quote_allowed(quote: &str) -> bool {
         let start = subordinate.unwrap_or(clause.start);
         if *word == "agreed" && matches!(next, Some("to" | "not")) {
             let asserted = (subordinate.is_none() && index == start)
-                || finite_subject_before(&words, start, index)
+                || finite_subject_before(&words, &original_words, start, index)
                 || words[start..index]
                     .iter()
                     .any(|word| ["have", "has", "had", "is", "are", "was", "were"].contains(word));
@@ -895,6 +952,8 @@ pub(super) fn withdrawal_quote_allowed(quote: &str) -> bool {
             });
     }
     let words = assertion_words(&lower);
+    let original = quote.replace('’', "'");
+    let original_words = assertion_words(&original);
     let clauses = assertion_clauses(&lower);
     words.iter().enumerate().any(|(index, word)| {
         let Some(clause) = clauses.iter().find(|range| range.contains(&index)) else {
@@ -902,12 +961,13 @@ pub(super) fn withdrawal_quote_allowed(quote: &str) -> bool {
         };
         let subordinate = subordinate_start(&words, clause.start, index);
         let start = subordinate.unwrap_or(clause.start);
-        if perfect_infinitive_after(&words, index, clause.end)
+        if infinitive_after(&words, index, clause.end)
             || infinitive_auxiliary_before(&words, start, index)
         {
             return false;
         }
-        let finite = subordinate.is_none() && finite_subject_before(&words, start, index);
+        let finite =
+            subordinate.is_none() && finite_subject_before(&words, &original_words, start, index);
         let auxiliary = |v: &str| {
             [
                 "habe", "haben", "hat", "hatte", "hatten", "ist", "sind", "war", "waren", "wurde",
@@ -1354,7 +1414,7 @@ pub(super) fn completion_quote_allowed(quote: &str) -> bool {
             return false;
         };
         // A perfect infinitive states an intention, not its completion.
-        if perfect_infinitive_after(&words, index, clause.end) {
+        if infinitive_after(&words, index, clause.end) {
             return false;
         }
         let subordinate = subordinate_start(&words, clause.start, index);

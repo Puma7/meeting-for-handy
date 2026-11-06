@@ -4,6 +4,10 @@ use super::*;
 fn perfect_decisions_validate_literal_sources_and_durable_reopen() {
     let mut mismatches = Vec::new();
     for (quote, allowed) in [
+        ("Anna agreed to start the pilot.", true),
+        ("The team agreed to start the pilot.", true),
+        ("Anna plans to have agreed to start the pilot.", false),
+        ("WE WANT IT AGREED TO.", false),
         (
             "Wir haben den Pilotstart, wie besprochen, beschlossen.",
             true,
@@ -173,6 +177,24 @@ fn perfect_decisions_validate_literal_sources_and_durable_reopen() {
 #[test]
 fn contracted_perfect_completion_retains_literal_quotes_after_reopen() {
     let cases = [
+        (
+            "Ich habe vorgeschlagen, den Bericht als abgeschlossen zu betrachten.",
+            false,
+        ),
+        (
+            "Ich habe vorgeschlagen, den Bericht als erledigt zu markieren.",
+            false,
+        ),
+        (
+            "Ich habe vorgeschlagen den Bericht als abgeschlossen zu betrachten.",
+            false,
+        ),
+        (
+            "Ich habe vorgeschlagen den Bericht als erledigt zu markieren.",
+            false,
+        ),
+        ("Ich habe den Bericht vorgeschlagen und verschickt.", true),
+        ("Ich habe den Bericht, zu den Akten, verschickt.", true),
         ("Ich habe den Bericht, wie besprochen, verschickt.", true),
         (
             "Ich habe den Bericht geprüft, korrigiert und verschickt.",
@@ -1145,6 +1167,10 @@ fn recorded_decisions_reject_negation_and_uncertainty_without_publishing_state()
 #[test]
 fn withdrawal_requires_explicit_current_intent_and_rejection_preserves_both_kinds() {
     let invalid = [
+        "Anna plans to cancel the report.",
+        "ANNA PLANS TO CANCEL THE REPORT.",
+        "WE WANT IT CANCELLED.",
+        "Das Team plant, den Beschluss zu widerrufen.",
         "We plan to cancel the report.",
         "We have planned to cancel the report.",
         "Ich habe vorgeschlagen, dass der Beschluss zurückgenommen wird.",
@@ -1183,6 +1209,13 @@ fn withdrawal_requires_explicit_current_intent_and_rejection_preserves_both_kind
         "We revoked none of the decisions.",
     ];
     let valid = [
+        "Anna cancelled the report.",
+        "Anna withdrew the decision.",
+        "Robin widerruft die Zusage.",
+        "The team cancelled the report.",
+        "Das zuständige Team widerruft die Zusage.",
+        "Anna just cancelled the report.",
+        "Anna Marie cancelled the report.",
         "We’ve withdrawn the decision.",
         "I've cancelled the report.",
         "Wir haben den Beschluss, wie besprochen, zurückgenommen.",
@@ -1202,6 +1235,7 @@ fn withdrawal_requires_explicit_current_intent_and_rejection_preserves_both_kind
         "We have withdrawn the decision.",
     ];
     let mut accepted_invalid = Vec::new();
+    let mut rejected_valid = Vec::new();
     for kind in ["task", "decision"] {
         let (mut state, mut request, mut answer) = setup();
         if kind == "decision" {
@@ -1263,7 +1297,15 @@ fn withdrawal_requires_explicit_current_intent_and_rejection_preserves_both_kind
             change["changes"][0]["evidence"] = json!([{"sourceId":"s_status","quote":quote}]);
             let mut next = state.clone();
             let result = validate::apply(&mut next, &status, &change.to_string());
-            if allowed {
+            if allowed && result.is_err() {
+                rejected_valid.push(format!("{kind}: {quote}: {}", result.unwrap_err()));
+                assert_eq!(serde_json::to_vec(&next).unwrap(), bytes, "{quote}");
+                assert!(!directory.path().join("revision-00000002.json").exists());
+                assert_eq!(
+                    read_state(directory.path()).unwrap().entities,
+                    state.entities
+                );
+            } else if allowed {
                 let events = result.unwrap_or_else(|e| panic!("{kind}: {quote}: {e}"));
                 assert_eq!(next.entities[0].status, "withdrawn");
                 assert_eq!(next.entities[0].text, state.entities[0].text);
@@ -1300,6 +1342,10 @@ fn withdrawal_requires_explicit_current_intent_and_rejection_preserves_both_kind
             );
         }
     }
+    assert!(
+        rejected_valid.is_empty(),
+        "Valid withdrawal rejected: {rejected_valid:?}"
+    );
     assert!(
         accepted_invalid.is_empty(),
         "Invalid withdrawal accepted: {accepted_invalid:?}"
