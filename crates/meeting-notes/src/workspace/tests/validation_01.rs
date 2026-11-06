@@ -4,6 +4,26 @@ use super::*;
 fn perfect_decisions_validate_literal_sources_and_durable_reopen() {
     let mut mismatches = Vec::new();
     for (quote, allowed) in [
+        (
+            "The members of the team must check that we have decided to start the pilot.",
+            false,
+        ),
+        (
+            "A team must verify that we decided to start the pilot.",
+            false,
+        ),
+        (
+            "All engineers must check that we have decided to start the pilot.",
+            false,
+        ),
+        (
+            "Our platform security team must check that we agreed to start the pilot.",
+            false,
+        ),
+        (
+            "Our platform security team has confirmed that we have decided to start the pilot.",
+            true,
+        ),
         ("We must check that we decided to start the pilot.", false),
         (
             "The team must verify that we have decided to start the pilot.",
@@ -222,6 +242,20 @@ fn perfect_decisions_validate_literal_sources_and_durable_reopen() {
 #[test]
 fn contracted_perfect_completion_retains_literal_quotes_after_reopen() {
     let cases = [
+        (
+            "The members of the team must check that the report is complete.",
+            false,
+        ),
+        ("A team must check that the report is complete.", false),
+        ("All engineers must verify that the report is done.", false),
+        (
+            "Our platform security team must check that the report is complete.",
+            false,
+        ),
+        (
+            "Our platform security team has confirmed that the report is complete.",
+            true,
+        ),
         ("We must check that the report is complete.", false),
         ("We must check that the report has been approved.", false),
         ("The team had to confirm that the report is done.", false),

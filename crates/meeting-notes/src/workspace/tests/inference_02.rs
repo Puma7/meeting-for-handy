@@ -235,250 +235,332 @@ fn withdrawn_decision_replay_keeps_identity_when_optional_seeds_hide_it() {
             .unwrap();
         fresh
     }
-    let directory = tempfile::tempdir().unwrap();
-    let mut runner = WorkspaceRunner::open(directory.path()).unwrap();
-    runner.set_context(Default::default()).unwrap();
-    let first_quote = "We decided to release the report.";
-    let other_quote = "We have decided to release the report.";
-    let make_text = |index: u64, text: String| LiveText {
-        key: format!("part-{index}"),
-        track: "system".into(),
-        start_ms: index * 3000,
-        end_ms: (index + 1) * 3000,
-        text,
-    };
-    let padding = "Background context. ".repeat(80);
-    let mut first = format!("{first_quote} {other_quote} {padding}");
-    first.truncate(1500);
-    let mut texts = vec![make_text(0, first)];
-    for index in 1..4 {
-        let mut value = padding.clone();
-        value.truncate(1500);
-        texts.push(make_text(index, value));
-    }
-    let original = seed_window(&mut runner,&texts,json!([{"proposalId":"p_decision","kind":"decision","targetId":null,"targetRevision":null,"text":"Release the report","status":"recorded","attention":"normal","owner":null,"due":null,"evidence":[{"sourceId":"s_pending","quote":first_quote},{"sourceId":"s_pending","quote":other_quote}],"relatedEntityIds":[]}]))[0].clone();
-    let decision_id = runner.state.entities[0].id.clone();
-    let mut filler = padding.clone();
-    filler.truncate(1500);
-    let withdrawal = "We withdraw the release decision.";
-    let later = vec![make_text(4, filler), make_text(5, withdrawal.into())];
-    seed_window(
-        &mut runner,
-        &later,
-        json!([{"proposalId":"p_withdraw","kind":"decision","targetId":decision_id,"targetRevision":1,"text":null,"status":"withdrawn","attention":"normal","owner":null,"due":null,"evidence":[{"sourceId":"s_pending","quote":withdrawal}],"relatedEntityIds":[]}]),
-    );
-    texts.extend(later);
-    let facts = [
-        "Budget discussed.",
-        "Scope reviewed.",
-        "Schedule reviewed.",
-        "Testing reviewed.",
-        "Costs reviewed.",
-        "Risks reviewed.",
-    ];
-    let fact_text = make_text(6, facts.join(" "));
-    let changes=facts.iter().enumerate().map(|(index,quote)|json!({"proposalId":format!("p_fact_{index}"),"kind":"fact","targetId":null,"targetRevision":null,"text":quote,"status":"recorded","attention":"normal","owner":null,"due":null,"evidence":[{"sourceId":"s_pending","quote":quote}],"relatedEntityIds":[]})).collect::<Vec<_>>();
-    seed_window(
-        &mut runner,
-        std::slice::from_ref(&fact_text),
-        json!(changes),
-    );
-    texts.push(fact_text);
-    let before = runner.view();
-    let withdrawn = before
-        .entities
-        .iter()
-        .find(|e| e.id == decision_id)
-        .unwrap()
-        .clone();
-    assert_eq!(withdrawn.status, "withdrawn");
-    assert_eq!(withdrawn.evidence.len(), 2);
-    let omitted = [first_quote, other_quote]
-        .into_iter()
-        .find(|quote| !withdrawn.evidence.iter().any(|e| e.quote == *quote))
-        .unwrap();
-    assert!(before
-        .events
-        .iter()
-        .any(|event| event.entity_id == decision_id
-            && event.status == "recorded"
-            && event.evidence.iter().any(|e| e.quote == omitted)));
-    let old_files = (1..=before.revision)
-        .map(|revision| {
-            let path = directory
-                .path()
-                .join(format!("revision-{revision:08}.json"));
-            let bytes = std::fs::read(&path).unwrap();
-            (path, bytes)
-        })
-        .collect::<Vec<_>>();
-    let context = runner.context.lock().unwrap().clone();
-    let mut forced_request = Request::new(
-        "r_forced".into(),
-        &context,
-        &before,
-        before.entities.clone(),
-        std::slice::from_ref(&original),
-        before.originals.clone(),
-    );
-    forced_request.purpose = "facts".into();
-    let forced_answer = json!({"contractVersion":CONTRACT_VERSION,"requestId":"r_forced","changes":[{"proposalId":"p_forced","kind":"decision","targetId":decision_id,"targetRevision":withdrawn.revision,"text":null,"status":"recorded","attention":"normal","owner":null,"due":null,"evidence":[{"sourceId":original.id,"quote":omitted}],"relatedEntityIds":[]}],"overviewRefs":[],"unresolvedContextIds":[],"moreChangesPossible":false});
-    let mut forced = before.clone();
-    let forced_result = validate::apply(&mut forced, &forced_request, &forced_answer.to_string());
-    let mut mismatches = Vec::new();
-    if forced_result.is_ok() || forced.entities != before.entities {
-        mismatches.push("an explicit model target reopened a withdrawn decision".to_owned());
-    }
-    let mut changed = context.clone();
-    changed.agenda.push(Agenda {
-        id: "e_release_review".into(),
-        revision: 1,
-        text: "Release review".into(),
-    });
-    let changed = update_context(directory.path(), &changed).unwrap().0;
-    *runner.context.lock().unwrap() = changed;
-    assert!(runner.context_dirty());
-    assert_eq!(live::next_window(&runner.active_sources()).len(), 4);
-    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-    let endpoint = format!("http://{}/v1/", listener.local_addr().unwrap());
-    let server_original = original.clone();
-    let server_decision = decision_id.clone();
-    let server = thread::spawn(move || {
-        let deadline = Instant::now() + Duration::from_secs(10);
-        let mut facts_seen = 0;
-        loop {
-            let mut stream = accept_synthetic_before(&listener, deadline).unwrap();
-            let mut bytes = Vec::new();
-            let mut buffer = [0; 8192];
-            let header = loop {
-                let n = stream.read(&mut buffer).unwrap();
-                assert!(n > 0 && bytes.len() < 500000);
-                bytes.extend_from_slice(&buffer[..n]);
-                if let Some(at) = bytes.windows(4).position(|b| b == b"\r\n\r\n") {
-                    break at + 4;
-                }
-            };
-            let size = String::from_utf8_lossy(&bytes[..header])
-                .lines()
-                .filter_map(|l| l.split_once(':'))
-                .find(|(key, _)| key.eq_ignore_ascii_case("content-length"))
-                .unwrap()
-                .1
-                .trim()
-                .parse::<usize>()
-                .unwrap();
-            while bytes.len() < header + size {
-                let n = stream.read(&mut buffer).unwrap();
-                assert!(n > 0);
-                bytes.extend_from_slice(&buffer[..n]);
-            }
-            let body: serde_json::Value =
-                serde_json::from_slice(&bytes[header..header + size]).unwrap();
-            let req: serde_json::Value =
-                serde_json::from_str(body["messages"][1]["content"].as_str().unwrap()).unwrap();
-            let changes = if req["purpose"] == "facts" {
-                facts_seen += 1;
-                let selected = req["state"].as_array().unwrap();
-                assert_eq!(selected.len(), 6);
-                assert!(selected
-                    .iter()
-                    .all(|e| e["kind"] == "fact" && e["id"] != server_decision));
-                assert!(!req["transcriptSources"]
-                    .as_array()
-                    .unwrap()
-                    .iter()
-                    .any(|s| s["text"].as_str().unwrap().contains("withdraw")));
-                json!([{"proposalId":"p_replay","kind":"decision","targetId":null,"targetRevision":null,"text":"Release the report","status":"recorded","attention":"normal","owner":null,"due":null,"evidence":[{"sourceId":server_original.id,"quote":omitted}],"relatedEntityIds":[]}])
-            } else {
-                json!([])
-            };
-            let answer=json!({"contractVersion":CONTRACT_VERSION,"requestId":req["requestId"],"changes":changes,"overviewRefs":[],"unresolvedContextIds":[],"moreChangesPossible":false}).to_string();
-            let payload = format!(
-                "data: {}\n\ndata: {}\n\n",
-                json!({"choices":[{"delta":{"content":answer},"finish_reason":null}]}),
-                json!({"choices":[{"delta":{},"finish_reason":"stop"}]})
-            );
-            write!(stream,"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{payload}",payload.len()).unwrap();
-            if req["purpose"] == "reconcile" {
-                break;
-            }
+    for revoke_note in [false, true] {
+        let directory = tempfile::tempdir().unwrap();
+        let mut runner = WorkspaceRunner::open(directory.path()).unwrap();
+        let mut initial = WorkspaceContext::default();
+        if revoke_note {
+            initial.shared_notes.push(SharedNote {
+                id: "h_decision".into(),
+                revision: 1,
+                text: "Private synthetic released protocol context.".into(),
+            });
         }
-        facts_seen
-    });
-    let client = TextClient::new(&crate::Connection {
-        endpoint,
-        model: "synthetic".into(),
-        mode: "local".into(),
-        cloud_consent: false,
-        api_key: String::new(),
-    })
-    .unwrap();
-    runner
-        .update(&client, &[], &AnalysisControl::default(), "en")
-        .unwrap();
-    assert_eq!(server.join().unwrap(), 1);
-    let replayed = runner.view();
-    if replayed
-        .entities
-        .iter()
-        .filter(|e| e.kind == "decision")
-        .count()
-        != 1
-        || replayed
-            .entities
-            .iter()
-            .any(|e| e.kind == "decision" && e.status != "withdrawn")
-    {
-        mismatches.push("context replay republished a withdrawn decision as recorded".to_owned());
-    }
-    for (path, bytes) in old_files {
-        assert_eq!(std::fs::read(path).unwrap(), bytes);
-    }
-    drop(runner);
-    let reopened = WorkspaceRunner::open(directory.path()).unwrap().view();
-    assert_eq!(reopened.entities, replayed.entities);
-    assert_eq!(
-        serde_json::to_vec(&reopened).unwrap(),
-        serde_json::to_vec(&WorkspaceRunner::open(directory.path()).unwrap().view()).unwrap()
-    );
-    let mut fresh = original.clone();
-    fresh.id = "s_independent_decision".into();
-    fresh.start_ms = 24000;
-    fresh.end_ms = 27000;
-    let mut all = before.originals.clone();
-    all.push(fresh.clone());
-    let mut request = Request::new(
-        "r_fresh".into(),
-        &context,
-        &before,
-        before.entities.clone(),
-        std::slice::from_ref(&fresh),
-        all,
-    );
-    request.purpose = "facts".into();
-    let answer = json!({"contractVersion":CONTRACT_VERSION,"requestId":"r_fresh","changes":[{"proposalId":"p_fresh","kind":"decision","targetId":null,"targetRevision":null,"text":"Release the report","status":"recorded","attention":"normal","owner":null,"due":null,"evidence":[{"sourceId":fresh.id,"quote":omitted}],"relatedEntityIds":[]}],"overviewRefs":[],"unresolvedContextIds":[],"moreChangesPossible":false});
-    let mut independent = before.clone();
-    validate::apply(&mut independent, &request, &answer.to_string()).unwrap();
-    assert_eq!(
-        independent
-            .entities
-            .iter()
-            .filter(|e| e.kind == "decision" && e.status == "recorded")
-            .count(),
-        1
-    );
-    assert_eq!(
-        independent
+        runner.set_context(initial).unwrap();
+        let first_quote = "We decided to release the report.";
+        let other_quote = "We have decided to release the report.";
+        let make_text = |index: u64, text: String| LiveText {
+            key: format!("part-{index}"),
+            track: "system".into(),
+            start_ms: index * 3000,
+            end_ms: (index + 1) * 3000,
+            text,
+        };
+        let padding = "Background context. ".repeat(80);
+        let mut first = format!("{first_quote} {other_quote} {padding}");
+        first.truncate(1500);
+        let mut texts = vec![make_text(0, first)];
+        for index in 1..4 {
+            let mut value = padding.clone();
+            value.truncate(1500);
+            texts.push(make_text(index, value));
+        }
+        let original = seed_window(&mut runner,&texts,json!([{"proposalId":"p_decision","kind":"decision","targetId":null,"targetRevision":null,"text":"Release the report","status":"recorded","attention":"normal","owner":null,"due":null,"evidence":[{"sourceId":"s_pending","quote":first_quote},{"sourceId":"s_pending","quote":other_quote}],"relatedEntityIds":[]}]))[0].clone();
+        let decision_id = runner.state.entities[0].id.clone();
+        let mut filler = padding.clone();
+        filler.truncate(1500);
+        let withdrawal = "We withdraw the release decision.";
+        let later = vec![make_text(4, filler), make_text(5, withdrawal.into())];
+        seed_window(
+            &mut runner,
+            &later,
+            json!([{"proposalId":"p_withdraw","kind":"decision","targetId":decision_id,"targetRevision":1,"text":null,"status":"withdrawn","attention":"normal","owner":null,"due":null,"evidence":[{"sourceId":"s_pending","quote":withdrawal}],"relatedEntityIds":[]}]),
+        );
+        texts.extend(later);
+        let facts = [
+            "Budget discussed.",
+            "Scope reviewed.",
+            "Schedule reviewed.",
+            "Testing reviewed.",
+            "Costs reviewed.",
+            "Risks reviewed.",
+        ];
+        let fact_text = make_text(6, facts.join(" "));
+        let changes=facts.iter().enumerate().map(|(index,quote)|json!({"proposalId":format!("p_fact_{index}"),"kind":"fact","targetId":null,"targetRevision":null,"text":quote,"status":"recorded","attention":"normal","owner":null,"due":null,"evidence":[{"sourceId":"s_pending","quote":quote}],"relatedEntityIds":[]})).collect::<Vec<_>>();
+        seed_window(
+            &mut runner,
+            std::slice::from_ref(&fact_text),
+            json!(changes),
+        );
+        texts.push(fact_text);
+        let before = runner.view();
+        let withdrawn = before
             .entities
             .iter()
             .find(|e| e.id == decision_id)
-            .unwrap(),
-        &withdrawn
-    );
-    assert!(
-        mismatches.is_empty(),
-        "Withdrawn decision regressions: {mismatches:?}"
-    );
+            .unwrap()
+            .clone();
+        assert_eq!(withdrawn.status, "withdrawn");
+        assert_eq!(withdrawn.evidence.len(), 2);
+        let omitted = [first_quote, other_quote]
+            .into_iter()
+            .find(|quote| !withdrawn.evidence.iter().any(|e| e.quote == *quote))
+            .unwrap();
+        assert!(before
+            .events
+            .iter()
+            .any(|event| event.entity_id == decision_id
+                && event.status == "recorded"
+                && event.evidence.iter().any(|e| e.quote == omitted)));
+        let old_files = (1..=before.revision)
+            .map(|revision| {
+                let path = directory
+                    .path()
+                    .join(format!("revision-{revision:08}.json"));
+                let bytes = std::fs::read(&path).unwrap();
+                (path, bytes)
+            })
+            .collect::<Vec<_>>();
+        let context = runner.context.lock().unwrap().clone();
+        let mut forced_request = Request::new(
+            "r_forced".into(),
+            &context,
+            &before,
+            before.entities.clone(),
+            std::slice::from_ref(&original),
+            before.originals.clone(),
+        );
+        forced_request.purpose = "facts".into();
+        let forced_answer = json!({"contractVersion":CONTRACT_VERSION,"requestId":"r_forced","changes":[{"proposalId":"p_forced","kind":"decision","targetId":decision_id,"targetRevision":withdrawn.revision,"text":null,"status":"recorded","attention":"normal","owner":null,"due":null,"evidence":[{"sourceId":original.id,"quote":omitted}],"relatedEntityIds":[]}],"overviewRefs":[],"unresolvedContextIds":[],"moreChangesPossible":false});
+        let mut forced = before.clone();
+        let forced_result =
+            validate::apply(&mut forced, &forced_request, &forced_answer.to_string());
+        let mut mismatches = Vec::new();
+        if forced_result.is_ok() || forced.entities != before.entities {
+            mismatches.push("an explicit model target reopened a withdrawn decision".to_owned());
+        }
+        let mut changed = context.clone();
+        if revoke_note {
+            changed.shared_notes.clear();
+        }
+        changed.agenda.push(Agenda {
+            id: "e_release_review".into(),
+            revision: 1,
+            text: "Release review".into(),
+        });
+        let changed = update_context(directory.path(), &changed).unwrap().0;
+        *runner.context.lock().unwrap() = changed;
+        assert!(runner.context_dirty());
+        assert_eq!(live::next_window(&runner.active_sources()).len(), 4);
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let endpoint = format!("http://{}/v1/", listener.local_addr().unwrap());
+        let server_original = original.clone();
+        let server_decision = decision_id.clone();
+        let server = thread::spawn(move || {
+            let deadline = Instant::now() + Duration::from_secs(10);
+            let mut facts_seen = 0;
+            loop {
+                let mut stream = accept_synthetic_before(&listener, deadline).unwrap();
+                let mut bytes = Vec::new();
+                let mut buffer = [0; 8192];
+                let header = loop {
+                    let n = stream.read(&mut buffer).unwrap();
+                    assert!(n > 0 && bytes.len() < 500000);
+                    bytes.extend_from_slice(&buffer[..n]);
+                    if let Some(at) = bytes.windows(4).position(|b| b == b"\r\n\r\n") {
+                        break at + 4;
+                    }
+                };
+                let size = String::from_utf8_lossy(&bytes[..header])
+                    .lines()
+                    .filter_map(|l| l.split_once(':'))
+                    .find(|(key, _)| key.eq_ignore_ascii_case("content-length"))
+                    .unwrap()
+                    .1
+                    .trim()
+                    .parse::<usize>()
+                    .unwrap();
+                while bytes.len() < header + size {
+                    let n = stream.read(&mut buffer).unwrap();
+                    assert!(n > 0);
+                    bytes.extend_from_slice(&buffer[..n]);
+                }
+                let body: serde_json::Value =
+                    serde_json::from_slice(&bytes[header..header + size]).unwrap();
+                let req: serde_json::Value =
+                    serde_json::from_str(body["messages"][1]["content"].as_str().unwrap()).unwrap();
+                let changes = if req["purpose"] == "facts" {
+                    facts_seen += 1;
+                    let selected = req["state"].as_array().unwrap();
+                    assert_eq!(selected.len(), if revoke_note { 0 } else { 6 });
+                    if revoke_note {
+                        assert!(!req
+                            .to_string()
+                            .contains("Private synthetic released protocol context."));
+                    }
+                    assert!(selected
+                        .iter()
+                        .all(|e| e["kind"] == "fact" && e["id"] != server_decision));
+                    assert!(!req["transcriptSources"]
+                        .as_array()
+                        .unwrap()
+                        .iter()
+                        .any(|s| s["text"].as_str().unwrap().contains("withdraw")));
+                    json!([{"proposalId":"p_replay","kind":"decision","targetId":null,"targetRevision":null,"text":"Release the report","status":"recorded","attention":"normal","owner":null,"due":null,"evidence":[{"sourceId":server_original.id,"quote":omitted}],"relatedEntityIds":[]}])
+                } else {
+                    json!([])
+                };
+                let overview = if revoke_note && req["purpose"] == "facts" {
+                    vec!["p_replay"]
+                } else {
+                    vec![]
+                };
+                let answer=json!({"contractVersion":CONTRACT_VERSION,"requestId":req["requestId"],"changes":changes,"overviewRefs":overview,"unresolvedContextIds":[],"moreChangesPossible":false}).to_string();
+                let payload = format!(
+                    "data: {}\n\ndata: {}\n\n",
+                    json!({"choices":[{"delta":{"content":answer},"finish_reason":null}]}),
+                    json!({"choices":[{"delta":{},"finish_reason":"stop"}]})
+                );
+                write!(stream,"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{payload}",payload.len()).unwrap();
+                if req["purpose"] == "reconcile" {
+                    break;
+                }
+            }
+            facts_seen
+        });
+        let client = TextClient::new(&crate::Connection {
+            endpoint,
+            model: "synthetic".into(),
+            mode: "local".into(),
+            cloud_consent: false,
+            api_key: String::new(),
+        })
+        .unwrap();
+        runner
+            .update(&client, &[], &AnalysisControl::default(), "en")
+            .unwrap();
+        assert_eq!(server.join().unwrap(), 1);
+        let replayed = runner.view();
+        if revoke_note {
+            assert!(
+                !replayed.overview_refs.contains(&decision_id),
+                "A hidden replay alias resurfaced in the overview"
+            );
+        }
+        if replayed
+            .entities
+            .iter()
+            .filter(|e| e.kind == "decision")
+            .count()
+            != 1
+            || replayed
+                .entities
+                .iter()
+                .any(|e| e.kind == "decision" && e.status != "withdrawn")
+        {
+            mismatches
+                .push("context replay republished a withdrawn decision as recorded".to_owned());
+        }
+        for (path, bytes) in old_files {
+            assert_eq!(std::fs::read(path).unwrap(), bytes);
+        }
+        drop(runner);
+        let reopened = WorkspaceRunner::open(directory.path()).unwrap().view();
+        assert_eq!(reopened.entities, replayed.entities);
+        assert_eq!(
+            serde_json::to_vec(&reopened).unwrap(),
+            serde_json::to_vec(&WorkspaceRunner::open(directory.path()).unwrap().view()).unwrap()
+        );
+        if revoke_note {
+            assert!(reopened.context_excluded_ids.contains(&decision_id));
+            let terminal_source = withdrawn
+                .evidence
+                .iter()
+                .find(|e| e.quote == withdrawal)
+                .unwrap()
+                .source_id
+                .clone();
+            for invalidation in ["superseded", "missing", "changed"] {
+                let mut invalid = reopened.clone();
+                match invalidation {
+                    "superseded" => invalid.superseded_sources.push(terminal_source.clone()),
+                    "missing" => invalid.originals.retain(|s| s.id != terminal_source),
+                    _ => {
+                        invalid
+                            .originals
+                            .iter_mut()
+                            .find(|s| s.id == terminal_source)
+                            .unwrap()
+                            .text = "Replaced synthetic terminal source.".into()
+                    }
+                }
+                let mut request = Request::new(
+                    "r_forced".into(),
+                    &invalid.context,
+                    &invalid,
+                    vec![],
+                    std::slice::from_ref(&original),
+                    invalid.originals.clone(),
+                );
+                request.purpose = "facts".into();
+                let mut proposal = forced_answer.clone();
+                proposal["changes"][0]["targetId"] = json!(null);
+                proposal["changes"][0]["targetRevision"] = json!(null);
+                proposal["changes"][0]["text"] = json!("Release the report");
+                let count = invalid.entities.len();
+                let events =
+                    validate::apply(&mut invalid, &request, &proposal.to_string()).unwrap();
+                assert_eq!(events.len(), 1, "{invalidation}");
+                assert_eq!(invalid.entities.len(), count + 1);
+                assert_eq!(
+                    invalid
+                        .entities
+                        .iter()
+                        .find(|e| e.id == decision_id)
+                        .unwrap(),
+                    &withdrawn
+                );
+            }
+        }
+        let mut fresh = original.clone();
+        fresh.id = "s_independent_decision".into();
+        fresh.start_ms = 24000;
+        fresh.end_ms = 27000;
+        let mut all = before.originals.clone();
+        all.push(fresh.clone());
+        let mut request = Request::new(
+            "r_fresh".into(),
+            &context,
+            &before,
+            before.entities.clone(),
+            std::slice::from_ref(&fresh),
+            all,
+        );
+        request.purpose = "facts".into();
+        let answer = json!({"contractVersion":CONTRACT_VERSION,"requestId":"r_fresh","changes":[{"proposalId":"p_fresh","kind":"decision","targetId":null,"targetRevision":null,"text":"Release the report","status":"recorded","attention":"normal","owner":null,"due":null,"evidence":[{"sourceId":fresh.id,"quote":omitted}],"relatedEntityIds":[]}],"overviewRefs":[],"unresolvedContextIds":[],"moreChangesPossible":false});
+        let mut independent = before.clone();
+        validate::apply(&mut independent, &request, &answer.to_string()).unwrap();
+        assert_eq!(
+            independent
+                .entities
+                .iter()
+                .filter(|e| e.kind == "decision" && e.status == "recorded")
+                .count(),
+            1
+        );
+        assert_eq!(
+            independent
+                .entities
+                .iter()
+                .find(|e| e.id == decision_id)
+                .unwrap(),
+            &withdrawn
+        );
+        assert!(
+            mismatches.is_empty(),
+            "Withdrawn decision regressions: {mismatches:?}"
+        );
+    }
 }
 
 #[test]

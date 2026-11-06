@@ -251,7 +251,19 @@ pub(crate) fn apply(
                             && c.evidence
                                 .iter()
                                 .all(|v| retained_terminal_witness(&next, e, v));
-                        !next.context_excluded_ids.contains(&e.id)
+                        // Context withdrawal hides an AI draft from the model,
+                        // but a still-proven terminal identity remains a private,
+                        // read-only replay witness. Never revive or expose it.
+                        let excluded_terminal_witness = terminal_identity
+                            && !e.evidence.is_empty()
+                            && e.evidence.iter().all(|evidence| {
+                                !next.superseded_sources.contains(&evidence.source_id)
+                                    && next.originals.iter().any(|source| {
+                                        source.id == evidence.source_id
+                                            && source.text.contains(&evidence.quote)
+                                    })
+                            });
+                        (!next.context_excluded_ids.contains(&e.id) || excluded_terminal_witness)
                             && e.kind == c.kind
                             && e.text == text
                             && (e.owner == c.owner || (terminal_identity && c.owner.is_none()))
@@ -949,7 +961,10 @@ fn unasserted_embedding(
             return false;
         }
         let clause_start = subordinate_start(words, start, index).unwrap_or(start);
-        finite_subject_before(words, original, clause_start, index)
+        // A governing modal does not become affirmative merely because its
+        // subject is longer than the bounded direct-assertion recognizer.
+        // At the clause start the same token can instead be a name (May).
+        index > clause_start
     });
     let required_infinitive = words[start..predicate].windows(2).any(|pair| {
         ["have", "has", "had", "need", "needs", "needed"].contains(&pair[0]) && pair[1] == "to"

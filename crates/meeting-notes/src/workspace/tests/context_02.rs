@@ -698,6 +698,10 @@ fn oversized_legacy_shared_context_remains_readable_and_can_be_shortened() {
 #[test]
 fn withdrawal_requires_explicit_current_intent_and_rejection_preserves_both_kinds() {
     let invalid = [
+        "The members of the team must check that the decision has been withdrawn.",
+        "A team must check that the decision has been withdrawn.",
+        "All engineers must verify that the decision has been withdrawn.",
+        "Our platform security team must check that the decision has been withdrawn.",
         "We must check that the decision has been withdrawn.",
         "We must check that we have cancelled the report.",
         "The team must confirm that the decision has been revoked.",
@@ -777,6 +781,7 @@ fn withdrawal_requires_explicit_current_intent_and_rejection_preserves_both_kind
         "We revoked none of the decisions.",
     ];
     let valid = [
+        "Our platform security team has confirmed that the decision has been withdrawn.",
         "We have checked that the decision has been withdrawn.",
         "We must check, but the decision has been withdrawn.",
         "We must check. The decision has been withdrawn.",

@@ -14,9 +14,9 @@ fn terminal_tasks_survive_context_replay_without_duplicate_open_obligations() {
     };
     let mut failures = Vec::new();
     for terminal in ["completed", "withdrawn"] {
-        for human in [false, true]
+        for (human, revoke_note) in [(false, false), (true, false), (false, true), (true, true)]
             .into_iter()
-            .filter(|human| !(*human && terminal == "withdrawn"))
+            .filter(|(human, _)| !(*human && terminal == "withdrawn"))
         {
             let listener = TcpListener::bind("127.0.0.1:0").unwrap();
             let endpoint = format!("http://{}/v1/", listener.local_addr().unwrap());
@@ -77,7 +77,7 @@ fn terminal_tasks_survive_context_replay_without_duplicate_open_obligations() {
                                     .starts_with("I will send the report tomorrow.")
                         }) {
                             // Deliberately repeat the old proposal even when terminal context is supplied.
-                            changes.push(json!({"proposalId":"p_promise","kind":"task","targetId":null,"targetRevision":null,"text":"Send the report","status":"open","attention":"current","owner":null,"due":if req["humanContext"].as_array().unwrap().is_empty() { json!("tomorrow") } else { json!(null) },"evidence":[{"sourceId":promise["id"],"quote":"I will send the report tomorrow."}],"relatedEntityIds":[]}));
+                            changes.push(json!({"proposalId":"p_promise","kind":"task","targetId":null,"targetRevision":null,"text":"Send the report","status":"open","attention":"current","owner":null,"due":if revoke_note || req["humanContext"].as_array().unwrap().is_empty() { json!("tomorrow") } else { json!(null) },"evidence":[{"sourceId":promise["id"],"quote":"I will send the report tomorrow."}],"relatedEntityIds":[]}));
                         }
                         if let Some(done) = sources.iter().find(|s| {
                             required.contains(&s["id"])
@@ -122,7 +122,15 @@ fn terminal_tasks_survive_context_replay_without_duplicate_open_obligations() {
             })
             .unwrap();
             let mut runner = WorkspaceRunner::open(dir.path()).unwrap();
-            runner.set_context(Default::default()).unwrap();
+            let mut initial = WorkspaceContext::default();
+            if revoke_note {
+                initial.shared_notes.push(SharedNote {
+                    id: "h_terminal".into(),
+                    revision: 1,
+                    text: "Review the retained conversation.".into(),
+                });
+            }
+            runner.set_context(initial).unwrap();
             let padded = |start: &str| format!("{start} {}", "z".repeat(1599 - start.len()));
             let mut texts = (0..8)
                 .map(|i| LiveText {
@@ -172,11 +180,15 @@ fn terminal_tasks_survive_context_replay_without_duplicate_open_obligations() {
                     saved: true,
                 });
             }
-            context.shared_notes.push(SharedNote {
-                id: "h_terminal".into(),
-                revision: 1,
-                text: "Review the retained conversation.".into(),
-            });
+            if revoke_note {
+                context.shared_notes.clear();
+            } else {
+                context.shared_notes.push(SharedNote {
+                    id: "h_terminal".into(),
+                    revision: 1,
+                    text: "Review the retained conversation.".into(),
+                });
+            }
             let (context, _) = update_context(dir.path(), &context).unwrap();
             *runner.context.lock().unwrap() = context;
             drop(runner);
@@ -262,6 +274,62 @@ fn terminal_tasks_survive_context_replay_without_duplicate_open_obligations() {
                 serde_json::to_vec(&unchanged).unwrap(),
                 serde_json::to_vec(&runner.state).unwrap()
             );
+            if revoke_note && !human {
+                let terminal_source = confirmed_terminal
+                    .evidence
+                    .iter()
+                    .find(|e| {
+                        e.quote == "I have sent the report."
+                            || e.quote == "I withdraw the report task."
+                    })
+                    .unwrap()
+                    .source_id
+                    .clone();
+                // A stale terminal result must not suppress work after its
+                // transcript proof was replaced, removed or superseded.
+                for invalidation in ["superseded", "missing", "changed"] {
+                    let mut invalid = runner.state.clone();
+                    match invalidation {
+                        "superseded" => invalid.superseded_sources.push(terminal_source.clone()),
+                        "missing" => invalid.originals.retain(|s| s.id != terminal_source),
+                        _ => {
+                            invalid
+                                .originals
+                                .iter_mut()
+                                .find(|s| s.id == terminal_source)
+                                .unwrap()
+                                .text = "Replaced synthetic terminal source.".into()
+                        }
+                    }
+                    let mut request = Request::new(
+                        "r_terminal".into(),
+                        &invalid.context,
+                        &invalid,
+                        vec![],
+                        std::slice::from_ref(&source),
+                        invalid.originals.clone(),
+                    );
+                    request.purpose = "tasks".into();
+                    let mut proposal = bad.clone();
+                    proposal["changes"][0]["targetId"] = json!(null);
+                    proposal["changes"][0]["targetRevision"] = json!(null);
+                    proposal["changes"][0]["text"] = json!("Send the report");
+                    proposal["changes"][0]["due"] = json!("tomorrow");
+                    let count = invalid.entities.len();
+                    let events =
+                        validate::apply(&mut invalid, &request, &proposal.to_string()).unwrap();
+                    assert_eq!(events.len(), 1, "{terminal}: {invalidation}");
+                    assert_eq!(invalid.entities.len(), count + 1);
+                    assert_eq!(
+                        invalid
+                            .entities
+                            .iter()
+                            .find(|e| e.id == original_id)
+                            .unwrap(),
+                        &confirmed_terminal
+                    );
+                }
+            }
             // An independently recorded later promise remains a legitimate new task.
             texts.push(LiveText {
                 key: "new-promise".into(),
@@ -298,11 +366,12 @@ fn terminal_tasks_survive_context_replay_without_duplicate_open_obligations() {
                 .iter()
                 .find(|(r, _)| {
                     r["purpose"] == "tasks"
-                        && r["humanContext"]
+                        && (r["humanContext"]
                             .as_array()
                             .unwrap()
                             .iter()
                             .any(|h| h["id"] == "h_terminal")
+                            != revoke_note)
                         && r["window"]["requiredSourceIds"]
                             .as_array()
                             .unwrap()
@@ -310,11 +379,20 @@ fn terminal_tasks_survive_context_replay_without_duplicate_open_obligations() {
                             .any(|id| id == &promise_id)
                 })
                 .unwrap();
-            if !relevant.0["state"].as_array().unwrap().iter().any(|e| {
+            let terminal_in_request = relevant.0["state"].as_array().unwrap().iter().any(|e| {
                 e["id"] == original_id
                     && e["status"] == terminal
                     && e["evidence"].as_array().unwrap().len() == 2
-            }) {
+            });
+            if revoke_note && !human {
+                // Context withdrawal still hides the old AI draft. Deduplication
+                // must use its private transcript witnesses without re-exposure.
+                assert!(!terminal_in_request);
+                assert!(!relevant
+                    .0
+                    .to_string()
+                    .contains("Review the retained conversation."));
+            } else if !terminal_in_request {
                 failures.push(format!("{terminal} human={human}: terminal identity/evidence absent from actual tasks request"));
             }
             {

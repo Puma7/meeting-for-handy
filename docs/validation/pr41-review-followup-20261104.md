@@ -11,29 +11,48 @@ Private Rohbelege und Nutzermeetings werden nicht veröffentlicht.
 
 ## Aktuelle Korrektur und Regressionen
 
-Die [Codex-Runde auf f175d7f](https://github.com/Puma7/meeting-for-handy/pull/41#pullrequestreview-5796980202)
-fand einen weiteren echten Fehler: We must check that the report is complete
-konnte einen Abschluss bestätigen; derselbe Prüfauftrag konnte einen Beschluss
-zurücknehmen. Die lokale Modalprüfung begann erst hinter that und verlor damit
-den noch auszuführenden übergeordneten Auftrag.
+Die [Codex-Runde auf 454cdea](https://github.com/Puma7/meeting-for-handy/pull/41#pullrequestreview-5797267596)
+fand zwei gültige Fehler. Übergeordnete Modalität blieb bei langen Subjekten
+wie The members of the team must check unerkannt. Der enge Erkenner für direkte
+Nominalsubjekte darf hier keine Grenze für die Modalprüfung setzen.
+Die Korrektur trennt beides. Drei bestehende dauerhafte Regressionen enthalten
+15 zusätzliche Literale und 20 Szenarien. Die ersten zwölf Literale mit 16
+Szenarien reproduzierten lokal zwölf falsche Beschluss-/Abschluss-/Rücknahmefälle;
+die zusätzlich berichteten genauen Formulierungen sind ebenfalls abgesichert.
+Lange tatsächlich bestätigende Sätze und May als Name oder Themenbezeichnung
+bleiben zulässig. Alle bisherigen Modal-, Hoffnungs-, Mengen-, Verneinungs-
+und Nichtstun-Gegenfälle bleiben erhalten. Dies ist eine begrenzte konservative
+Konstruktionserkennung, kein Grammatik- oder Wahrheitsbeweis.
 
-Die gemeinsame Prüfung verfolgt jetzt auch die Modalität des übergeordneten
-Satzes über that/dass und Kommas hinweg. Sie berücksichtigt verpflichtende
-Infinitive mit have/need to und ausdrückliche höfliche oder imperative Prüfaufträge.
-Der konkrete Prüfauftrag allein bestätigt weder Abschluss noch Rücknahme oder
-Beschluss. Ein unabhängig bestätigter Folgesatz, ein tatsächlich abgeschlossener
-Prüfvorgang und May als Name oder Themenbezeichnung bleiben zulässig.
+Der zweite Fehler betraf das Leeren einer freigegebenen Protokollnotiz. Dadurch
+werden alte KI-Entwürfe aus der Modellansicht ausgeschlossen. Eine erledigte oder
+zurückgenommene Aufgabe konnte beim erneuten Lesen der ursprünglichen Zusage
+jedoch als neue offene Aufgabe erscheinen; ein zurückgenommener Beschluss
+ebenso als neuer Beschluss. Die tatsächlichen synthetischen HTTP-Vorherläufe
+reproduzierten beide Aufgabenfälle und den Beschlussfall mit Zusage und späterem
+Statusbeleg in getrennten begrenzten Gesprächsfenstern.
 
-Die drei vorhandenen dauerhaften Regressionen enthalten **43 zusätzliche
-Literale und 59 Szenarien**. Vorher wurden sechs Beschlüsse, elf Abschlüsse und
-je zwölf Aufgaben-/Beschlussrücknahmen fälschlich angenommen: **41 tatsächliche
-Fehlannahmen**. Nachher bestehen alle neuen und bisherigen Fälle einschließlich
-positiver Gegenfälle. Ablehnung verändert keinen bestätigten Stand und erzeugt
-keine neue Revision. Originalzitate, Checkpointbytes und mehrfache Wiederöffnung
-bleiben erhalten. Keine neue Testfunktion oder Filterausnahme.
-Die Konstruktionserkennung ist begrenzt und konservativ; sie beweist weder
-vollständige Grammatik noch Wahrheit. Die früheren Hoffnungs-, Modalform-,
-Infinitiv-, Mengen-, Verneinungs- und Nichtstun-Regressionen bleiben bestehen.
+Jetzt bleiben ausgeschlossene terminale Identitäten ausschließlich interne,
+schreibgeschützte Deduplizierungszeugen, wenn alle aktuellen Originalbelege
+noch wörtlich vorhanden und nicht ersetzt sind. Die Modellansicht wird nicht
+erweitert. Keine Mutation oder neue Modell-Ereignisrevision des alten Eintrags;
+keine erneute Freigabe zurückgezogener Notizen. Die tatsächlichen Anfragen,
+Überblicksprojektion, alten Checkpointbytes und mehrfache Wiederöffnung sind geprüft.
+Menschlich bestätigte Aufgaben bleiben geschützt. Eine tatsächlich neue spätere
+Zusage mit eigener Quellenkennung bleibt eine neue Aufgabe.
+
+Die bestehenden Runner-Regressionen decken nun zusätzlich Notizwiderruf bei
+KI-erledigten, menschlich erledigten und KI-zurückgenommenen Aufgaben sowie
+zurückgenommenen Beschlüssen ab. Neun Gegenfälle ersetzen, entfernen oder
+überholen deren Statusbelege; solche alten Ergebnisse unterdrücken keine neue
+Arbeit. Ein zusätzlicher Überblicks-Aliastest bestand bereits mit der bestehenden
+Projektion; dafür wurde kein weiterer Produktionspfad geändert.
+Ein erster privater Aufgaben-Vorherlauf hatte im neuen Fixture einen fehlenden
+Anfangstermin. Er bleibt erhalten und zählt nicht als Produktfehlernachweis.
+Der korrigierte Vorherlauf reproduzierte die tatsächlichen doppelten Identitäten.
+Keine neue Testfunktion, keine neue Datei und keine abgesenkte Prüfungsschwelle.
+Alle vorangehenden Zwischenläufe dieser Korrektur bleiben erhalten; nur die
+abschließende vollständige Prüfung gehört zum endgültigen Stand.
 
 ## Tatsächlich geprüft
 
@@ -44,8 +63,8 @@ Infinitiv-, Mengen-, Verneinungs- und Nichtstun-Regressionen bleiben bestehen.
 | Frontend | Bytegleich zu f7fc62c; dessen **417 Tests in 21 Dateien**, TypeScript, Build und Format wurden hierfür nicht erneut ausgeführt. |
 | Browser | Bytegleich zur tatsächlichen vorherigen **16er-Matrix**, nicht erneut ausgeführt. |
 | Projektprüfung | Frisch verify.ps1: 47 PCM-, 35 Notizen-, 28 Vorlagen-, acht Agenten- und Monitorprüfungen bestanden. |
-| Deutsch, echtes lokales Modell | **159.9218233 s**, **0** reguläre Validierungswiederholungen. |
-| Englisch, echtes lokales Modell | **122.5649442 s**, **0** reguläre Validierungswiederholungen. |
+| Deutsch, echtes lokales Modell | **128.3122401 s**, **0** reguläre Validierungswiederholungen. |
+| Englisch, echtes lokales Modell | **159.0205338 s**, **0** reguläre Validierungswiederholungen. |
 
 Beide Modellreferenzen nutzen den unveränderten synthetischen Gesprächskorpus.
 Englisch einschließlich I’ll und der ursprüngliche englische Referenzpatch
@@ -94,7 +113,7 @@ eine vollständige saubere CodeRabbit-Runde und seine eigene grüne CI nötig.
 Spätere tatsächliche Links werden separat im PR dokumentiert. Alte oder leere
 Security-Flags sind kein aktueller formaler Securitynachweis.
 
-Die [unveränderliche vorige Fassung mit allen Detailnachweisen](https://github.com/Puma7/meeting-for-handy/blob/f175d7f6d06ee632dc35427accbd34be29d03612/docs/validation/pr41-review-followup-20261104.md)
+Die [unveränderliche vorige Fassung mit allen Detailnachweisen](https://github.com/Puma7/meeting-for-handy/blob/454cdea57adf1aff584c86527d849710e16378de/docs/validation/pr41-review-followup-20261104.md)
 erhält frühere Fehler, Korrekturen, Fehlläufe und deren Grenzen. Dazu gehören
 Batch-Fixture-Synchronisation bei unveränderten produktiven ASR-Bytes und
 Fristen, Belegnavigation, englische Beschriftung, strikte LM-Instanzeigentümerschaft,
