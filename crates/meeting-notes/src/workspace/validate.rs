@@ -524,6 +524,10 @@ const UNCERTAIN_TERMINAL_WORDS: &[&str] = &[
     "vielleicht",
     "not",
     "never",
+    "nichts",
+    "nothing",
+    "none",
+    "neither",
     "no",
     "if",
     "unless",
@@ -639,6 +643,14 @@ pub(super) fn recorded_decision_quote_allowed(quote: &str) -> bool {
             // intervening object and an actual infinitive after "nicht zu".
             if negation > index + 1 && words.len() > negation + 2 {
                 negation
+            } else {
+                words.len()
+            }
+        } else if let Some(object) = words.windows(2).position(|p| p == ["nichts", "zu"]) {
+            // "Nichts" is the infinitive's object, not a denial that a decision
+            // was taken. Preserve that complement when ASR omits its comma.
+            if object > index && words.len() > object + 2 {
+                object
             } else {
                 words.len()
             }
@@ -843,8 +855,24 @@ fn incomplete_quantity(text: &str) -> bool {
     ratios.extend(
         words
             .iter()
-            .filter(|w| ["of", "von"].contains(&w.2))
-            .map(|w| (w.0, w.1)),
+            .enumerate()
+            .filter(|(_, w)| ["of", "von"].contains(&w.2))
+            .map(|(index, w)| {
+                // "out of" is one ratio operator; its numerator precedes
+                // "out", not the immediately following "of" token.
+                let start = if w.2 == "of"
+                    && index > 0
+                    && words[index - 1].2 == "out"
+                    && text[words[index - 1].1..w.0]
+                        .chars()
+                        .all(char::is_whitespace)
+                {
+                    words[index - 1].0
+                } else {
+                    w.0
+                };
+                (start, w.1)
+            }),
     );
     if ratios.into_iter().any(|(at, end)| {
         let (left, left_end) = left_number(at);
@@ -1072,7 +1100,6 @@ pub(super) fn completion_quote_allowed(quote: &str) -> bool {
         || words.iter().any(|word| {
             UNCERTAIN_TERMINAL_WORDS.contains(word)
                 || ADDITIONAL_UNCERTAIN_TERMINAL_WORDS.contains(word)
-                || ["nichts", "nothing", "none", "neither"].contains(word)
                 || [
                     "beinahe",
                     "nahezu",

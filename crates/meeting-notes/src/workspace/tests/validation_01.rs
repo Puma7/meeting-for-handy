@@ -497,6 +497,12 @@ fn perfect_decisions_validate_literal_sources_and_durable_reopen() {
         ("We have decided not to release on Friday.", true),
         ("We decided to release on Friday.", true),
         ("We have agreed to release on Friday.", true),
+        ("We decided nothing.", false),
+        ("Wir haben nichts entschieden.", false),
+        ("We have decided none of the options.", false),
+        ("We decided to do nothing.", true),
+        ("Wir haben beschlossen, nichts zu ändern.", true),
+        ("Wir haben beschlossen nichts zu ändern.", true),
         ("We have not decided to release on Friday.", false),
         ("We haven't decided to release on Friday.", false),
         ("We haven’t decided to release on Friday.", false),
@@ -637,6 +643,11 @@ fn contracted_perfect_completion_retains_literal_quotes_after_reopen() {
         ("Ich habe bereits genau 1 von 2 abgeschlossen.", false),
         ("I have completed exactly 2/2 today.", true),
         ("Ich habe genau 2 von 2 abgeschlossen.", true),
+        ("I have completed 1 out of 2 reports.", false),
+        ("I have completed exactly 1 out of 2 reports.", false),
+        ("I have completed 2 out of 2 reports.", true),
+        ("I have completed 2 out of 2.", true),
+        ("I have completed report 1 out of 2.", true),
         ("I have completed 2 of 2 parts of the report.", true),
         ("Ich habe 2 von 2 Teilen des Berichts abgeschlossen.", true),
         ("I have completed 2/2 parts of the report.", true),
@@ -1531,6 +1542,12 @@ fn withdrawal_requires_explicit_current_intent_and_rejection_preserves_both_kind
         "Nobody cancelled the report.",
         "Noone withdrew the decision.",
         "Wir haben die Zusage keineswegs widerrufen.",
+        "Wir haben nichts zurückgenommen.",
+        "We withdrew nothing.",
+        "We have withdrawn none of the decisions.",
+        "We withdrew neither decision.",
+        "Wir widerrufen nichts.",
+        "We revoked none of the decisions.",
     ];
     let valid = [
         "Wir nehmen den Beschluss zurück.",
@@ -1543,6 +1560,9 @@ fn withdrawal_requires_explicit_current_intent_and_rejection_preserves_both_kind
         "We withdraw the decision.",
         "The decision has been withdrawn.",
         "We cancelled the report.",
+        "We withdrew the decision nonetheless.",
+        "Ich habe den Beschluss zurückgenommen.",
+        "We have withdrawn the decision.",
     ];
     let mut accepted_invalid = Vec::new();
     for kind in ["task", "decision"] {
@@ -1556,13 +1576,29 @@ fn withdrawal_requires_explicit_current_intent_and_rejection_preserves_both_kind
             answer["changes"][0]["evidence"][0]["quote"] = json!("Wir beschließen den Pilotstart.");
         }
         answer["changes"][0]["due"] = json!(null);
-        validate::apply(&mut state, &request, &answer.to_string()).unwrap();
+        let seed_events = validate::apply(&mut state, &request, &answer.to_string()).unwrap();
+        state.revision = 1;
+        state.originals = request.transcript_sources.clone();
         let bytes = serde_json::to_vec(&state).unwrap();
         for (quote, allowed) in invalid
             .iter()
             .map(|q| (*q, false))
             .chain(valid.iter().map(|q| (*q, true)))
         {
+            let directory = tempfile::tempdir().unwrap();
+            let (_writer, empty) = store::load(directory.path()).unwrap();
+            store::append(
+                directory.path(),
+                &store::Delta::between(
+                    &empty,
+                    &state,
+                    request.transcript_sources.clone(),
+                    seed_events.clone(),
+                ),
+            )
+            .unwrap();
+            let checkpoint =
+                std::fs::read(directory.path().join("revision-00000001.json")).unwrap();
             let source = Source {
                 id: "s_status".into(),
                 source: "system".into(),
@@ -1591,18 +1627,40 @@ fn withdrawal_requires_explicit_current_intent_and_rejection_preserves_both_kind
             let mut next = state.clone();
             let result = validate::apply(&mut next, &status, &change.to_string());
             if allowed {
-                result.unwrap_or_else(|e| panic!("{kind}: {quote}: {e}"));
+                let events = result.unwrap_or_else(|e| panic!("{kind}: {quote}: {e}"));
                 assert_eq!(next.entities[0].status, "withdrawn");
                 assert_eq!(next.entities[0].text, state.entities[0].text);
                 assert!(state.entities[0]
                     .evidence
                     .iter()
                     .all(|e| next.entities[0].evidence.contains(e)));
+                next.revision = 2;
+                store::append(
+                    directory.path(),
+                    &store::Delta::between(&state, &next, vec![source], events),
+                )
+                .unwrap();
+                let reopened = read_state(directory.path()).unwrap();
+                assert_eq!(reopened.entities, next.entities);
+                assert!(reopened.originals.iter().any(|s| s.text == quote));
+                assert_eq!(
+                    serde_json::to_vec(&reopened).unwrap(),
+                    serde_json::to_vec(&read_state(directory.path()).unwrap()).unwrap()
+                );
             } else if result.is_ok() {
                 accepted_invalid.push(format!("{kind}: {quote}"));
             } else {
                 assert_eq!(serde_json::to_vec(&next).unwrap(), bytes, "{quote}");
+                assert!(!directory.path().join("revision-00000002.json").exists());
+                assert_eq!(
+                    read_state(directory.path()).unwrap().entities,
+                    state.entities
+                );
             }
+            assert_eq!(
+                std::fs::read(directory.path().join("revision-00000001.json")).unwrap(),
+                checkpoint
+            );
         }
     }
     assert!(

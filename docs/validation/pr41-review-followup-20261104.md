@@ -2,17 +2,54 @@
 
 Stand: 6. November 2026. Version **1.1.0-beta.1**, unverändert.
 
-Diese Nacharbeit erhält zurückgenommene Beschlüsse beim erneuten Kontextabgleich
-und erkennt ausdrückliche Teilmengen auch nach Mengenadverbien. Alte Beschlüsse
-werden nicht automatisch wieder aktuell; Teilmengen schließen keine Aufgabe. Beide Referenzsprachen
+Diese Nacharbeit unterscheidet verneinte Rücknahmen von tatsächlichen Rücknahmen
+und erkennt „out of“ als zusammenhängende Teilmengenangabe. Gültige Beschlüsse
+über bewusstes Nichtstun bleiben zulässig, auch ohne Komma im Transkript. Beide Referenzsprachen
 enthalten unverändert eine ausdrückliche Budgetfrage, wenn der Test einen Gesprächsimpuls verlangt.
 Die ursprünglichen Zusagen und unverbindlichen Aussagen bleiben erhalten.
 
-Die [bisherige ausführliche Fassung](https://github.com/Puma7/meeting-for-handy/blob/e502c9123a1bba45560d6395ac79c0dab01222d5/docs/validation/pr41-review-followup-20261104.md)
+Die [bisherige ausführliche Fassung](https://github.com/Puma7/meeting-for-handy/blob/c8ffeedc73b3d55659317b7d83df5eecbd4908cd/docs/validation/pr41-review-followup-20261104.md)
 und deren Detailhistorie bleiben unveränderlich in Git.
 Private Rohbelege, alte Checkpoints und fehlgeschlagene Läufe bleiben erhalten.
 Der vollständige TEST_REPORT bleibt gegenüber dem PR-Basisstand byteunverändert.
 Dieser bereinigte Vermerk veröffentlicht keine Nutzermeetings oder privaten Sitzungsdaten.
+
+## Verneinte Rücknahmen und mehrteilige Mengenangaben
+
+Die [Codex-Runde auf c8ffeed](https://github.com/Puma7/meeting-for-handy/pull/41#pullrequestreview-5794427330)
+fand zwei gültige Fehler. „Wir haben nichts zurückgenommen.“, „We withdrew
+nothing.“ und verwandte negative Pronomen konnten vorhandene Aufgaben oder
+Beschlüsse zurücknehmen. Sechs negative Aussagen wurden vorher für beide
+Eintragsarten angenommen: zwölf tatsächliche falsche Rücknahmen.
+
+Die gemeinsame Prüfung für terminale Aussagen weist diese negativen Pronomen
+jetzt zurück. Die vorhandene Regression verwendet für beide Eintragsarten auch
+den produktiven Zustandsschreiber: gültige Rücknahmen bleiben nach mehrfacher
+Wiederöffnung erhalten; abgelehnte Antworten verändern weder Eintrag noch
+Originalzitat oder früheren Checkpoint und erzeugen keine neue Revision.
+Drei zusätzliche echte Rücknahmen bleiben zulässig. Alle älteren Fälle,
+darunter „Wir brauchen den Bericht nicht mehr.“, bleiben erhalten.
+
+Dieselbe verneinte Behauptung war auch für neue Beschlüsse problematisch:
+„We decided nothing.“, „Wir haben nichts entschieden.“ und „We have decided
+none of the options.“ wurden vorher tatsächlich als Beschlussbelege akzeptiert.
+Sie werden jetzt abgewiesen. „We decided to do nothing.“ und „Wir haben
+beschlossen, nichts zu ändern.“ bleiben ausdrücklich gültige Beschlüsse.
+Der zusätzliche Gegenfall ohne Komma reproduzierte zunächst eine falsche
+Ablehnung der engeren Prüfung. Die Klauselgrenze berücksichtigt jetzt auch
+„nichts zu“ mit anschließendem Infinitiv; die Beschlussbehauptung bleibt von
+ihrem Inhalt getrennt. Auch dieser Vorherfehler und seine Korrektur sind belegt.
+
+„I have completed 1 out of 2 reports.“ und die Variante mit exactly wurden
+vorher als vollständige Erledigung angenommen. „out of“ wird jetzt als ein
+Mengenoperator gelesen; der Zähler steht vor out. Vollständige 2-out-of-2-
+Mengen und der einzelne benannte „report 1 out of 2“ bleiben zulässig.
+
+Die drei vorhandenen dauerhaften Regressionen ergänzen insgesamt 20 wörtliche
+Fälle mit 29 ausgeführten Szenarien, einschließlich beider Rücknahmearten.
+Die Vorherläufe zeigen 17 falsche Annahmen sowie die separat reproduzierte
+falsche Ablehnung des gültigen Beschlusses ohne Komma. Kein alter Fall wurde
+entfernt; keine Grenze wurde nachträglich an die Ergebnisse angepasst.
 
 ## Korrektur der Abschlussprüfung
 
@@ -139,8 +176,8 @@ alte Fehlläufe werden dadurch nicht als bestanden umgedeutet.
 | --- | --- |
 | Rust-Workspace, alle Targets | Frisch **568 bestanden**, darunter **169 Notizenfälle** und **37 Providerprotokollfälle**; drei bestehende besondere Einstiege regulär ignoriert. |
 | Rustformat und Clippy | Frisch bestanden, gesperrte Abhängigkeiten und Warnungen als Fehler. |
-| Deutsch, tatsächliches lokales Modell | Frisch **119.2043905 s**; reguläre vollständig validierte Wiederholungen: **0**. |
-| Englisch, tatsächliches lokales Modell | Frisch **119.2574082 s**; reguläre vollständig validierte Wiederholungen: **0**. |
+| Deutsch, tatsächliches lokales Modell | Frisch **238.9431324 s**; reguläre vollständig validierte Wiederholungen: **2**. |
+| Englisch, tatsächliches lokales Modell | Frisch **119.9836872 s**; reguläre vollständig validierte Wiederholungen: **0**. |
 | Frontend | **414 Tests in 21 Dateien**, TypeScript, Produktionsbuild und Format auf den hier bytegleichen Komponenten von 8d0ba21 bestanden; hier nicht erneut ausgeführt. |
 | Projektprüfung | Nach dem letzten Dokumentedit vor Upload erneut verify.ps1 erforderlich: 47 PCM-, 35 Notizen-, 28 Vorlagen-, acht Agenten- und Monitorprüfungen. |
 
@@ -257,6 +294,7 @@ auf 90becdd, quantitative Teilfortschritte auf dfe5d65 und die zu breite
 Prozentprüfung auf 94b3ee6 sowie die nachgestellten Adverbien auf 9da4d6d. Eine erste Code-Runde auf
 6170d4a war sauber; dessen zweite Runde fand die zu breite Verhältnisprüfung.
 Die folgende Runde auf e502c91 fand Mengenadverbien und zurückgenommene Beschlüsse.
+Die Runde auf c8ffeed fand verneinte Rücknahmen und den mehrteiligen Operator out of.
 Diese Runden waren keine sauberen Abschlüsse.
 
 Die Projektionskorrektur wurde von CodeRabbit
@@ -304,9 +342,9 @@ sowie bestehende Speicher- und Verwaltungsschranken bleiben erhalten.
 
 Statische Produktprompts, statische Vertragsdateien, Belegbudget, Fristen, UI, Transport,
 Aufnahme-/ASR-Logik, Modellreservierungen, Abhängigkeiten, Schutz-/Reviewerregeln,
-Version und vollständiger TEST_REPORT bleiben gegenüber e502c91 unverändert.
-Die dynamischen Änderungszweige für zurückgenommene Beschlüsse werden wie oben
-beschrieben enger gefasst; statische Vertragsdateien und Feldnamen bleiben gleich.
+Version und vollständiger TEST_REPORT bleiben gegenüber c8ffeed unverändert.
+Die bereits enger gefassten dynamischen Änderungszweige für zurückgenommene
+Beschlüsse bleiben hier ebenfalls byteunverändert.
 Auch der deutsche und englische synthetische Referenztext bleiben hier byteunverändert.
 
 Physische Aufnahme-, Berechtigungs-, Geräteverlust- und zweistündige Gerätetests
