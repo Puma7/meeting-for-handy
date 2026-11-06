@@ -98,6 +98,10 @@ pub(crate) fn apply(
                 "Abgeschlossene oder zurückgenommene Aufgaben sind nur Lesekontext."
             );
             ensure!(
+                old.kind != "decision" || old.status != "withdrawn",
+                "Zurückgenommene Beschlüsse sind nur Lesekontext; ein neuer Beschluss benötigt eine eigene Identität."
+            );
+            ensure!(
                 Some(old.revision) == c.target_revision,
                 "Die Modellantwort verwendet eine veraltete Eintragsfassung."
             );
@@ -237,21 +241,22 @@ pub(crate) fn apply(
                 next.entities
                     .iter()
                     .find(|e| {
-                        // A terminal task retains its original promise plus later
-                        // status evidence. Replaying the promise is the same identity,
-                        // even if optional old metadata is omitted in the new proposal.
-                        let terminal_promise = c.kind == "task"
-                            && ["completed", "withdrawn"].contains(&e.status.as_str())
+                        // Terminal identities retain their original assertion plus
+                        // later status evidence. Replay must not revive a withdrawn
+                        // decision or duplicate a completed/withdrawn task.
+                        let terminal_identity = ((c.kind == "task"
+                            && ["completed", "withdrawn"].contains(&e.status.as_str()))
+                            || (c.kind == "decision" && e.status == "withdrawn"))
                             && !c.evidence.is_empty()
                             && c.evidence
                                 .iter()
-                                .all(|v| retained_task_witness(&next, e, v));
+                                .all(|v| retained_terminal_witness(&next, e, v));
                         !next.context_excluded_ids.contains(&e.id)
                             && e.kind == c.kind
                             && e.text == text
-                            && (e.owner == c.owner || (terminal_promise && c.owner.is_none()))
-                            && (e.due == c.due || (terminal_promise && c.due.is_none()))
-                            && (e.evidence == c.evidence || terminal_promise)
+                            && (e.owner == c.owner || (terminal_identity && c.owner.is_none()))
+                            && (e.due == c.due || (terminal_identity && c.due.is_none()))
+                            && (e.evidence == c.evidence || terminal_identity)
                     })
                     .map(|e| e.id.clone())
             })
@@ -360,16 +365,19 @@ pub(crate) fn apply(
     Ok(events)
 }
 
-/// Match an original promise without enlarging the bounded current evidence set.
-/// Only this task's uninterrupted current-text history can supply an omitted witness.
-fn retained_task_witness(
+/// Match an original promise/decision without enlarging the bounded current evidence set.
+/// Only this identity's uninterrupted current-text history can supply an omitted witness.
+fn retained_terminal_witness(
     state: &WorkspaceState,
-    task: &Entity,
+    entity: &Entity,
     evidence: &crate::Evidence,
 ) -> bool {
-    task.evidence.contains(evidence)
-        || (task_quote_allowed(&evidence.quote)
-            && !state.superseded_sources.contains(&evidence.source_id)
+    entity.evidence.contains(evidence)
+        || ((match entity.kind.as_str() {
+            "task" => task_quote_allowed(&evidence.quote),
+            "decision" => recorded_decision_quote_allowed(&evidence.quote),
+            _ => false,
+        }) && !state.superseded_sources.contains(&evidence.source_id)
             && state
                 .originals
                 .iter()
@@ -378,9 +386,12 @@ fn retained_task_witness(
                 .events
                 .iter()
                 .rev()
-                .filter(|event| event.entity_id == task.id)
-                .take_while(|event| event.text == task.text)
-                .any(|event| event.evidence.contains(evidence)))
+                .filter(|event| event.entity_id == entity.id)
+                .take_while(|event| event.text == entity.text)
+                .any(|event| {
+                    event.evidence.contains(evidence)
+                        && (entity.kind != "decision" || event.status == "recorded")
+                }))
 }
 
 /// Select text and metadata witnesses within the unchanged combined six-evidence budget.
@@ -851,7 +862,44 @@ fn incomplete_quantity(text: &str) -> bool {
         }
         // Date notation is not a progress ratio (including chained YYYY/MM/DD).
         let before = text[..left].trim_end();
-        let preceding = words.iter().rev().find(|w| w.1 == before.len());
+        let mut prior = words.iter().rposition(|w| w.1 == before.len());
+        // Keep the link to the predicate across adjacent quantity adverbs,
+        // without crossing an object noun or a punctuation boundary.
+        while let Some(index) = prior {
+            if ![
+                "exactly",
+                "genau",
+                "precisely",
+                "exakt",
+                "only",
+                "nur",
+                "just",
+                "erst",
+                "already",
+                "bereits",
+                "schon",
+                "approximately",
+                "circa",
+                "roughly",
+                "about",
+                "around",
+                "etwa",
+                "ungefähr",
+                "knapp",
+                "vollständig",
+                "fully",
+            ]
+            .contains(&words[index].2)
+            {
+                break;
+            }
+            prior = index.checked_sub(1).filter(|previous| {
+                text[words[*previous].1..words[index].0]
+                    .chars()
+                    .all(char::is_whitespace)
+            });
+        }
+        let preceding = prior.map(|index| &words[index]);
         if before.ends_with('/')
             || text[right_end..].trim_start().starts_with('/')
             || preceding

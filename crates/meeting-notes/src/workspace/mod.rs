@@ -648,7 +648,9 @@ impl WorkspaceRunner {
                     }
                     // Tasks may be present as overview context but cannot be retagged as facts.
                     for entity in req.state.iter().filter(|entity| {
-                        !entity.human_locked && ["fact", "decision"].contains(&entity.kind.as_str())
+                        !entity.human_locked
+                            && ["fact", "decision"].contains(&entity.kind.as_str())
+                            && !(entity.kind == "decision" && entity.status == "withdrawn")
                     }) {
                         let mut branch = base.clone();
                         branch["properties"]["kind"]["enum"] = serde_json::json!([entity.kind]);

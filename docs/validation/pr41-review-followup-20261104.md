@@ -2,13 +2,13 @@
 
 Stand: 6. November 2026. Version **1.1.0-beta.1**, unverändert.
 
-Diese Nacharbeit unterscheidet ausdrückliche Fortschrittsverhältnisse von
-Jahres-, Quartals- und Berichtsbezeichnungen im Aufgabengegenstand. Explizite
-Teilmengen schließen eine Aufgabe nicht automatisch. Beide Referenzsprachen
+Diese Nacharbeit erhält zurückgenommene Beschlüsse beim erneuten Kontextabgleich
+und erkennt ausdrückliche Teilmengen auch nach Mengenadverbien. Alte Beschlüsse
+werden nicht automatisch wieder aktuell; Teilmengen schließen keine Aufgabe. Beide Referenzsprachen
 enthalten unverändert eine ausdrückliche Budgetfrage, wenn der Test einen Gesprächsimpuls verlangt.
 Die ursprünglichen Zusagen und unverbindlichen Aussagen bleiben erhalten.
 
-Die [bisherige ausführliche Fassung](https://github.com/Puma7/meeting-for-handy/blob/6170d4a6b076d20361880c91369bd7600b7cec48/docs/validation/pr41-review-followup-20261104.md)
+Die [bisherige ausführliche Fassung](https://github.com/Puma7/meeting-for-handy/blob/e502c9123a1bba45560d6395ac79c0dab01222d5/docs/validation/pr41-review-followup-20261104.md)
 und deren Detailhistorie bleiben unveränderlich in Git.
 Private Rohbelege, alte Checkpoints und fehlgeschlagene Läufe bleiben erhalten.
 Der vollständige TEST_REPORT bleibt gegenüber dem PR-Basisstand byteunverändert.
@@ -74,7 +74,38 @@ freistehenden Mengen. Dreizehn zusätzliche dauerhafte Fälle erhalten zulässig
 Perioden-/Berichtsnamen, echte Teilmengen mit und ohne Abstand zur Teileinheit
 und vollständige 2-von-2-Mengen am Satzende. Ein Satzpunkt wird nicht mehr als
 leere Dezimalstelle eines Mengenverhältnisses behandelt.
-Die Zahl der Testfunktionen bleibt unverändert.
+
+Auf e502c91 waren zwei weitere
+[Codex-Befunde](https://github.com/Puma7/meeting-for-handy/pull/41#pullrequestreview-5793991439)
+gültig. Sechs Vorherfälle schlossen Aufgaben trotz „exactly 1/2“ oder
+„genau 1 von 2“, auch mit aufeinanderfolgenden Mengenadverbien. Die Verbindung
+zum Fortschrittsprädikat wird jetzt über benachbarte Mengenadverbien erhalten,
+ohne über Gegenstandsnamen oder Satzgrenzen zu springen. Acht weitere Fälle
+prüfen sechs Teilmengen und zwei zulässige vollständige Mengen.
+
+Ein neuer Regressionstest verwendet den tatsächlichen Workspace-Runner mit
+synthetischen HTTP-Modellantworten und dem produktiven Zustandsschreiber.
+Eine Agendaänderung spielt vier alte Ausschnitte mit zusammen 6000 Zeichen
+erneut ab; der nächste Ausschnitt würde die unveränderte 6500-Zeichen-Grenze
+überschreiten. Die Rücknahme liegt im späteren Fenster. Sechs neuere Fakten
+verdrängen den zurückgenommenen Beschluss aus den optionalen Modell-Seeds.
+Der alte Beschlussbeleg ist zudem im aktuellen Belegsatz bereits minimiert,
+bleibt aber in der unveränderlichen aufgezeichneten Historie vorhanden.
+
+Vorher entstanden eine neue aktuelle Beschlussidentität und bei ausdrücklich
+angegebener alter Zielkennung ein unerlaubtes Wiederöffnen. Jetzt erkennt die
+Deduplizierung auch zurückgenommene Beschlüsse anhand ihrer ursprünglichen
+aufgezeichneten Belege. Ein bloßer Modell-Replay öffnet die Identität nicht.
+Native Validierung und dynamisches Fakten-Schema geben zurückgenommene
+Beschlüsse nur als Lesekontext frei. Ein eigenständiger neuer Beschluss mit
+einer neuen Originalquelle bleibt möglich und erhält einen neuen Eintrag.
+
+Der Test prüft beide Vorherfehler, byteunveränderte frühere Checkpoints,
+mehrfache Wiederöffnung und den unabhängigen neuen Beschluss. Historische
+Belege werden nicht in den begrenzten aktuellen Belegsatz hineinkopiert;
+die unveränderte Sechs-Belege-Grenze und aktive Quellenidentität bleiben erhalten.
+Die bisherigen Tabellenfälle erhöhen keine Testfunktionszählung. Diese
+Nacharbeit ergänzt zusätzlich einen eigenen Produktions-Runner-Replaytest.
 Abgelehnte Antworten verändern weder Aufgabe noch Zitate oder alten Checkpoint
 und schreiben keine zweite Revision.
 Zulässige Abschlüsse bewahren die wörtlichen Quellen und stimmen nach
@@ -106,10 +137,10 @@ alte Fehlläufe werden dadurch nicht als bestanden umgedeutet.
 
 | Prüfung | Tatsächliches Ergebnis |
 | --- | --- |
-| Rust-Workspace, alle Targets | Frisch **567 bestanden**, darunter **168 Notizenfälle** und **37 Providerprotokollfälle**; drei bestehende besondere Einstiege regulär ignoriert. |
+| Rust-Workspace, alle Targets | Frisch **568 bestanden**, darunter **169 Notizenfälle** und **37 Providerprotokollfälle**; drei bestehende besondere Einstiege regulär ignoriert. |
 | Rustformat und Clippy | Frisch bestanden, gesperrte Abhängigkeiten und Warnungen als Fehler. |
-| Deutsch, tatsächliches lokales Modell | Frisch **113.3022092 s**; reguläre vollständig validierte Wiederholungen: **0**. |
-| Englisch, tatsächliches lokales Modell | Frisch **152.1628312 s**; reguläre vollständig validierte Wiederholungen: **0**. |
+| Deutsch, tatsächliches lokales Modell | Frisch **119.2043905 s**; reguläre vollständig validierte Wiederholungen: **0**. |
+| Englisch, tatsächliches lokales Modell | Frisch **119.2574082 s**; reguläre vollständig validierte Wiederholungen: **0**. |
 | Frontend | **414 Tests in 21 Dateien**, TypeScript, Produktionsbuild und Format auf den hier bytegleichen Komponenten von 8d0ba21 bestanden; hier nicht erneut ausgeführt. |
 | Projektprüfung | Nach dem letzten Dokumentedit vor Upload erneut verify.ps1 erforderlich: 47 PCM-, 35 Notizen-, 28 Vorlagen-, acht Agenten- und Monitorprüfungen. |
 
@@ -225,6 +256,7 @@ doppelte Workspace-Projektion. Nachfolgende Codex-Läufe fanden Wortmarker
 auf 90becdd, quantitative Teilfortschritte auf dfe5d65 und die zu breite
 Prozentprüfung auf 94b3ee6 sowie die nachgestellten Adverbien auf 9da4d6d. Eine erste Code-Runde auf
 6170d4a war sauber; dessen zweite Runde fand die zu breite Verhältnisprüfung.
+Die folgende Runde auf e502c91 fand Mengenadverbien und zurückgenommene Beschlüsse.
 Diese Runden waren keine sauberen Abschlüsse.
 
 Die Projektionskorrektur wurde von CodeRabbit
@@ -270,9 +302,11 @@ benötigt weiterhin die bisherige Programmversion.
 Fremde Modellreservierungen bleiben fremd; TTL 300 s und Erneuerung 60 s
 sowie bestehende Speicher- und Verwaltungsschranken bleiben erhalten.
 
-Statische Produktprompts, Vertragsdateien, Belegbudget, Fristen, UI, Transport,
+Statische Produktprompts, statische Vertragsdateien, Belegbudget, Fristen, UI, Transport,
 Aufnahme-/ASR-Logik, Modellreservierungen, Abhängigkeiten, Schutz-/Reviewerregeln,
-Version und vollständiger TEST_REPORT bleiben gegenüber 6170d4a unverändert.
+Version und vollständiger TEST_REPORT bleiben gegenüber e502c91 unverändert.
+Die dynamischen Änderungszweige für zurückgenommene Beschlüsse werden wie oben
+beschrieben enger gefasst; statische Vertragsdateien und Feldnamen bleiben gleich.
 Auch der deutsche und englische synthetische Referenztext bleiben hier byteunverändert.
 
 Physische Aufnahme-, Berechtigungs-, Geräteverlust- und zweistündige Gerätetests
