@@ -2,19 +2,55 @@
 
 Stand: 6. November 2026. Version **1.1.0-beta.1**, unverändert.
 
-Diese Nacharbeit bindet deutsches Hilfsverb und Beschlussprädikat an denselben
-Satzteil. Ein früheres Hilfsverb aus einem Vorschlag begründet keinen späteren
-Beschluss im Nebensatz. Gültige einfache Vergangenheit und tatsächlich ausgesagte
-Vergangenheit beziehungsweise passive Beschlusszustände bleiben zulässig.
-Die bisherigen UI-, Rücknahme-, Mengen- und Nichtstun-Korrekturen bleiben erhalten. Beide Referenzsprachen
+Diese Nacharbeit verwendet dieselbe Satzteilabgrenzung für Beschlüsse und
+Erledigungen. Ein vorgeschlagener Abschluss oder ein beabsichtigter perfekter
+Infinitiv schließt keine Aufgabe. Gültige Abschlüsse, Fortschrittspräpositionen,
+Dezimal-/Versionspunkte und affirmative englische Adverbien bleiben zulässig.
+Alle bisherigen UI-, Rücknahme-, Mengen- und Nichtstun-Korrekturen bleiben erhalten. Beide Referenzsprachen
 enthalten unverändert eine ausdrückliche Budgetfrage, wenn der Test einen Gesprächsimpuls verlangt.
 Die ursprünglichen Zusagen und unverbindlichen Aussagen bleiben erhalten.
 
-Die [bisherige ausführliche Fassung](https://github.com/Puma7/meeting-for-handy/blob/b8b1ed83ab5f4b918ec6cf01a3fbeff3b09c188e/docs/validation/pr41-review-followup-20261104.md)
+Die [bisherige ausführliche Fassung](https://github.com/Puma7/meeting-for-handy/blob/1ad859bfa1ff213cf54be7b7c5fd352feb5af11b/docs/validation/pr41-review-followup-20261104.md)
 und deren Detailhistorie bleiben unveränderlich in Git.
 Private Rohbelege, alte Checkpoints und fehlgeschlagene Läufe bleiben erhalten.
 Der vollständige TEST_REPORT bleibt gegenüber dem PR-Basisstand byteunverändert.
 Dieser bereinigte Vermerk veröffentlicht keine Nutzermeetings oder privaten Sitzungsdaten.
+
+## Erledigungsbehauptung statt vorgeschlagenem Abschluss
+
+Die [Codex-Runde auf 1ad859b](https://github.com/Puma7/meeting-for-handy/pull/41#discussion_r4488684140)
+fand einen gültigen Fehler im getrennten Erledigungspfad: „Ich habe
+vorgeschlagen, dass der Bericht abgeschlossen wird.“ und „Ich habe vor,
+den Bericht abgeschlossen zu haben.“ konnten eine offene Aufgabe schließen.
+Die produktive Validator-/Checkpoint-Regression reproduzierte fünf falsche
+Annahmen, einschließlich fehlender ASR-Kommas und einer geplanten Fertigstellung.
+
+Beschlüsse und Erledigungen verwenden jetzt dieselbe Satzteilabgrenzung und
+Nebensatzzuordnung. Hilfsverb und ausgesagter Abschluss müssen zusammengehören.
+Ein perfekter Infinitiv unmittelbar nach dem Partizip reicht innerhalb desselben
+Satzteils nicht aus; die gemeinsame Prüfung gilt auch für Beschlüsse.
+Eine echte Nebensatz-Vergangenheit mit abschließendem habe/haben bleibt zulässig.
+Die Fortschrittspräposition zu wird davon unterschieden: vollständige 100-Prozent-
+Sätze mit und ohne Dezimalkomma bleiben gültig. Satzzeichen zwischen Ziffern
+trennen keine Dezimal- oder Versionskennung wie 1.0.
+
+Der finale Vorherlauf zeigte zusätzlich vier zu Unrecht abgewiesene gültige
+Abschlüsse: eine bestätigte Nebensatz-Vergangenheit, einen Bericht zur Version
+1.0 und zwei englische perfekte Aussagen mit already beziehungsweise just.
+Für diese affirmativen Adverbien wird dieselbe begrenzte Liste wie bei
+Beschlussprädikaten verwendet; Verneinungen, Teilmengen und Bedingungen bleiben gesperrt.
+Ein weiterer Vorherfall wies einen tatsächlich gefassten Versionsbeschluss ab.
+
+Elf neue Abschlussfälle und drei neue Beschlussfälle ergänzen die vorhandenen
+dauerhaften Regressionen. Ein getrennt protokollierter unveröffentlichter
+Zwischenstand reproduzierte noch einen Beschluss-Infinitiv und eine fälschlich
+abgewiesene Agenda-Präposition; beide bestehen nach der gemeinsamen Präzisierung.
+Ein anderer Zwischentest wies drei gültige vollständige Prozentbelege ab.
+Auch dieser fehlgeschlagene Lauf bleibt erhalten; die finale Prüfung verwirft
+statt einer beliebigen Präposition nur den tatsächlichen perfekten Infinitiv.
+Alle alten und neuen Belege, ursprünglichen Checkpointbytes, mehrfachen
+Wiederöffnungen und abgelehnten Antworten ohne neue Revision bestehen.
+Die Testfunktionszählung wird durch die zusätzlichen Tabellenfälle nicht erhöht.
 
 ## Hilfsverb und Beschlussprädikat im selben Satzteil
 
@@ -292,8 +328,8 @@ alte Fehlläufe werden dadurch nicht als bestanden umgedeutet.
 | --- | --- |
 | Rust-Workspace, alle Targets | Frisch **568 bestanden**, darunter **169 Notizenfälle** und **37 Providerprotokollfälle**; drei bestehende besondere Einstiege regulär ignoriert. |
 | Rustformat und Clippy | Frisch bestanden, gesperrte Abhängigkeiten und Warnungen als Fehler. |
-| Deutsch, tatsächliches lokales Modell | Frisch **136.64991 s**; reguläre vollständig validierte Wiederholungen: **0**. |
-| Englisch, tatsächliches lokales Modell | Frisch **108.0559909 s**; reguläre vollständig validierte Wiederholungen: **0**. |
+| Deutsch, tatsächliches lokales Modell | Frisch **143.5995061 s**; reguläre vollständig validierte Wiederholungen: **0**. |
+| Englisch, tatsächliches lokales Modell | Frisch **117.6821639 s**; reguläre vollständig validierte Wiederholungen: **0**. |
 | Frontend | **416 Tests in 21 Dateien**, TypeScript, Produktionsbuild und Format auf dem hier bytegleichen b8b1ed8-UI-Stand bestanden; nicht erneut ausgeführt. |
 | Projektprüfung | Nach dem letzten Dokumentedit vor Upload erneut verify.ps1 erforderlich: 47 PCM-, 35 Notizen-, 28 Vorlagen-, acht Agenten- und Monitorprüfungen. |
 
@@ -316,7 +352,7 @@ Modell-Dateigröße ist keine RAM-Messung.
 
 ## Erhaltene Fehlläufe und Nachweisgrenzen
 
-Ein erster deutscher Modellversuch dieses Satzteil-Stands hielt im ersten
+Ein deutscher Modellversuch auf dem Vorgängerstand 1ad859b hielt im ersten
 Fenster mit der Meldung zum Antwortlimit an. Es entstand weder eine
 Ergebnisrevision noch ein Referenz-Erfolgsvermerk; der ursprünglich geschriebene
 Agendakontext blieb erhalten. Der englische Lauf wurde nach diesem Fehler
@@ -326,8 +362,9 @@ nicht separat gespeichert. Dieselbe Fehlerklasse kann aus dem Transport oder
 aus einer Antwort mit weiteren Änderungen entstehen; ein tatsächlicher
 4096-Token-Verbrauch ist damit nicht bewiesen. Die weitergehende Ursache
 bleibt offen. Der Fehllauf bleibt erhalten und zählt nicht als bestanden.
-Das hier gemessene getrennte Referenzpaar wurde anschließend mit identischem
-Code, Modell, Korpus, Fristen und allen fünf Kriterien separat festgelegt.
+Ein damaliges getrenntes Referenzpaar wurde anschließend mit identischem
+Code, Modell, Korpus, Fristen und allen fünf Kriterien separat festgelegt und bestand.
+Dieses historische Paar wird den hier frisch gemessenen Referenzen nicht zugeordnet.
 Keine Akzeptanzgrenze oder Wiederholungsregel wurde dafür erweitert.
 
 
@@ -428,6 +465,7 @@ Die folgende Runde auf e502c91 fand Mengenadverbien und zurückgenommene Beschl�
 Die Runde auf c8ffeed fand verneinte Rücknahmen und den mehrteiligen Operator out of.
 Die folgende Runde auf 35a9bee fand beabsichtigte deutsche Entscheidungen.
 Die Runde auf b8b1ed8 fand eine falsche Hilfsverb-Zuordnung über Satzteilgrenzen.
+Die Runde auf 1ad859b fand dieselbe Fehlerklasse im Erledigungspfad.
 Diese Runden waren keine sauberen Abschlüsse.
 
 Die Projektionskorrektur wurde von CodeRabbit
@@ -475,7 +513,7 @@ sowie bestehende Speicher- und Verwaltungsschranken bleiben erhalten.
 
 Statische Produktprompts, statische Vertragsdateien, Belegbudget, Fristen und Transport,
 Aufnahme-/ASR-Logik, Modellreservierungen, Abhängigkeiten, Schutz-/Reviewerregeln,
-Version und vollständiger TEST_REPORT bleiben gegenüber b8b1ed8 unverändert.
+Version und vollständiger TEST_REPORT bleiben gegenüber 1ad859b unverändert.
 Die bereits enger gefassten dynamischen Änderungszweige für zurückgenommene
 Beschlüsse bleiben hier ebenfalls byteunverändert.
 Auch der deutsche und englische synthetische Referenztext bleiben hier byteunverändert.

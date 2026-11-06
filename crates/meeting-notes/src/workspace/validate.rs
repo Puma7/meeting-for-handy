@@ -579,6 +579,62 @@ const ADDITIONAL_UNCERTAIN_TERMINAL_WORDS: &[&str] = &[
     "whether",
 ];
 
+/// Partition temporary word tokens at clause punctuation, preserving decimal/version separators.
+fn assertion_clauses(text: &str) -> Vec<std::ops::Range<usize>> {
+    let mut result = Vec::new();
+    let mut segment = 0;
+    let mut first_word = 0;
+    for (at, ch) in text
+        .char_indices()
+        .chain(std::iter::once((text.len(), '\n')))
+    {
+        let numeric = ['.', ','].contains(&ch)
+            && at
+                .checked_sub(1)
+                .and_then(|i| text.as_bytes().get(i))
+                .is_some_and(|c| c.is_ascii_digit())
+            && text
+                .as_bytes()
+                .get(at + 1)
+                .is_some_and(|c| c.is_ascii_digit());
+        if ['.', '!', '?', ';', ',', ':', '\n'].contains(&ch) && !numeric {
+            let count = text[segment..at]
+                .split(|c: char| !c.is_alphabetic())
+                .filter(|word| !word.is_empty())
+                .count();
+            result.push(first_word..first_word + count);
+            first_word += count;
+            segment = (at + ch.len_utf8()).min(text.len());
+        }
+    }
+    result
+}
+
+/// Locate a dependent clause before a predicate, even when ASR omitted its comma.
+fn subordinate_start(words: &[&str], start: usize, predicate: usize) -> Option<usize> {
+    words[start..predicate]
+        .iter()
+        .rposition(|word| ["dass", "ob", "weil", "damit", "wenn", "falls", "sofern"].contains(word))
+        .map(|at| start + at + 1)
+}
+
+const AFFIRMATIVE_PREDICATE_ADVERBS: &[&str] = &[
+    "already",
+    "just",
+    "now",
+    "today",
+    "finally",
+    "unanimously",
+    "explicitly",
+];
+
+/// A perfect infinitive belongs to an intention, not an asserted terminal state.
+fn perfect_infinitive_after(words: &[&str], predicate: usize, clause_end: usize) -> bool {
+    predicate + 2 < clause_end
+        && words[predicate + 1] == "zu"
+        && ["haben", "sein"].contains(&words[predicate + 2])
+}
+
 /// Require an affirmative decision assertion. Its infinitive/that-clause may
 /// itself be negative ("decided not to ..."); that does not negate the decision.
 pub(super) fn recorded_decision_quote_allowed(quote: &str) -> bool {
@@ -594,28 +650,14 @@ pub(super) fn recorded_decision_quote_allowed(quote: &str) -> bool {
         .collect();
     // Bind German auxiliaries to the same clause, including ASR without commas.
     // Token counts also match the temporary two-token expansion of "we've".
-    let mut clause_start = 0;
-    let clauses: Vec<_> = lower
-        .split(['.', '!', '?', ';', ',', ':', '\n'])
-        .map(|clause| {
-            let count = clause
-                .split(|c: char| !c.is_alphabetic())
-                .filter(|word| !word.is_empty())
-                .count();
-            let range = clause_start..clause_start + count;
-            clause_start += count;
-            range
-        })
-        .collect();
+    let clauses = assertion_clauses(&lower);
     let german = words.iter().enumerate().find_map(|(index, word)| {
         if !["entscheiden", "beschließen", "beschlossen", "entschieden"].contains(word) {
             return None;
         }
         let clause = clauses.iter().find(|range| range.contains(&index))?;
-        let subordinate = words[clause.start..index].iter().rposition(|word| {
-            ["dass", "ob", "weil", "damit", "wenn", "falls", "sofern"].contains(word)
-        });
-        let start = subordinate.map_or(clause.start, |at| clause.start + at + 1);
+        let subordinate = subordinate_start(&words, clause.start, index);
+        let start = subordinate.unwrap_or(clause.start);
         let finite = subordinate.is_none()
             && ((index > start && words[index - 1] == "wir")
                 || (index + 1 < clause.end && words[index + 1] == "wir"));
@@ -630,16 +672,13 @@ pub(super) fn recorded_decision_quote_allowed(quote: &str) -> bool {
             // A modal/intention followed by an infinitive is not a decision.
             "entscheiden" | "beschließen" => finite,
             "beschlossen" | "entschieden" => {
-                finite
-                    || words[start..index]
-                        .iter()
-                        .rposition(|w| auxiliary(w))
-                        .is_some_and(|at| !words[start + at + 1..index].contains(&"zu"))
-                    // In an asserted subordinate past/passive clause the finite
-                    // auxiliary follows the participle at the end of that clause.
-                    || (subordinate.is_some()
-                        && index + 2 == clause.end
-                        && auxiliary(words[index + 1]))
+                !perfect_infinitive_after(&words, index, clause.end)
+                    && (finite
+                        || words[start..index].iter().any(|w| auxiliary(w))
+                        // A finite subordinate auxiliary ends that same clause.
+                        || (subordinate.is_some()
+                            && index + 2 == clause.end
+                            && auxiliary(words[index + 1])))
             }
             _ => false,
         };
@@ -661,18 +700,9 @@ pub(super) fn recorded_decision_quote_allowed(quote: &str) -> bool {
         }
         let mut predicate = index + 2;
         while predicate < index + 5
-            && words.get(predicate).is_some_and(|w| {
-                [
-                    "already",
-                    "just",
-                    "now",
-                    "today",
-                    "finally",
-                    "unanimously",
-                    "explicitly",
-                ]
-                .contains(w)
-            })
+            && words
+                .get(predicate)
+                .is_some_and(|w| AFFIRMATIVE_PREDICATE_ADVERBS.contains(w))
         {
             predicate += 1;
         }
@@ -1159,7 +1189,14 @@ pub(super) fn completion_quote_allowed(quote: &str) -> bool {
     {
         return false;
     }
-    let phrase = |sequence: &[&str]| words.windows(sequence.len()).any(|part| part == sequence);
+    let clauses = assertion_clauses(&lower);
+    let phrase = |sequence: &[&str]| {
+        clauses.iter().any(|range| {
+            words[range.clone()]
+                .windows(sequence.len())
+                .any(|part| part == sequence)
+        })
+    };
     if [
         &["ist", "erledigt"][..],
         &["ist", "erteilt"],
@@ -1184,13 +1221,26 @@ pub(super) fn completion_quote_allowed(quote: &str) -> bool {
         "uploaded",
         "published",
     ];
-    if words
-        .windows(2)
-        .any(|part| ["i", "we"].contains(&part[0]) && english.contains(&part[1]))
-        || words.windows(3).any(|part| {
-            ["i", "we"].contains(&part[0]) && part[1] == "have" && english.contains(&part[2])
-        })
-    {
+    if words.iter().enumerate().any(|(index, word)| {
+        if !["i", "we"].contains(word) {
+            return false;
+        }
+        let Some(clause) = clauses.iter().find(|range| range.contains(&index)) else {
+            return false;
+        };
+        let mut predicate = index + 1;
+        if words.get(predicate) == Some(&"have") {
+            predicate += 1;
+            while predicate < (index + 5).min(clause.end)
+                && words
+                    .get(predicate)
+                    .is_some_and(|w| AFFIRMATIVE_PREDICATE_ADVERBS.contains(w))
+            {
+                predicate += 1;
+            }
+        }
+        predicate < clause.end && english.contains(&words[predicate])
+    }) {
         return true;
     }
     let german = [
@@ -1204,10 +1254,25 @@ pub(super) fn completion_quote_allowed(quote: &str) -> bool {
         "hochgeladen",
         "veröffentlicht",
     ];
-    lower.split(['.', '!', ';', '\n']).any(|sentence| {
-        let mut words = sentence.split(|c: char| !c.is_alphabetic());
-        words.any(|word| ["habe", "haben"].contains(&word))
-            && words.any(|word| german.contains(&word))
+    words.iter().enumerate().any(|(index, word)| {
+        if !german.contains(word) {
+            return false;
+        }
+        let Some(clause) = clauses.iter().find(|range| range.contains(&index)) else {
+            return false;
+        };
+        // A perfect infinitive states an intention, not its completion.
+        if perfect_infinitive_after(&words, index, clause.end) {
+            return false;
+        }
+        let subordinate = subordinate_start(&words, clause.start, index);
+        let start = subordinate.unwrap_or(clause.start);
+        words[start..index]
+            .iter()
+            .any(|w| ["habe", "haben"].contains(w))
+            || (subordinate.is_some()
+                && index + 2 == clause.end
+                && ["habe", "haben"].contains(&words[index + 1]))
     })
 }
 

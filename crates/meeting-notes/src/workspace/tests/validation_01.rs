@@ -4,6 +4,8 @@ use super::*;
 fn perfect_decisions_validate_literal_sources_and_durable_reopen() {
     let mut mismatches = Vec::new();
     for (quote, allowed) in [
+        ("Wir haben vor den Pilotstart beschlossen zu haben.", false),
+        ("Wir haben zu Punkt 1 den Pilotstart beschlossen.", true),
         ("We have decided to release on Friday.", true),
         ("We've decided to release on Friday.", true),
         ("We’ve decided to release on Friday.", true),
@@ -66,6 +68,10 @@ fn perfect_decisions_validate_literal_sources_and_durable_reopen() {
         ),
         (
             "Es ist bestätigt, dass der Pilotstart beschlossen ist.",
+            true,
+        ),
+        (
+            "Wir haben den Pilotstart für Version 1.0 beschlossen.",
             true,
         ),
         ("We have not decided to release on Friday.", false),
@@ -151,6 +157,32 @@ fn perfect_decisions_validate_literal_sources_and_durable_reopen() {
 #[test]
 fn contracted_perfect_completion_retains_literal_quotes_after_reopen() {
     let cases = [
+        (
+            "Ich habe vorgeschlagen, dass der Bericht abgeschlossen wird.",
+            false,
+        ),
+        (
+            "Wir haben vorgeschlagen dass der Bericht abgeschlossen wird.",
+            false,
+        ),
+        ("Ich habe vor, den Bericht abgeschlossen zu haben.", false),
+        ("Wir haben vor den Bericht abgeschlossen zu haben.", false),
+        (
+            "Ich habe geplant den Bericht abgeschlossen zu haben.",
+            false,
+        ),
+        (
+            "Robin bestätigt, dass ich den Bericht abgeschlossen habe.",
+            true,
+        ),
+        ("Robin bestätigt: Ich habe den Bericht abgeschlossen.", true),
+        (
+            "Ich habe den Bericht abgeschlossen um Zeit für andere Aufgaben zu haben.",
+            true,
+        ),
+        ("Ich habe den Bericht für Version 1.0 abgeschlossen.", true),
+        ("I have already completed the report.", true),
+        ("I've just sent the report.", true),
         ("I've sent the report.", true),
         ("I’ve sent the report.", true),
         ("We've completed the report.", true),
