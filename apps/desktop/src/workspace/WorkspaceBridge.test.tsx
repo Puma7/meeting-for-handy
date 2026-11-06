@@ -695,6 +695,42 @@ function fixture() {
   };
   return { adapter, meeting, status };
 }
+/** Drive only the two-second workspace poll; keep async assertion timers and the test deadline real. */
+function controlWorkspacePolling() {
+  const callbacks = new Map<ReturnType<typeof setInterval>, () => void>();
+  const originalSet = globalThis.setInterval;
+  const originalClear = globalThis.clearInterval;
+  const registration = vi
+    .spyOn(globalThis, "setInterval")
+    .mockImplementation((callback, delay, ...args) => {
+      if (delay !== 2000 || typeof callback !== "function")
+        return originalSet(callback, delay, ...args);
+      const handle = originalSet(() => {}, delay);
+      callbacks.set(handle, () => callback(...args));
+      return handle;
+    });
+  const cancellation = vi
+    .spyOn(globalThis, "clearInterval")
+    .mockImplementation((handle) => {
+      if (handle) callbacks.delete(handle);
+      originalClear(handle);
+    });
+  return {
+    advance: async (milliseconds: number) => {
+      await act(async () => {
+        for (let elapsed = 2000; elapsed <= milliseconds; elapsed += 2000)
+          for (const callback of [...callbacks.values()]) callback();
+      });
+    },
+    restore: () => {
+      for (const handle of callbacks.keys()) originalClear(handle);
+      callbacks.clear();
+      registration.mockRestore();
+      cancellation.mockRestore();
+    },
+  };
+}
+
 describe("Native workspace boundary", () => {
   it("does not create note snapshots when unchanged empty notes lose focus", async () => {
     const f = fixture();
@@ -1817,30 +1853,45 @@ it("commits protocol notes after inference and retains a newer uncommitted draft
 }, 10000);
 
 it("does not acknowledge a context write deferred by the native inference gate", async () => {
-  const f = fixture();
-  f.status.status = "waiting";
-  f.adapter.context.mockImplementationOnce(async () => false);
-  render(
-    <LiveWorkspace adapter={f.adapter} meeting={f.meeting} onBack={() => {}} />,
-  );
-  fireEvent.click(
-    await screen.findByRole("button", { name: "Fürs Protokoll" }),
-  );
-  const note = screen.getByRole("textbox", {
-    name: "Protokollnotiz",
-  }) as HTMLTextAreaElement;
-  await waitFor(() => expect(note.value).toBe("Gesicherte Protokollnotiz"));
-  fireEvent.change(note, { target: { value: "Queued at native race" } });
-  fireEvent.blur(note);
-  await waitFor(() => expect(f.adapter.context).toHaveBeenCalledOnce());
-  expect(f.status.workspaceContext.revision).toBe(7);
-  await waitFor(() => expect(f.adapter.context).toHaveBeenCalledTimes(2), {
-    timeout: 4000,
-  });
-  expect(f.adapter.context.mock.calls[1][0].revision).toBe(7);
-  expect(f.status.workspaceContext.sharedNotes[0].text).toBe(
-    "Queued at native race",
-  );
+  const polling = controlWorkspacePolling();
+  let mounted: ReturnType<typeof render> | undefined;
+  try {
+    const f = fixture();
+    f.status.status = "waiting";
+    f.adapter.context.mockImplementationOnce(async () => false);
+    mounted = render(
+      <LiveWorkspace
+        adapter={f.adapter}
+        meeting={f.meeting}
+        onBack={() => {}}
+      />,
+    );
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Fürs Protokoll" }),
+    );
+    const note = screen.getByRole("textbox", {
+      name: "Protokollnotiz",
+    }) as HTMLTextAreaElement;
+    await waitFor(() => expect(note.value).toBe("Gesicherte Protokollnotiz"));
+    fireEvent.change(note, { target: { value: "Queued at native race" } });
+    fireEvent.blur(note);
+    await act(async () => {});
+    await waitFor(() => expect(f.adapter.context).toHaveBeenCalledOnce());
+    expect(f.status.workspaceContext.revision).toBe(7);
+    const polls = f.adapter.status.mock.calls.length;
+    await polling.advance(2000);
+    expect(f.adapter.status.mock.calls.length).toBeGreaterThan(polls);
+    await waitFor(() => expect(f.adapter.context).toHaveBeenCalledTimes(2), {
+      timeout: 4000,
+    });
+    expect(f.adapter.context.mock.calls[1][0].revision).toBe(7);
+    expect(f.status.workspaceContext.sharedNotes[0].text).toBe(
+      "Queued at native race",
+    );
+  } finally {
+    mounted?.unmount();
+    polling.restore();
+  }
 });
 
 it.each([
@@ -2050,49 +2101,56 @@ it("rejects a newly over-budget topic share but preserves the draft and permits 
 it.each(["de", "en"] as const)(
   "reports a rejected manual status change and permits an explicit later retry in %s",
   async (language) => {
-    const f = fixture();
-    f.adapter.context.mockImplementationOnce(async () => false);
-    render(
-      <LiveWorkspace
-        adapter={f.adapter}
-        meeting={f.meeting}
-        language={language}
-        onBack={() => {}}
-      />,
-    );
-    fireEvent.click(
-      await screen.findByRole("tab", {
-        name: language === "de" ? "Impulse" : "Prompts",
-      }),
-    );
-    const label = language === "de" ? "Besprochen" : "Discussed";
-    fireEvent.click(screen.getByRole("button", { name: label }));
-    await waitFor(() => expect(f.adapter.context).toHaveBeenCalledOnce());
-    expect(f.status.view.workspace.entities[0].status).toBe("open");
-    expect(
-      await screen.findByText(
-        language === "de"
-          ? "Die Änderung wurde nicht übernommen. Bitte aktuellen Auswertungsstand abwarten und erneut versuchen."
-          : "The change was not applied. Wait for the current analysis state and try again.",
-      ),
-    ).toBeTruthy();
-    await act(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 2100));
-    });
-    expect(f.adapter.context).toHaveBeenCalledOnce();
-    fireEvent.click(screen.getByRole("button", { name: label }));
-    await waitFor(() => expect(f.adapter.context).toHaveBeenCalledTimes(2));
-    expect(f.status.view.workspace.entities[0].status).toBe("discussed");
-    await screen.findByRole("button", {
-      name: language === "de" ? "Wieder öffnen" : "Reopen",
-    });
-    expect(
-      screen.queryByText(
-        language === "de"
-          ? "Die Änderung wurde nicht übernommen. Bitte aktuellen Auswertungsstand abwarten und erneut versuchen."
-          : "The change was not applied. Wait for the current analysis state and try again.",
-      ),
-    ).toBeNull();
+    const polling = controlWorkspacePolling();
+    let mounted: ReturnType<typeof render> | undefined;
+    try {
+      const f = fixture();
+      f.adapter.context.mockImplementationOnce(async () => false);
+      mounted = render(
+        <LiveWorkspace
+          adapter={f.adapter}
+          meeting={f.meeting}
+          language={language}
+          onBack={() => {}}
+        />,
+      );
+      fireEvent.click(
+        await screen.findByRole("tab", {
+          name: language === "de" ? "Impulse" : "Prompts",
+        }),
+      );
+      const label = language === "de" ? "Besprochen" : "Discussed";
+      fireEvent.click(screen.getByRole("button", { name: label }));
+      await waitFor(() => expect(f.adapter.context).toHaveBeenCalledOnce());
+      expect(f.status.view.workspace.entities[0].status).toBe("open");
+      expect(
+        await screen.findByText(
+          language === "de"
+            ? "Die Änderung wurde nicht übernommen. Bitte aktuellen Auswertungsstand abwarten und erneut versuchen."
+            : "The change was not applied. Wait for the current analysis state and try again.",
+        ),
+      ).toBeTruthy();
+      const polls = f.adapter.status.mock.calls.length;
+      await polling.advance(2100);
+      expect(f.adapter.status.mock.calls.length).toBeGreaterThan(polls);
+      expect(f.adapter.context).toHaveBeenCalledOnce();
+      fireEvent.click(screen.getByRole("button", { name: label }));
+      await waitFor(() => expect(f.adapter.context).toHaveBeenCalledTimes(2));
+      expect(f.status.view.workspace.entities[0].status).toBe("discussed");
+      await screen.findByRole("button", {
+        name: language === "de" ? "Wieder öffnen" : "Reopen",
+      });
+      expect(
+        screen.queryByText(
+          language === "de"
+            ? "Die Änderung wurde nicht übernommen. Bitte aktuellen Auswertungsstand abwarten und erneut versuchen."
+            : "The change was not applied. Wait for the current analysis state and try again.",
+        ),
+      ).toBeNull();
+    } finally {
+      mounted?.unmount();
+      polling.restore();
+    }
   },
 );
 
