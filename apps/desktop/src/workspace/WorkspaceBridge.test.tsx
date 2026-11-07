@@ -18,6 +18,81 @@ import { workspaceText } from "./shell/workspaceLocale.jsx";
 import MeetingView from "../views/MeetingView";
 import { de, en, extraDe, extraEn } from "../i18n";
 
+it("can open an earlier unlocked workspace and its history without changing the live run", async () => {
+  const f = fixture();
+  const saved = {
+    runId: "old-run",
+    promptVersion: "handymeeting-workspace-10",
+    model: "Old synthetic model",
+    createdAt: "2026-11-01T10:00:00Z",
+    updatedAt: "2026-11-01T10:10:00Z",
+    workspace: {
+      ...structuredClone(f.status.view.workspace),
+      entities: [
+        {
+          ...f.status.view.workspace.entities[0],
+          text: "Früherer unbestätigter Impuls",
+        },
+      ],
+      events: [
+        {
+          id: "v_old",
+          entityId: "e_impulse",
+          revision: 1,
+          atMs: 30000,
+          text: "Früherer Verlaufseintrag",
+          status: "open",
+          evidence: [],
+        },
+      ],
+    },
+  };
+  const adapter = {
+    ...f.adapter,
+    history: vi.fn(async () => ({
+      entries: [{ ...saved, workspace: undefined, entityCount: 1 }],
+      unreadableEntries: 0,
+    })),
+    historyView: vi.fn(async () => saved),
+  };
+  const before = JSON.stringify(saved);
+  const mounted = render(
+    <LiveWorkspace adapter={adapter} meeting={f.meeting} onBack={() => {}} />,
+  );
+  try {
+    await screen.findAllByText("Welche Freigabe fehlt?");
+    fireEvent.click(
+      screen.getByRole("button", { name: "Frühere Auswertungen" }),
+    );
+    const dialog = await screen.findByRole("dialog", {
+      name: "Frühere Auswertungen",
+    });
+    await within(dialog).findByText("Früherer unbestätigter Impuls");
+    expect(within(dialog).getByText("Früherer Verlaufseintrag")).toBeTruthy();
+    expect(
+      within(dialog).getAllByText("Die Freigabe bleibt noch offen.").length,
+    ).toBeGreaterThan(0);
+    expect(
+      within(dialog).queryByRole("button", {
+        name: /Besprochen|Wieder öffnen|Freigeben/,
+      }),
+    ).toBeNull();
+    expect(adapter.context).not.toHaveBeenCalled();
+    expect(adapter.stop).not.toHaveBeenCalled();
+    expect(adapter.start).not.toHaveBeenCalled();
+    expect(adapter.refresh).not.toHaveBeenCalled();
+    fireEvent.click(
+      within(dialog).getByRole("button", { name: "Dialog schließen" }),
+    );
+    expect(
+      screen.getAllByText("Welche Freigabe fehlt?").length,
+    ).toBeGreaterThan(0);
+    expect(JSON.stringify(saved)).toBe(before);
+  } finally {
+    mounted.unmount();
+  }
+});
+
 it.each(["de", "en"] as const)(
   "keeps a shortened clock due as a time in the task row (%s)",
   async (language) => {

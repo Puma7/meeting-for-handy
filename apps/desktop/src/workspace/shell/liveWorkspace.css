@@ -357,3 +357,43 @@
 .compact-filters .compact-search:focus-within {
   flex-grow: 4;
 }
+.saved-workspace-history {
+  min-width: 0;
+}
+.saved-workspace-history > label {
+  display: grid;
+  gap: 0.4rem;
+}
+.saved-workspace-history select {
+  max-width: 100%;
+  min-width: 0;
+  width: 100%;
+}
+.saved-workspace-history article {
+  padding: 0.6rem 0;
+  border-bottom: 1px solid var(--line, #8885);
+  overflow-wrap: anywhere;
+}
+.saved-workspace-history h4 {
+  margin: 0 0 0.25rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  align-items: baseline;
+}
+.saved-workspace-history h4 small {
+  font-weight: normal;
+}
+.saved-workspace-history blockquote {
+  margin: 0.4rem 0 0.4rem 1rem;
+  white-space: pre-wrap;
+}
+.saved-workspace-history article p {
+  margin: 0.3rem 0;
+  white-space: pre-wrap;
+}
+.saved-workspace-history section nav {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}

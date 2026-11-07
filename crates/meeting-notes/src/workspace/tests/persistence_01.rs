@@ -25,7 +25,8 @@ fn previous_quality_prompt_is_read_only_and_keeps_its_saved_folder() {
         read_state(&folder).unwrap().prompt_version(),
         "handymeeting-workspace-10"
     );
-    assert!(WorkspaceRunner::open(&folder).is_err());
+    assert_eq!(WorkspaceRunner::open(&folder).err().unwrap().to_string(),
+        "Ältere Meetingfassungen werden nur gelesen. Eine neue Auswertung mit den aktuellen Prompts starten.");
     assert_eq!(
         crate::live::workspace_folder(dir.path()).unwrap(),
         Some(folder)

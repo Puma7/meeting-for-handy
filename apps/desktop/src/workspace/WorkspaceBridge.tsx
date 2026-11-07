@@ -118,6 +118,13 @@ export default function WorkspaceBridge({
   const adapter = useMemo(
     () => ({
       status: (id: string) => api.getLiveNotes!(id, true),
+      history: api.listWorkspaceHistory
+        ? (id: string) => api.listWorkspaceHistory!(id)
+        : undefined,
+      historyView: api.readWorkspaceHistory
+        ? (id: string, runId: string, version: string) =>
+            api.readWorkspaceHistory!(id, runId, version)
+        : undefined,
       start: (
         request: Parameters<NonNullable<DesktopApi["startLiveNotes"]>>[0],
       ) =>

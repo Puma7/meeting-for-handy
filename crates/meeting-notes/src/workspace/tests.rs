@@ -105,6 +105,8 @@ fn setup() -> (WorkspaceState, Request, serde_json::Value) {
 
 mod context_01;
 mod context_02;
+#[path = "tests/history_01.rs"]
+mod history_01;
 mod inference_01;
 mod persistence_01;
 mod validation_01;

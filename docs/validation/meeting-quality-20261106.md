@@ -86,9 +86,23 @@ semantische Richtigkeit; auch kleine lokale Modelle können falsch zuordnen.
 Die aktuelle deutsche Qualitätsreferenz und die unveränderte englische
 Basisreferenz bestanden mit Prompt 11: keine zusätzlichen unverbindlichen
 Aufgaben, erhaltene manuelle Markierungen und bytegleiche Wiederöffnung.
-Die manuelle Sichtung des deutschen Ergebnisses zeigt allerdings noch zwei
+Die manuelle Sichtung eines vorherigen deutschen Ergebnisses zeigte zwei
 ähnlich formulierte Rückfragen zum selben Thema. Die Referenzkriterien prüfen
 keine vollständige semantische Deduplizierung; das bleibt eine Qualitätsgrenze.
+
+Der anschließende Review erkannte eine Bedienlücke: Ältere Dateien blieben
+erhalten, nach dem Start einer neuen Promptfassung waren ihre unbestätigten
+Ergebnisse aber nicht gezielt aufrufbar. „Frühere Auswertungen“ öffnet nun eine
+getrennte, schreibgeschützte Auswahl der gespeicherten Modell-/Promptfassungen
+einschließlich ursprünglicher Einträge, Belege, Verlauf und Transkript.
+Die laufende Auswertung wird dabei weder umgeschaltet noch angehalten.
+Ergebnisse werden nicht in die neue Fassung kopiert. Größere Listen bleiben
+über begrenzte Seiten vollständig erreichbar; unlesbare Fassungen werden
+gemeldet und erhalten. Native Kennungs-/Ordnerprüfungen und eine gemeinsame
+Publikationslease schützen das Lesen gegenüber kooperierender Wartung und
+Löschung. Komponentenregressionen prüfen Auswahlwechsel, verspätete Antworten,
+Lesefehler, Seiten und fehlende Schreib-/Stoppaufrufe; native Regressionen
+prüfen alte unbestätigte Ergebnisse, Ereignisse und unveränderte Dateibytes.
 
 Gemessen wird auf Windows x64 / Intel Core i7-13700 mit rund 63,7 GiB nutzbarem
 RAM. Keine eigenen Compiler liefen während der Modellreferenzen. Laufzeiten

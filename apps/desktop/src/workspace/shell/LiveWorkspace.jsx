@@ -25,6 +25,7 @@ import {
 import { CustomOverview } from "./CustomOverview.jsx";
 import { Notes } from "./Notes.jsx";
 import SourceAudioPreview from "../SourceAudioPreview";
+import SavedWorkspaceHistory from "../SavedWorkspaceHistory";
 import { IconButton, Modal, Panel, Status } from "./ui.jsx";
 import { usePanelSettings } from "./usePanelSettings.jsx";
 import { formatTime } from "./data.mjs";
@@ -703,6 +704,15 @@ function WorkspaceContents({
           {t("Zur Standardansicht")}
         </button>
         <div className="live-update-bar">
+          {adapter.history && adapter.historyView && (
+            <button
+              type="button"
+              className="subtle-button"
+              onClick={() => setModal({ type: "saved-history" })}
+            >
+              {language === "en" ? "Earlier analyses" : "Frühere Auswertungen"}
+            </button>
+          )}
           {(onStopRecording ||
             ["recording", "streaming", "catching-up"].includes(
               meeting.status,
@@ -1064,6 +1074,25 @@ function WorkspaceContents({
           {renderPanel(modal.panel, true)}
         </Modal>
       )}
+      {modal?.type === "saved-history" &&
+        adapter.history &&
+        adapter.historyView && (
+          <Modal
+            title={
+              language === "en" ? "Earlier analyses" : "Frühere Auswertungen"
+            }
+            wide
+            onClose={() => setModal(null)}
+          >
+            <SavedWorkspaceHistory
+              meetingId={meeting.id}
+              currentRunId={status?.view?.runId}
+              list={adapter.history}
+              load={adapter.historyView}
+              language={language}
+            />
+          </Modal>
+        )}
       {modal?.type === "source" && (
         <Modal
           title={t("Originalbeleg")}

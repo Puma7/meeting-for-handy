@@ -29,6 +29,14 @@ function jobInvoke<T>(
   return pending;
 }
 export const desktopApi: DesktopApi = {
+  listWorkspaceHistory: (meetingId) =>
+    desktopInvoke("list_workspace_history", { meetingId }),
+  readWorkspaceHistory: (meetingId, runId, promptVersion) =>
+    desktopInvoke("read_workspace_history", {
+      meetingId,
+      runId,
+      promptVersion,
+    }),
   getSourceAudio: (id, file) =>
     desktopInvoke<ArrayBuffer>("get_source_audio", { id, file }),
   setWorkspaceContext: (meetingId, runId, context) =>

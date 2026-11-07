@@ -357,6 +357,22 @@ export interface LiveNotesStatus {
   lastTrigger: LiveTrigger | null;
   view: LiveView | null;
 }
+
+export interface WorkspaceHistoryEntry {
+  runId: string;
+  promptVersion: string;
+  model: string;
+  createdAt: string;
+  updatedAt: string | null;
+  entityCount: number;
+}
+export interface WorkspaceHistoryListing {
+  entries: WorkspaceHistoryEntry[];
+  unreadableEntries: number;
+}
+export interface SavedWorkspace extends WorkspaceHistoryEntry {
+  workspace: WorkspaceState;
+}
 export interface LiveNotesRequest {
   workspace?: WorkspaceContext;
   meetingId: string;
@@ -535,6 +551,12 @@ export interface DesktopApi {
   getNotesProgress(): Promise<NotesProgress | null>;
   cancelNotes(jobId: string): Promise<boolean>;
   getSourceAudio?(id: string, file: string): Promise<ArrayBuffer>;
+  listWorkspaceHistory?(meetingId: string): Promise<WorkspaceHistoryListing>;
+  readWorkspaceHistory?(
+    meetingId: string,
+    runId: string,
+    promptVersion: string,
+  ): Promise<SavedWorkspace>;
   setWorkspaceContext?(
     meetingId: string,
     runId: string,

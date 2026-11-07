@@ -1,11 +1,16 @@
 //! Live notes while a meeting is still running: confirmed transcript text is summarized in
 //! append-only windows, and a compact rolling overview is rebuilt from verified statements.
 //! Every statement passes the same literal source check as post-meeting analysis.
+mod history;
 mod prompt;
 mod sources;
 mod store;
 mod trigger;
 
+pub use history::{
+    list_workspace_history, read_workspace_history, SavedWorkspace, WorkspaceHistoryEntry,
+    WorkspaceHistoryListing,
+};
 pub use prompt::LIVE_PROMPT_VERSION;
 pub use sources::{next_window, pending, pending_chars, LiveSource, LiveText, WINDOW_CHARS};
 pub use store::{

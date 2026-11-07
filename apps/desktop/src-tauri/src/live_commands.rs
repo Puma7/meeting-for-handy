@@ -5,6 +5,49 @@ use crate::{blocking, AppResult, Service};
 use std::sync::Arc;
 use tauri::State;
 
+/// Resolve only a validated native session; callers keep its publication lease throughout the read.
+fn history_root(service: &Service, meeting_id: &str) -> AppResult<std::path::PathBuf> {
+    crate::meeting_files::session_folder(&service.root, meeting_id)
+        .map(|path| path.join("live-notes"))
+}
+
+/// Enumerate saved workspace generations under the selected native session without starting a model.
+#[tauri::command]
+pub(crate) async fn list_workspace_history(
+    service: State<'_, Arc<Service>>,
+    meeting_id: String,
+) -> AppResult<meeting_notes::live::WorkspaceHistoryListing> {
+    let service = Arc::clone(&service);
+    blocking(move || {
+        crate::validate_id(&meeting_id)?;
+        let _publication = meeting_core::archive::source_publication_lease(&service.root)
+            .map_err(|e| e.to_string())?;
+        let root = history_root(&service, &meeting_id)?;
+        meeting_notes::live::list_workspace_history(&root, &meeting_id).map_err(|e| e.to_string())
+    })
+    .await
+}
+
+/// Load one explicitly selected read-only generation while its publication lease is held.
+#[tauri::command]
+pub(crate) async fn read_workspace_history(
+    service: State<'_, Arc<Service>>,
+    meeting_id: String,
+    run_id: String,
+    prompt_version: String,
+) -> AppResult<meeting_notes::live::SavedWorkspace> {
+    let service = Arc::clone(&service);
+    blocking(move || {
+        crate::validate_id(&meeting_id)?;
+        let _publication = meeting_core::archive::source_publication_lease(&service.root)
+            .map_err(|e| e.to_string())?;
+        let root = history_root(&service, &meeting_id)?;
+        meeting_notes::live::read_workspace_history(&root, &meeting_id, &run_id, &prompt_version)
+            .map_err(|e| e.to_string())
+    })
+    .await
+}
+
 #[tauri::command]
 pub(crate) async fn start_live_notes(
     service: State<'_, Arc<Service>>,
