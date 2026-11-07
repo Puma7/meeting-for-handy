@@ -1,6 +1,122 @@
 use super::*;
 
 #[test]
+/// The previous prompt stays readable but cannot acquire new answers from changed instructions.
+fn previous_quality_prompt_is_read_only_and_keeps_its_saved_folder() {
+    let dir = tempfile::tempdir().unwrap();
+    let folder = dir.path().join("workspace-v10");
+    std::fs::create_dir(&folder).unwrap();
+    let state = WorkspaceState {
+        revision: 1,
+        ..Default::default()
+    };
+    let mut delta = serde_json::to_value(store::Delta::between(
+        &WorkspaceState::default(),
+        &state,
+        vec![],
+        vec![],
+    ))
+    .unwrap();
+    delta["schema"] = json!("handymeeting-workspace-10");
+    let bytes = serde_json::to_vec(&delta).unwrap();
+    let path = folder.join("revision-00000001.json");
+    std::fs::write(&path, &bytes).unwrap();
+    assert_eq!(
+        read_state(&folder).unwrap().prompt_version(),
+        "handymeeting-workspace-10"
+    );
+    assert!(WorkspaceRunner::open(&folder).is_err());
+    assert_eq!(
+        crate::live::workspace_folder(dir.path()).unwrap(),
+        Some(folder)
+    );
+    assert_eq!(std::fs::read(path).unwrap(), bytes);
+}
+
+#[test]
+/// Speaker labels must not turn a request or an unknown actor into an assignment.
+fn speaker_labels_preserve_pledges_but_do_not_bypass_assignment_screening() {
+    assert_quality_assignment_cases(&[
+        ("Robin: Bitte holt die Unterlagen ab.", false),
+        ("Robin: Someone will collect the equipment.", false),
+        ("Robin: Someone will prepare the documents.", false),
+        ("Robin says: Someone will prepare the documents.", false),
+        ("Robin sagt: Bitte holt die Unterlagen ab.", false),
+        ("sp_abc1: Someone will prepare the documents.", false),
+        ("Robin: Probably Jana will collect the equipment.", false),
+        ("Robin: Ich übernehme die Unterlagen.", true),
+        ("Robin: I will collect the equipment.", true),
+        ("Robin says: I will collect the equipment.", true),
+        ("Robin: Jana holt die Unterlagen ab.", true),
+        ("Sprecher 1: Jana holt die Unterlagen ab.", true),
+        ("Ich übernehme nichts: I will write the report.", false),
+    ]);
+}
+
+#[test]
+/// Predicate uncertainty blocks work; an uncertain deadline alone keeps the task undated.
+fn hedged_explicit_pledges_do_not_publish_tasks() {
+    assert_quality_assignment_cases(&[
+        ("Ich werde wahrscheinlich den Bericht schreiben.", false),
+        ("I will probably write the report.", false),
+        ("Ich werde hoffentlich den Bericht schreiben.", false),
+        ("I will hopefully write the report.", false),
+        (
+            "Ich werde den Bericht schreiben, wahrscheinlich bis Freitag.",
+            true,
+        ),
+        ("I will write the report, probably by Friday.", true),
+        ("Ich werde den Bericht schreiben.", true),
+        ("I will write the report.", true),
+    ]);
+}
+
+/// Check native publication atomically and preserve literal evidence on admitted work.
+fn assert_quality_assignment_cases(cases: &[(&str, bool)]) {
+    let mut mismatches = Vec::new();
+    for &(quote, allowed) in cases {
+        let (mut state, mut request, mut answer) = setup();
+        request.transcript_sources[0].text = quote.into();
+        answer["changes"][0]["text"] = json!("Unterlagen prüfen");
+        answer["changes"][0]["due"] = json!(null);
+        answer["changes"][0]["owner"] = json!(null);
+        answer["changes"][0]["evidence"][0]["quote"] = json!(quote);
+        let before = serde_json::to_vec(&state).unwrap();
+        let result = validate::apply(&mut state, &request, &answer.to_string());
+        if result.is_ok() != allowed || validate::task_quote_allowed(quote) != allowed {
+            mismatches.push(format!("{quote}: {result:?}"));
+        } else if allowed {
+            assert_eq!(state.entities[0].evidence[0].quote, quote);
+        } else {
+            assert_eq!(serde_json::to_vec(&state).unwrap(), before);
+        }
+    }
+    assert!(mismatches.is_empty(), "{}", mismatches.join("\n"));
+}
+
+#[test]
+/// A promised safeguard can concern nothing being missed, without promising inaction.
+fn positive_safeguards_keep_tasks_without_accepting_negative_objects() {
+    assert_quality_assignment_cases(&[
+        ("I will make sure nothing is missed.", true),
+        ("I will ensure nothing is missed.", true),
+        ("Ich werde darauf achten, nichts zu übersehen.", true),
+        ("Ich werde sicherstellen, dass nichts übersehen wird.", true),
+        ("I will collect nothing.", false),
+        ("Ich übernehme nichts.", false),
+        ("I will not make sure nothing is missed.", false),
+        (
+            "I will make sure nothing is missed, but I will not do the check.",
+            false,
+        ),
+        (
+            "Ich werde darauf achten, nichts zu übersehen, aber ich übernehme nichts.",
+            false,
+        ),
+    ]);
+}
+
+#[test]
 /// Reject speaker wishes and requests without excluding explicit named/pronominal work.
 fn hedges_requests_and_indefinite_people_are_not_assignment_subjects() {
     for (quote, allowed) in [

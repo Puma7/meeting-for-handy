@@ -158,7 +158,12 @@ pub(crate) fn read(folder: &Path) -> Result<WorkspaceState> {
         let delta: Delta = serde_json::from_slice(&bytes)
             .context("Meetingstand ist beschädigt; Originale bleiben unverändert.")?;
         ensure!(
-            [super::PROMPT_VERSION, super::LEGACY_PROMPT_VERSION].contains(&delta.schema.as_str())
+            [
+                super::PROMPT_VERSION,
+                super::PREVIOUS_PROMPT_VERSION,
+                super::LEGACY_PROMPT_VERSION
+            ]
+            .contains(&delta.schema.as_str())
                 && (state.revision == 0 || state.prompt_version() == delta.schema)
                 && delta.revision == state.revision + 1,
             "Meetingfassungen sind unvollständig oder inkompatibel."

@@ -516,6 +516,14 @@ pub(crate) fn commitment_assertion_text(quote: &str) -> String {
     let subject = words.iter().enumerate().find_map(|(index, word)| {
         ((["that", "whether"].contains(word) && english.is_some_and(|end| index >= end))
             || embedded_english_question(&words, index, english)
+            || (english.is_some_and(|end| index >= end)
+                && *word == "nothing"
+                && (words[..index].ends_with(&["make", "sure"])
+                    || words[..index].ends_with(&["ensure"])))
+            || (german.is_some_and(|end| index >= end)
+                && *word == "nichts"
+                && (words[..index].ends_with(&["darauf", "achten"])
+                    || words[..index].ends_with(&["sicherstellen"])))
             || (["ob", "dass"].contains(word) && german.is_some_and(|end| index >= end)))
         .then_some(index)
     });
@@ -655,7 +663,7 @@ fn commitment(quote: &str) -> Commitment {
         .collect();
     let mut hedged_date = false;
     for (index, word) in words.iter().enumerate() {
-        if ["vielleicht", "maybe", "perhaps"].contains(word) {
+        if TASK_HEDGES.contains(word) {
             if starts_date(&words[index + 1..]) {
                 hedged_date = true;
             } else {
@@ -670,8 +678,7 @@ fn commitment(quote: &str) -> Commitment {
         .filter(|word| !word.is_empty())
         .collect();
     hedged_date |= literal_words.iter().enumerate().any(|(index, word)| {
-        ["vielleicht", "maybe", "perhaps"].contains(word)
-            && starts_date(&literal_words[index + 1..])
+        TASK_HEDGES.contains(word) && starts_date(&literal_words[index + 1..])
     });
     if hedged_date {
         Commitment::UncertainDate
@@ -679,6 +686,18 @@ fn commitment(quote: &str) -> Commitment {
         Commitment::Binding
     }
 }
+
+/// A predicate hedge weakens work itself; the same word before a date weakens only its due.
+const TASK_HEDGES: &[&str] = &[
+    "vielleicht",
+    "maybe",
+    "perhaps",
+    "wahrscheinlich",
+    "vermutlich",
+    "hoffentlich",
+    "probably",
+    "hopefully",
+];
 
 /// Reads a saved per-batch checkpoint strictly: saved items are never filtered or repaired,
 /// so a damaged checkpoint blocks instead of silently shrinking confirmed work.
@@ -766,6 +785,50 @@ fn check_fact(fact: &Fact, allowed: &HashMap<&str, &str>, kind: &Kind) -> Option
 #[cfg(test)]
 mod generation_tests {
     use super::*;
+    #[test]
+    /// Classic generation must share the safeguard and hedge rules without rewriting evidence.
+    fn safeguards_and_predicate_hedges_preserve_only_binding_tasks() {
+        let mut mismatches = Vec::new();
+        for (quote, allowed) in [
+            ("I will make sure nothing is missed.", true),
+            ("Ich werde darauf achten, nichts zu übersehen.", true),
+            ("Ich werde sicherstellen, dass nichts übersehen wird.", true),
+            ("I will collect nothing.", false),
+            ("Ich übernehme nichts.", false),
+            ("I will not make sure nothing is missed.", false),
+            ("I will probably write the report.", false),
+            ("Ich werde wahrscheinlich den Bericht schreiben.", false),
+            ("I will write the report, probably by Friday.", true),
+            (
+                "Ich werde den Bericht schreiben, wahrscheinlich bis Freitag.",
+                true,
+            ),
+        ] {
+            let result = check(quote, "Prepare the report", Kind::Tasks);
+            if result.items.len() != usize::from(allowed) {
+                mismatches.push(format!("{quote}: retained {}", result.items.len()));
+            } else if let Some(item) = result.items.first() {
+                assert_eq!(item.evidence[0].quote, quote);
+            }
+        }
+        assert!(mismatches.is_empty(), "{}", mismatches.join("\n"));
+        for quote in [
+            "I will write the report, probably by Friday.",
+            "Ich werde den Bericht schreiben, wahrscheinlich bis Freitag.",
+        ] {
+            let due = if quote.starts_with("I ") {
+                "Friday"
+            } else {
+                "Freitag"
+            };
+            assert!(
+                check_due(quote, "Prepare the report", Some(due), Kind::Tasks)
+                    .items
+                    .is_empty()
+            );
+        }
+    }
+
     #[test]
     fn negative_subjects_keep_real_tasks_without_admitting_refusals_or_hedged_dates() {
         let mut mismatches = Vec::new();

@@ -5,7 +5,7 @@ einzelne Nutzersitzung und verändert weder Originaltranskripte noch Aufnahmen.
 
 ## Verhalten
 
-- Prompt `handymeeting-workspace-10` verlangt einzelne kurze Handlungstitel
+- Prompt `handymeeting-workspace-11` verlangt einzelne kurze Handlungstitel
   statt fortlaufend verlängerter Sammelabsätze. Die produktive Anfrage und die
   native Antwortprüfung begrenzen neue Ergebnistitel auf 180 Zeichen.
 - Ausdrückliche Zuweisungen wie „Jana holt die Technik ab“ erreichen nun die
@@ -26,8 +26,8 @@ einzelne Nutzersitzung und verändert weder Originaltranskripte noch Aufnahmen.
   zeigt der Verlauf zunächst die Ergänzung. Der vollständige gespeicherte
   Stand bleibt aufklappbar. Statuswechsel, menschliche Änderungen und
   inhaltliche Korrekturen bleiben als vollständige Ereignisse sichtbar.
-- Neue Auswertungen erhalten eine eigene Promptidentität und `workspace-v10`.
-  Vorherige `workspace-v9`-Fassungen bleiben lesbar und werden nicht mit der
+- Neue Auswertungen erhalten eine eigene Promptidentität und `workspace-v11`.
+  Vorherige `workspace-v9`- und `workspace-v10`-Fassungen bleiben lesbar und werden nicht mit der
   neuen Promptfassung fortgeschrieben. Freigegebene menschliche Eingaben und
   bestätigte Zustände werden über die bestehenden geprüften Regeln erhalten.
 
@@ -63,6 +63,32 @@ und unbestimmte Personen als vermeintliche Namen. Diese Präfixe werden jetzt
 auch vor alten Aufgabenmarkern abgefangen; echte benannte und pronominale
 Zuweisungen bleiben zulässig. Die betroffenen Ablauf- und Regressionfunktionen
 sind dokumentiert; die unveränderte Dokumentationsgrenze bleibt 80 Prozent.
+
+Eine weitere gezielte Runde reproduzierte drei verbleibende Zuordnungsfehler:
+bejahte Schutz-/Prüfzusagen mit „nothing“ oder „nichts“ wurden verworfen,
+Sprecherpräfixe verdeckten Bitten und unbestimmte Personen, und ausdrückliche
+Zukunftsaussagen mit „wahrscheinlich“/„probably“ galten als verbindlich.
+Die Prüfung trennt jetzt auch diese Fälle. Unsicherheit ausschließlich vor
+einem Datum erhält die Aufgabe ohne bestätigten Termin; unabhängige
+Verneinungen und Bedingungen sperren weiterhin. Regressionen prüfen die
+klassische Ausgabe und die atomare Workspace-Veröffentlichung einschließlich
+unveränderter Originalbelege. Es bleibt eine begrenzte sprachliche Prüfung,
+keine Garantie für die Deutung jedes frei formulierten Gesprächs.
+
+Die erneute echte deutsche Referenz deckte zusätzlich eine falsche Zuordnung
+auf: Ein unverbindliches Thema erhielt einen vorhandenen Beleg einer anderen
+Aufgabe. Dieser Versuch gilt ausdrücklich als nicht bestanden. Die neue
+Promptfassung verlangt deshalb einen eigenen inhaltlich passenden Beleg pro
+Handlung und Frage, verbietet erfundene Klärungsaufgaben und doppelte Impulse.
+Eine eigene Promptidentität verhindert unbemerkte Fortschreibung älterer
+Fassungen. Die technische Literalprüfung allein beweist weiterhin keine
+semantische Richtigkeit; auch kleine lokale Modelle können falsch zuordnen.
+Die aktuelle deutsche Qualitätsreferenz und die unveränderte englische
+Basisreferenz bestanden mit Prompt 11: keine zusätzlichen unverbindlichen
+Aufgaben, erhaltene manuelle Markierungen und bytegleiche Wiederöffnung.
+Die manuelle Sichtung des deutschen Ergebnisses zeigt allerdings noch zwei
+ähnlich formulierte Rückfragen zum selben Thema. Die Referenzkriterien prüfen
+keine vollständige semantische Deduplizierung; das bleibt eine Qualitätsgrenze.
 
 Gemessen wird auf Windows x64 / Intel Core i7-13700 mit rund 63,7 GiB nutzbarem
 RAM. Keine eigenen Compiler liefen während der Modellreferenzen. Laufzeiten

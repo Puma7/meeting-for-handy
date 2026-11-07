@@ -651,11 +651,13 @@ fn task_missing_pledge(quote: &str) -> bool {
 
 /// Require a positive obligation in the literal quote; a wish or missing approval is insufficient.
 pub(super) fn task_quote_allowed(quote: &str) -> bool {
+    // Never hide a refusal, condition or hedge in text before a potential speaker colon.
+    let binding = !task_missing_pledge(quote) && crate::validation::has_new_task_commitment(quote);
     // Temporary classification text only: literal evidence and saved IDs are unchanged.
+    let quote = super::assertions::assignment_text(quote);
     let text = quote.to_lowercase().replace('’', "'");
     super::assertions::assignment_prefix_allowed(quote)
-        && !task_missing_pledge(quote)
-        && crate::validation::has_new_task_commitment(quote)
+        && binding
         && !text.contains('?')
         && (crate::validation::task_pledge_end(&text, crate::validation::GERMAN_TASK_PLEDGES)
             .is_some()

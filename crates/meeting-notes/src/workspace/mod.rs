@@ -20,9 +20,11 @@ use std::{
 };
 
 pub const CONTRACT_VERSION: &str = "meeting-update-1";
-pub const PROMPT_VERSION: &str = "handymeeting-workspace-10";
+pub const PROMPT_VERSION: &str = "handymeeting-workspace-11";
+pub const PREVIOUS_PROMPT_VERSION: &str = "handymeeting-workspace-10";
 pub const LEGACY_PROMPT_VERSION: &str = "handymeeting-workspace-9";
-pub const WORKSPACE_FOLDER: &str = "workspace-v10";
+pub const WORKSPACE_FOLDER: &str = "workspace-v11";
+pub const PREVIOUS_WORKSPACE_FOLDER: &str = "workspace-v10";
 pub const LEGACY_WORKSPACE_FOLDER: &str = "workspace-v9";
 /// Read shared-input chronology without treating model output or confirmations as new releases.
 pub(crate) fn shared_context_timestamp(

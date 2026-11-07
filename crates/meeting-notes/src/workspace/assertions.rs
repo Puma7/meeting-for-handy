@@ -74,6 +74,26 @@ const SUBORDINATE_CLAUSE_MARKERS: &[&str] = &[
     "if", "unless",
 ];
 
+/// Remove a bounded speaker label for classification only; literal evidence is never edited.
+pub(super) fn assignment_text(quote: &str) -> &str {
+    let Some((label, text)) = quote.split_once(':') else {
+        return quote;
+    };
+    let label = label.trim();
+    if !label.is_empty()
+        && label.len() <= 80
+        && label.chars().next().is_some_and(char::is_alphabetic)
+        && label.split_whitespace().count() <= 4
+        && label
+            .chars()
+            .all(|c| c.is_alphanumeric() || c.is_whitespace() || ['-', '_'].contains(&c))
+    {
+        text.trim_start()
+    } else {
+        quote
+    }
+}
+
 /// A request, initial hedge or indefinite actor is not a named/pronominal assignment.
 pub(super) fn assignment_prefix_allowed(quote: &str) -> bool {
     let lower = quote.to_lowercase();

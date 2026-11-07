@@ -640,11 +640,12 @@ fn read_workspace_if_present(folder: &Path) -> Result<Option<crate::workspace::W
     }
 }
 
-/// Recognize only the two explicit application-owned generations; never follow links.
+/// Recognize only the explicit current and readable application-owned generations; never follow links.
 fn workspace_folders(run_folder: &Path) -> Result<Vec<std::path::PathBuf>> {
     let mut folders = Vec::new();
     for name in [
         crate::workspace::WORKSPACE_FOLDER,
+        crate::workspace::PREVIOUS_WORKSPACE_FOLDER,
         crate::workspace::LEGACY_WORKSPACE_FOLDER,
     ] {
         let path = run_folder.join(name);
