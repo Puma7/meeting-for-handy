@@ -1505,10 +1505,10 @@ describe("Native workspace boundary", () => {
         adapter={f.adapter}
         meeting={{
           ...f.meeting,
-          modelId: "parakeet-ultra",
           status: "recording",
           pendingAudioMs: 15000,
         }}
+        batchTranscription
         onBack={() => {}}
       />,
     );
@@ -1654,9 +1654,7 @@ describe("Native workspace boundary", () => {
       { target: { value: "absent" } },
     );
     expect(
-      within(panel).getByText(
-        "Für diese Auswahl kein bestätigter Transkriptabschnitt.",
-      ),
+      within(panel).getByText("Für diese Auswahl kein Transkriptabschnitt."),
     ).toBeTruthy();
   });
 });
@@ -1772,6 +1770,44 @@ it("keeps transcript available and does not repeat original text in the timeline
   expect(f.adapter.start).not.toHaveBeenCalled();
 });
 
+it("uses newest-first in the workspace and preserves a changed order after reopening", () => {
+  localStorage.removeItem("handymeeting.transcriptOrder");
+  const f = fixture();
+  const first = {
+    ...f.meeting.parts[0],
+    startSample: 0,
+    text: "Synthetic older.",
+  };
+  f.meeting.parts = [
+    first,
+    {
+      ...first,
+      file: "newer.wav",
+      startSample: 480000,
+      text: "Synthetic newer.",
+    },
+  ];
+  const app = (
+    <LiveWorkspace adapter={f.adapter} meeting={f.meeting} onBack={() => {}} />
+  );
+  const view = render(app);
+  fireEvent.click(screen.getByRole("tab", { name: "Transkript" }));
+  const rows = () =>
+    Array.from(
+      screen
+        .getByRole("tabpanel", { name: "Transkript" })
+        .querySelectorAll(".transcript-row p"),
+    ).map((p) => p.textContent);
+  expect(rows()).toEqual(["Synthetic newer.", "Synthetic older."]);
+  fireEvent.click(screen.getByRole("button", { name: "Neueste zuerst" }));
+  expect(rows()).toEqual(["Synthetic older.", "Synthetic newer."]);
+  view.unmount();
+  render(app);
+  fireEvent.click(screen.getByRole("tab", { name: "Transkript" }));
+  expect(rows()).toEqual(["Synthetic older.", "Synthetic newer."]);
+  localStorage.removeItem("handymeeting.transcriptOrder");
+});
+
 it.each(["complete", "streaming"])(
   "uses the authoritative %s source text to focus the transcript after opening a model citation",
   async (partStatus) => {
@@ -1783,7 +1819,7 @@ it.each(["complete", "streaming"])(
       committedText:
         partStatus === "complete" ? "Synthetic earlier checkpoint." : literal,
     });
-    render(
+    const view = render(
       <LiveWorkspace
         adapter={f.adapter}
         meeting={f.meeting}
@@ -1808,6 +1844,27 @@ it.each(["complete", "streaming"])(
         .closest("article")
         ?.classList.contains("source-focused"),
     ).toBe(true);
+    if (partStatus === "streaming") {
+      expect(
+        within(transcript).getByText("Synthetic uncommitted tail."),
+      ).toBeTruthy();
+      expect(within(transcript).getByText("Vorläufig")).toBeTruthy();
+      f.meeting.parts[0].text = literal + " A newer tentative phrase.";
+      view.rerender(
+        <LiveWorkspace
+          adapter={f.adapter}
+          meeting={f.meeting}
+          onBack={() => {}}
+        />,
+      );
+      expect(
+        within(transcript).getByText("A newer tentative phrase."),
+      ).toBeTruthy();
+      expect(
+        within(transcript).queryByText("Synthetic uncommitted tail."),
+      ).toBeNull();
+      expect(within(transcript).getAllByText(literal)).toHaveLength(1);
+    }
   },
 );
 
@@ -2279,6 +2336,8 @@ it.each([false, true])(
         model="synthetic"
         apiKey="synthetic-fixture-key"
         useSavedKey={useSavedKey}
+        outputLanguage="zh"
+        workspacePrompt="Focus on concrete risks."
         onBack={() => {}}
       />,
     );
@@ -2296,6 +2355,8 @@ it.each([false, true])(
         expect.objectContaining({
           apiKey: useSavedKey ? "" : "synthetic-fixture-key",
           useSavedKey,
+          language: "zh",
+          workspacePrompt: "Focus on concrete risks.",
           mode: "local",
           cloudConsent: false,
         }),

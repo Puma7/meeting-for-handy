@@ -33,6 +33,8 @@ pub(crate) const DEFAULT_INTERVAL_MS: u64 = 3 * 60_000;
 pub(crate) struct LiveNotesRequest {
     #[serde(default)]
     workspace: Option<meeting_notes::workspace::WorkspaceContext>,
+    #[serde(default)]
+    workspace_prompt: String,
     meeting_id: String,
     endpoint: String,
     model: String,
@@ -596,12 +598,23 @@ impl LiveNotes {
             );
         }
         validate_id(&request.meeting_id)?;
-        if !["de", "en"].contains(&request.language.as_str()) {
+        let valid_language = if request.workspace.is_some() {
+            meeting_notes::workspace::supports_output_language(&request.language)
+        } else {
+            ["de", "en"].contains(&request.language.as_str())
+        };
+        if !valid_language {
             return Err("Unbekannte Sprache.".into());
         }
-        if request.workspace.is_some() && (request.mode != "local" || request.cloud_consent) {
-            return Err("Automatische Kachelauswertung benötigt ein lokales Modell.".into());
-        }
+        let workspace_prompt = if request.workspace.is_some() {
+            if request.mode != "local" || request.cloud_consent {
+                return Err("Automatische Kachelauswertung benötigt ein lokales Modell.".into());
+            }
+            meeting_notes::workspace::normalize_prompt(&request.workspace_prompt)
+                .map_err(|error| error.to_string())?
+        } else {
+            ""
+        };
         let mut guard = self.lock()?;
         if guard.as_ref().is_some_and(Job::running) {
             return Err(
@@ -643,17 +656,18 @@ impl LiveNotes {
             crate::local_models::provider_for_endpoint(&connection.endpoint),
         )?;
         let model_lease = model_work.as_ref().map(|work| work.lease()).transpose()?;
-        let start = if request.workspace.is_some() {
-            LiveRunner::start_workspace
+        let root = live_root(service, &request.meeting_id);
+        let runner = if request.workspace.is_some() {
+            LiveRunner::start_workspace_with_prompt(
+                &root,
+                &request.meeting_id,
+                connection,
+                &request.language,
+                workspace_prompt,
+            )
         } else {
-            LiveRunner::start
-        };
-        let runner = start(
-            &live_root(service, &request.meeting_id),
-            &request.meeting_id,
-            connection,
-            &request.language,
-        )
+            LiveRunner::start(&root, &request.meeting_id, connection, &request.language)
+        }
         .map_err(|e| e.to_string())?;
         let runner = match &model_lease {
             Some(lease) => runner
@@ -1714,6 +1728,7 @@ mod tests {
     fn request(meeting_id: &str, mode: &str, endpoint: &str) -> LiveNotesRequest {
         LiveNotesRequest {
             workspace: None,
+            workspace_prompt: String::new(),
             meeting_id: meeting_id.into(),
             endpoint: endpoint.into(),
             model: "synthetic".into(),

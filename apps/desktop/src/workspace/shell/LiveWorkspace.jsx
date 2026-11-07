@@ -1,5 +1,6 @@
 import { useWorkspaceText, WorkspaceLanguage } from "./workspaceLocale.jsx";
 import { workspaceStorageKey } from "../workspaceStorage";
+import { useTranscriptOrder } from "../../useTranscriptOrder";
 import { Fragment, useContext, useEffect, useRef, useState } from "react";
 import {
   Activity,
@@ -10,7 +11,14 @@ import {
   Check,
   ChevronDown,
   ChevronUp,
+  CircleStop,
+  Copy,
   FileText,
+  History,
+  Mic,
+  MicOff,
+  Pause,
+  Play,
   Lightbulb,
   ListChecks,
   Maximize2,
@@ -84,6 +92,7 @@ export function LiveWorkspace(props) {
 function WorkspaceContents({
   adapter,
   meeting,
+  batchTranscription = false,
   onBack,
   selectedFile,
   initialEndpoint = "",
@@ -92,6 +101,8 @@ function WorkspaceContents({
   theme = "light",
   onThemeChange,
   onModelSettings,
+  onCopyTranscript,
+  transcriptCopied = false,
   onStopRecording,
   stopping = false,
   onTogglePause,
@@ -533,7 +544,11 @@ function WorkspaceContents({
     setModal(null);
   }
 
+  const [transcriptNewestFirst, setTranscriptNewestFirst] =
+    useTranscriptOrder();
   const ctx = {
+    transcriptNewestFirst,
+    setTranscriptNewestFirst,
     _mutate: mutate,
     changeTopics,
     state,
@@ -694,25 +709,85 @@ function WorkspaceContents({
         )
       : [];
   const classicRunning = Boolean(status?.running && !status.workspaceContext);
+  const analysisProgress = [
+    classicRunning
+      ? t("Auswertung läuft in der bisherigen Ansicht.")
+      : storageReady
+        ? mode === "cloud" && !status?.running
+          ? t("Cloud-Modell in den Einstellungen ausgewählt")
+          : workspaceStatusText(status, language)
+        : t("Gespeicherte Auswertung wird geladen …"),
+    lastEvidenceEnd > 0 &&
+      `${t("Belege bis")} ${formatTime(lastEvidenceEnd / 1000)}`,
+    status?.running &&
+      status.pendingChars > 0 &&
+      `${status.pendingChars.toLocaleString(language)} ${t("Zeichen noch nicht ausgewertet")}`,
+  ]
+    .filter(Boolean)
+    .join(" · ");
   return (
     <div
       className={`prototype theme-${dark ? "dark" : "light"} format-window live-workspace`}
     >
-      <div className="prototype-toolbar">
-        <button className="text-button" onClick={onBack}>
-          <ArrowLeft size={14} />
-          {t("Zur Standardansicht")}
-        </button>
-        <div className="live-update-bar">
+      <header className="prototype-toolbar workspace-toolbar">
+        <div className="workspace-toolbar-nav">
+          <button
+            className="text-button"
+            title={t("Zur Standardansicht")}
+            onClick={onBack}
+          >
+            <ArrowLeft size={16} aria-hidden="true" />
+            <span>{t("Zur Standardansicht")}</span>
+          </button>
+          {onCopyTranscript && (
+            <IconButton
+              label={t("Transkript kopieren")}
+              title={t(
+                "Kopiert das bisherige Transkript beider Spuren, unabhängig vom Filter.",
+              )}
+              onClick={onCopyTranscript}
+            >
+              {transcriptCopied ? (
+                <Check size={16} aria-hidden="true" />
+              ) : (
+                <Copy size={16} aria-hidden="true" />
+              )}
+            </IconButton>
+          )}
+          <span className="sr-only" role="status">
+            {transcriptCopied ? t("Transkript kopiert") : ""}
+          </span>
           {adapter.history && adapter.historyView && (
-            <button
-              type="button"
-              className="subtle-button"
+            <IconButton
+              label={t("Frühere Auswertungen")}
+              title={t(
+                "Öffnet frühere gespeicherte Auswertungen dieses Meetings zum Nachlesen.",
+              )}
               onClick={() => setModal({ type: "saved-history" })}
             >
-              {language === "en" ? "Earlier analyses" : "Frühere Auswertungen"}
-            </button>
+              <History size={16} aria-hidden="true" />
+            </IconButton>
           )}
+          <IconButton
+            label={
+              dark
+                ? t("Helles Design aktivieren")
+                : t("Dunkles Design aktivieren")
+            }
+            onClick={() => onThemeChange?.(dark ? "light" : "dark")}
+          >
+            {dark ? (
+              <Sun size={16} aria-hidden="true" />
+            ) : (
+              <Moon size={16} aria-hidden="true" />
+            )}
+          </IconButton>
+        </div>
+        <div
+          className="workspace-capture-tools"
+          role="group"
+          aria-label={t("Aufnahme")}
+        >
           {(onStopRecording ||
             ["recording", "streaming", "catching-up"].includes(
               meeting.status,
@@ -728,7 +803,7 @@ function WorkspaceContents({
                 : t("Erkennung holt nach")}
             </span>
           )}
-          {meeting.modelId === "parakeet-ultra" &&
+          {batchTranscription &&
             ["recording", "streaming", "catching-up"].includes(
               meeting.status,
             ) && (
@@ -740,159 +815,179 @@ function WorkspaceContents({
                   ` · ${language === "de" ? "offenes Audio" : "audio pending"} ${formatTime(meeting.pendingAudioMs / 1000)}`}
               </span>
             )}
-          {onStopRecording && (
-            <button
-              type="button"
-              className="subtle-button"
-              disabled={stopping}
-              onClick={onStopRecording}
-            >
-              {t("Aufnahme beenden")}
-            </button>
-          )}
-          {onTogglePause && (
-            <button
-              type="button"
-              className="subtle-button"
-              disabled={stopping}
-              onClick={onTogglePause}
-            >
-              {paused ? t("Aufnahme fortsetzen") : t("Aufnahme pausieren")}
-            </button>
-          )}
           {onToggleMute && (
-            <button
-              type="button"
-              className="subtle-button"
+            <IconButton
+              label={
+                muted ? t("Mikrofon aktivieren") : t("Mikrofon stummschalten")
+              }
+              className={muted ? "capture-pause" : ""}
               disabled={stopping}
               onClick={onToggleMute}
             >
-              {muted ? t("Mikrofon aktivieren") : t("Mikrofon stummschalten")}
+              {muted ? (
+                <MicOff size={16} aria-hidden="true" />
+              ) : (
+                <Mic size={16} aria-hidden="true" />
+              )}
+            </IconButton>
+          )}
+          {onTogglePause && (
+            <IconButton
+              label={
+                paused ? t("Aufnahme fortsetzen") : t("Aufnahme pausieren")
+              }
+              className="capture-pause"
+              disabled={stopping}
+              onClick={onTogglePause}
+            >
+              {paused ? (
+                <Play size={16} aria-hidden="true" />
+              ) : (
+                <Pause size={16} aria-hidden="true" />
+              )}
+            </IconButton>
+          )}
+          {onStopRecording && (
+            <button
+              type="button"
+              className="subtle-button capture-stop"
+              title={t("Aufnahme beenden und sichern")}
+              disabled={stopping}
+              onClick={onStopRecording}
+            >
+              <Square size={13} fill="currentColor" aria-hidden="true" />
+              {t("Aufnahme beenden")}
             </button>
           )}
           {(meeting.captureIncomplete || meeting.warnings?.length > 0) && (
-            <button type="button" className="subtle-button" onClick={onBack}>
+            <button
+              type="button"
+              className="subtle-button"
+              title={t("Aufnahmehinweise in der Standardansicht öffnen")}
+              onClick={onBack}
+            >
               {t("Aufnahme prüfen")}
             </button>
           )}
-          {onModelSettings && (
-            <IconButton
-              label={t("Textmodell einrichten")}
-              title={t(
-                "Öffnet die Einstellungen für Anbieter und Modell der Meeting-Auswertung.",
-              )}
-              onClick={onModelSettings}
-            >
-              <Settings2 size={16} />
-            </IconButton>
-          )}
-          <span role="status">
-            {classicRunning
-              ? t("Auswertung läuft in der bisherigen Ansicht.")
-              : storageReady
-                ? mode === "cloud" && !status?.running
-                  ? t("Cloud-Modell in den Einstellungen ausgewählt")
-                  : workspaceStatusText(status, language)
-                : t("Gespeicherte Auswertung wird geladen …")}
-            {lastEvidenceEnd > 0 &&
-              ` · ${t("Belege bis")} ${formatTime(lastEvidenceEnd / 1000)}`}
-            {status?.running &&
-              status.pendingChars > 0 &&
-              ` · ${status.pendingChars.toLocaleString(language)} ${t("Zeichen noch nicht ausgewertet")}`}
-          </span>
-          <label>
-            {t("Intervall")}{" "}
-            <select
-              aria-label={t("Auswertungsintervall")}
-              title={t("Legt fest, wie oft die KI den Überblick aktualisiert.")}
-              disabled={!storageReady || classicRunning || busy}
-              value={shownMinutes}
-              onChange={(e) => {
-                const value = Number(e.target.value);
-                setMinutes(value);
-                if (status?.running)
-                  void action(() => adapter.interval(value * 60000));
-              }}
-            >
-              <option value={2}>{t("2 Min.")}</option>
-              <option value={3}>{t("3 Min.")}</option>
-              {![2, 3].includes(shownMinutes) && (
-                <option value={shownMinutes}>
-                  {shownMinutes.toLocaleString(language)}{" "}
-                  {language === "de" ? "Min." : "min"}
-                </option>
-              )}
-            </select>
-          </label>
-          {status?.running ? (
-            <>
-              <button
-                disabled={busy || classicRunning || status.refreshRequested}
-                className="subtle-button"
-                onClick={() => action(() => adapter.refresh())}
-              >
-                <RefreshCw size={13} />
-                {status.refreshRequested ? t("Vorgemerkt") : t("Aktualisieren")}
-              </button>
-              <IconButton
-                label={t("Nur Auswertung beenden")}
-                title={t(
-                  "Stoppt die KI-Auswertung. Eine laufende Aufnahme geht weiter.",
-                )}
-                disabled={busy}
-                onClick={() => action(() => adapter.stop())}
-              >
-                <Square size={14} />
-              </IconButton>
-            </>
-          ) : (
-            <button
-              className="subtle-button"
-              disabled={
-                busy ||
-                !storageReady ||
-                storageBlocked ||
-                mode !== "local" ||
-                !endpoint.trim() ||
-                !model.trim()
-              }
-              onClick={() =>
-                action(async () => {
-                  const shared = sharedWorkspaceContext(state);
-                  if (sharedContextSize(shared) > SHARED_CONTEXT_LIMIT)
-                    throw new Error(t(CONTEXT_BUDGET_MESSAGE));
-                  await adapter.start({
-                    meetingId: meeting.id,
-                    endpoint,
-                    model,
-                    mode: "local",
-                    cloudConsent: false,
-                    apiKey: "",
-                    useSavedKey: false,
-                    intervalMs: minutes * 60000,
-                    language,
-                    workspace: shared,
-                  });
-                })
-              }
-            >
-              {mode === "cloud"
-                ? t("Erweiterte Auswertung nur lokal verfügbar")
-                : t("Lokale Auswertung starten")}
-            </button>
-          )}
         </div>
-        <IconButton
-          label={
-            dark
-              ? t("Helles Design aktivieren")
-              : t("Dunkles Design aktivieren")
-          }
-          onClick={() => onThemeChange?.(dark ? "light" : "dark")}
+        <div
+          className="workspace-analysis"
+          role="group"
+          aria-label={t("KI-Auswertung")}
         >
-          {dark ? <Sun size={16} /> : <Moon size={16} />}
-        </IconButton>
-      </div>
+          <span
+            className="workspace-analysis-status"
+            role="status"
+            title={analysisProgress}
+          >
+            {analysisProgress}
+          </span>
+          <div className="workspace-analysis-actions">
+            {onModelSettings && (
+              <IconButton
+                label={t("Textmodell einrichten")}
+                title={t(
+                  "Öffnet die Einstellungen für Anbieter und Modell der Meeting-Auswertung.",
+                )}
+                onClick={onModelSettings}
+              >
+                <Settings2 size={16} />
+              </IconButton>
+            )}
+            <label>
+              {t("Intervall")}{" "}
+              <select
+                aria-label={t("Auswertungsintervall")}
+                title={t(
+                  "Legt fest, wie oft die KI den Überblick aktualisiert.",
+                )}
+                disabled={!storageReady || classicRunning || busy}
+                value={shownMinutes}
+                onChange={(e) => {
+                  const value = Number(e.target.value);
+                  setMinutes(value);
+                  if (status?.running)
+                    void action(() => adapter.interval(value * 60000));
+                }}
+              >
+                <option value={2}>{t("2 Min.")}</option>
+                <option value={3}>{t("3 Min.")}</option>
+                {![2, 3].includes(shownMinutes) && (
+                  <option value={shownMinutes}>
+                    {shownMinutes.toLocaleString(language)}{" "}
+                    {language === "de" ? "Min." : "min"}
+                  </option>
+                )}
+              </select>
+            </label>
+            {status?.running ? (
+              <>
+                <button
+                  disabled={busy || classicRunning || status.refreshRequested}
+                  className="subtle-button"
+                  title={t(
+                    "Aktualisiert die KI-Auswertung, sobald der laufende Durchgang fertig ist.",
+                  )}
+                  onClick={() => action(() => adapter.refresh())}
+                >
+                  <RefreshCw size={13} />
+                  {status.refreshRequested
+                    ? t("Vorgemerkt")
+                    : t("Aktualisieren")}
+                </button>
+                <IconButton
+                  label={t("Nur Auswertung beenden")}
+                  title={t(
+                    "Stoppt die KI-Auswertung. Eine laufende Aufnahme geht weiter.",
+                  )}
+                  disabled={busy}
+                  onClick={() => action(() => adapter.stop())}
+                >
+                  <CircleStop size={16} aria-hidden="true" />
+                </IconButton>
+              </>
+            ) : (
+              <button
+                className="subtle-button"
+                title={t(
+                  "Startet die lokale KI-Auswertung des bisherigen Transkripts.",
+                )}
+                disabled={
+                  busy ||
+                  !storageReady ||
+                  storageBlocked ||
+                  mode !== "local" ||
+                  !endpoint.trim() ||
+                  !model.trim()
+                }
+                onClick={() =>
+                  action(async () => {
+                    const shared = sharedWorkspaceContext(state);
+                    if (sharedContextSize(shared) > SHARED_CONTEXT_LIMIT)
+                      throw new Error(t(CONTEXT_BUDGET_MESSAGE));
+                    await adapter.start({
+                      meetingId: meeting.id,
+                      endpoint,
+                      model,
+                      mode: "local",
+                      cloudConsent: false,
+                      apiKey: "",
+                      useSavedKey: false,
+                      intervalMs: minutes * 60000,
+                      language,
+                      workspace: shared,
+                    });
+                  })
+                }
+              >
+                {mode === "cloud"
+                  ? t("Erweiterte Auswertung nur lokal verfügbar")
+                  : t("Lokale Auswertung starten")}
+              </button>
+            )}
+          </div>
+        </div>
+      </header>
       <div className="prototype-stage">
         <div className="meeting-app">
           <div className="app-interior">
@@ -1359,11 +1454,24 @@ function LivePanel({
   if (panel === "impulses") items = items.slice(0, impulseLimit);
   const needle = (view.query || "").trim().toLocaleLowerCase();
   const transcript = (meeting.parts || [])
-    .map((part) => ({
-      ...part,
-      text: part.status === "complete" ? part.text : part.committedText,
-    }))
-    .filter((part) => part.text?.trim());
+    .map((part) => {
+      const confirmed =
+        part.status === "complete" ? part.text : part.committedText;
+      const current = part.status === "complete" ? "" : part.text || "";
+      const tentative =
+        current && current !== (confirmed || "")
+          ? confirmed && current.startsWith(confirmed)
+            ? current.slice(confirmed.length)
+            : current
+          : "";
+      return {
+        ...part,
+        confirmed,
+        tentative,
+        text: current || confirmed || "",
+      };
+    })
+    .filter((part) => part.text.trim() || part.confirmed?.trim());
   const latestEnd = transcript.reduce(
     (end, part) =>
       Math.max(end, (part.startSample + (part.sampleCount || 0)) / 16000),
@@ -1389,13 +1497,18 @@ function LivePanel({
     .filter(
       (part) =>
         !invalidRange &&
-        (!needle || part.text.toLocaleLowerCase().includes(needle)) &&
+        (!needle ||
+          part.text.toLocaleLowerCase().includes(needle) ||
+          part.confirmed?.toLocaleLowerCase().includes(needle)) &&
         (view.track === "all" || !view.track || part.source === view.track) &&
         ((part.startSample + (part.sampleCount || 0)) / 16000 > fromSeconds ||
           (!part.sampleCount && part.startSample / 16000 === fromSeconds)) &&
         part.startSample / 16000 < toSeconds,
     )
-    .sort((a, b) => direction * (a.startSample - b.startSample));
+    .sort(
+      (a, b) =>
+        (ctx.transcriptNewestFirst ? -1 : 1) * (a.startSample - b.startSample),
+    );
   const additions =
     panel === "changes" ? eventAdditions(workspace?.events || []) : new Map();
   const timeline = (workspace?.events || [])
@@ -1499,16 +1612,18 @@ function LivePanel({
                 type="button"
                 className="subtle-button sort-toggle"
                 aria-label={
-                  view.ascending === false
+                  ctx.transcriptNewestFirst
                     ? t("Neueste zuerst")
                     : t("Älteste zuerst")
                 }
                 title={
-                  view.ascending === false
+                  ctx.transcriptNewestFirst
                     ? t("Neueste zuerst · Reihenfolge umkehren")
                     : t("Älteste zuerst · Reihenfolge umkehren")
                 }
-                onClick={() => patch({ ascending: view.ascending === false })}
+                onClick={() =>
+                  ctx.setTranscriptNewestFirst(!ctx.transcriptNewestFirst)
+                }
               >
                 <ArrowDownUp size={13} />
               </button>
@@ -1592,7 +1707,19 @@ function LivePanel({
                   {p.source === "microphone" ? t("Mikrofon") : t("Computerton")}{" "}
                   · {formatTime(p.startSample / 16000)}
                 </div>
-                <p>{p.text}</p>
+                {p.confirmed?.trim() && <p>{p.confirmed}</p>}
+                {p.tentative.trim() && (
+                  <div className="transcript-tentative">
+                    <small
+                      title={t(
+                        "Diese Wörter können sich während der Erkennung noch ändern.",
+                      )}
+                    >
+                      {t("Vorläufig")}
+                    </small>
+                    <p>{p.tentative.trimStart()}</p>
+                  </div>
+                )}
               </article>
             ))
           : panel === "changes"
@@ -1725,7 +1852,7 @@ function LivePanel({
               ))}
         {panel === "transcript" && !transcriptRows.length && (
           <p className="empty-inline">
-            {t("Für diese Auswahl kein bestätigter Transkriptabschnitt.")}
+            {t("Für diese Auswahl kein Transkriptabschnitt.")}
           </p>
         )}
         {panel !== "transcript" &&

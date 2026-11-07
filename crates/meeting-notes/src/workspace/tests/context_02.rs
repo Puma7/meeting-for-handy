@@ -395,6 +395,8 @@ fn edited_protocol_retains_human_confirmed_state_before_and_after_reopen() {
     let current = runner.context.lock().unwrap().clone();
     let (_, mut req, mut answer) = setup();
     req.purpose = "reconcile".into();
+    req.transcript_sources[0].text = "Wer gibt den Entwurf frei?".into();
+    answer["changes"][0]["evidence"][0]["quote"] = json!("Wer gibt den Entwurf frei?");
     answer["changes"][0]["kind"] = json!("impulse");
     answer["changes"][0]["text"] = json!("Wer gibt den Entwurf frei?");
     answer["changes"][0]["due"] = json!(null);
@@ -597,6 +599,8 @@ fn durable_human_activity_selects_the_last_edited_model_without_new_inference() 
         let initial = context_store::read(&folder, &Default::default()).unwrap();
         let (mut state, mut req, mut answer) = setup();
         req.purpose = "reconcile".into();
+        req.transcript_sources[0].text = "Who approves the draft?".into();
+        answer["changes"][0]["evidence"][0]["quote"] = json!("Who approves the draft?");
         answer["changes"][0]["kind"] = json!("impulse");
         answer["changes"][0]["text"] = json!("Who approves the draft?");
         answer["changes"][0]["due"] = json!(null);

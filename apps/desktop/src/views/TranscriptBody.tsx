@@ -3,15 +3,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { clock, trackName } from "../domain";
 import type { AudioPart, Locale } from "../types";
 import type { MessageKey } from "../i18n";
-/** Stored choice of the reading order; the transcript itself is never reordered. */
-const ORDER_KEY = "handymeeting.transcriptOrder";
-function storedNewestFirst() {
-  try {
-    return localStorage.getItem(ORDER_KEY) === "newest";
-  } catch {
-    return false;
-  }
-}
+import { useTranscriptOrder } from "../useTranscriptOrder";
 
 /**
  * Renders all retained transcript sections and searches their literal text without markup.
@@ -38,16 +30,8 @@ export default function TranscriptBody({
   const matching = needle
     ? parts.filter((part) => searchPattern(needle).test(part.text ?? ""))
     : parts;
-  const [newestFirst, setNewestFirst] = useState(storedNewestFirst);
+  const [newestFirst, chooseOrder] = useTranscriptOrder();
   const shown = newestFirst ? [...matching].reverse() : matching;
-  const chooseOrder = (newest: boolean) => {
-    setNewestFirst(newest);
-    try {
-      localStorage.setItem(ORDER_KEY, newest ? "newest" : "oldest");
-    } catch {
-      // The order still applies to this view when the preference cannot be stored.
-    }
-  };
   const scrolledFile = useRef<string | null>(null);
   useEffect(() => {
     if (!selectedFile) {

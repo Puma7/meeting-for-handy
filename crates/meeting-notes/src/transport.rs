@@ -34,12 +34,13 @@ impl reqwest::dns::Resolve for NoDns {
     }
 }
 
-/// Only an explicit provider context rejection or a complete length-limited envelope
-/// permits a smaller text batch. Other HTTP errors never trigger speculative retries.
+/// Explicit provider limits and declared workspace overflow permit smaller text batches.
+/// Other HTTP errors never trigger speculative retries.
 #[derive(Debug)]
 pub(crate) enum BudgetError {
     Context,
     Output,
+    WorkspaceChanges,
 }
 impl std::fmt::Display for BudgetError {
     /// Explains the recoverable limit without exposing provider text or discarded content.
@@ -47,6 +48,7 @@ impl std::fmt::Display for BudgetError {
         f.write_str(match self {
             Self::Context => "Der Text passt nicht in den Modellkontext. Kleinere Abschnitte oder mehr Kontext im lokalen Dienst verwenden; gesicherte Ergebnisse bleiben erhalten.",
             Self::Output => "Das Modell hat sein Antwortlimit erreicht. Die unvollständige Antwort wurde nicht übernommen; gesicherte Ergebnisse bleiben erhalten.",
+            Self::WorkspaceChanges => "Das Modell meldet zu viele Änderungen für diesen Abschnitt. Die Auswertung bleibt auf dem letzten gültigen Stand. Falls das erneut auftritt, ein anderes lokales Textmodell wählen.",
         })
     }
 }
@@ -591,7 +593,13 @@ impl TextClient {
         }
         let response = if let Some(lease) = &self.residency {
             lease.prepare(control)?;
-            let (provider, model, keep_alive, context_length) = lease.inference()?;
+            let crate::residency::InferenceRoute {
+                provider,
+                model,
+                keep_alive,
+                context_length,
+                ..
+            } = lease.inference()?;
             match provider {
                 crate::residency::LocalProvider::Ollama => {
                     // Native chat supports keep_alive on older Ollama versions too.

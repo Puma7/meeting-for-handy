@@ -109,6 +109,7 @@ mod context_02;
 mod history_01;
 mod inference_01;
 mod persistence_01;
+mod quality_01;
 mod validation_01;
 
 #[test]
@@ -344,4 +345,55 @@ fn checkpoint_only_context_can_start_a_new_journal_and_replay_a_valid_suffix() {
         std::fs::read(dir.path().join("revision-00000001.json")).unwrap(),
         checkpoint
     );
+}
+
+#[test]
+fn changes_to_prompt_and_output_language_keep_separate_durable_runs() {
+    let dir = tempfile::tempdir().unwrap();
+    let connection = || crate::Connection {
+        endpoint: "http://127.0.0.1:1/v1/".into(),
+        model: "synthetic".into(),
+        mode: "local".into(),
+        cloud_consent: false,
+        api_key: String::new(),
+    };
+    let start = |language, prompt| {
+        live::LiveRunner::start_workspace_with_prompt(
+            dir.path(),
+            "synthetic-meeting",
+            connection(),
+            language,
+            prompt,
+        )
+    };
+    let standard = start("auto", "").unwrap().run().clone();
+    assert_eq!(start("auto", PRESENTATION).unwrap().run(), &standard);
+    let custom = start("auto", "Focus on rollout blockers.")
+        .unwrap()
+        .run()
+        .clone();
+    assert_ne!(custom.id, standard.id);
+    assert!(custom.prompt_profile_hash.is_some());
+    assert_eq!(
+        start("auto", " Focus on rollout blockers. ").unwrap().run(),
+        &custom
+    );
+    let metadata = std::fs::read_to_string(dir.path().join(&custom.id).join("run.json")).unwrap();
+    assert!(!metadata.contains("rollout blockers"));
+    assert_ne!(
+        start("auto", "Focus on deadlines.").unwrap().run().id,
+        custom.id
+    );
+    let russian = start("ru", "").unwrap().run().clone();
+    assert_ne!(russian.id, standard.id);
+    assert_eq!(start("ru", "").unwrap().run(), &russian);
+    assert_ne!(start("zh", "").unwrap().run().id, russian.id);
+    assert!(start("invalid", "").is_err());
+    let too_long = "a".repeat(601);
+    assert!(start("auto", &too_long).is_err());
+    assert!(start("auto", "hidden\0control").is_err());
+    assert!(
+        live::LiveRunner::start(dir.path(), "synthetic-meeting", connection(), "auto").is_err()
+    );
+    assert_eq!(start("auto", "").unwrap().run(), &standard);
 }

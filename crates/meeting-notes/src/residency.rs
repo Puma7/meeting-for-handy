@@ -17,6 +17,58 @@ pub enum LocalProvider {
     LmStudio,
 }
 
+/// Read-only inventory information from LM Studio, without any lease or load authority.
+#[derive(Clone, Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LmStudioLoadedModel {
+    pub model: String,
+    pub context_length: Option<u64>,
+}
+
+/// A bounded loopback GET for setup only. Failures leave loaded status unknown.
+pub fn lm_studio_loaded_models(endpoint: &str) -> Result<Vec<LmStudioLoadedModel>> {
+    let client = TextClient::new(&Connection {
+        endpoint: endpoint.into(),
+        model: "local-model-discovery".into(),
+        mode: "local".into(),
+        cloud_consent: false,
+        api_key: String::new(),
+    })?;
+    let inventory = client.model_request(
+        "api/v1/models",
+        None,
+        &AnalysisControl::default(),
+        Duration::from_secs(2),
+    )?;
+    let models = inventory["models"]
+        .as_array()
+        .context("Ungültige lokale Modellliste.")?;
+    ensure!(models.len() <= 10_000, "Lokale Modellliste ist zu groß.");
+    Ok(models
+        .iter()
+        .filter_map(|model| {
+            if model["type"] != "llm" {
+                return None;
+            }
+            let key = model["key"].as_str()?;
+            valid_model_name(key).ok()?;
+            let instances = model["loaded_instances"].as_array()?;
+            let first = instances.first()?;
+            let context_length = if instances.len() == 1 {
+                first["config"]["context_length"]
+                    .as_u64()
+                    .filter(|length| *length > 0)
+            } else {
+                None
+            };
+            Some(LmStudioLoadedModel {
+                model: key.into(),
+                context_length,
+            })
+        })
+        .collect())
+}
+
 #[derive(Default)]
 pub struct LocalModelPool {
     slots: Arc<Mutex<HashMap<String, Arc<Slot>>>>,
@@ -50,7 +102,16 @@ enum Loaded {
     LmStudio {
         instance: String,
         context_length: Option<u64>,
+        supports_reasoning_off: bool,
     },
+}
+
+pub(crate) struct InferenceRoute {
+    pub provider: LocalProvider,
+    pub model: String,
+    pub keep_alive: i64,
+    pub context_length: Option<u64>,
+    pub supports_reasoning_off: bool,
 }
 
 /// One logical user's reservation. Arc clones retain an in-flight user's ownership.
@@ -312,7 +373,7 @@ impl ModelLease {
                 let selected_instances = model["loaded_instances"].as_array().context(
                     "Lokale Instanzliste fehlt; keine zusätzliche Modellkopie wird geladen.",
                 )?;
-                ensure!(selected_instances.is_empty(), "Dieses Modell ist in LM Studio bereits geladen. Es wird weder eine weitere Kopie geladen noch die fremde Instanz übernommen oder entladen. Für eine eigene Reservierung zuerst den Ladezustand in LM Studio prüfen.");
+                ensure!(selected_instances.is_empty(), "Das ausgewählte Modell ist in LM Studio bereits geladen. Falls es gerade nicht gebraucht wird, entlade es dort und lass den Server laufen. Aktualisiere danach die Auswertung in HandyMeeting oder starte sie erneut.");
                 let existing: Vec<&str> = models
                     .iter()
                     .filter_map(|m| m["loaded_instances"].as_array())
@@ -347,9 +408,13 @@ impl ModelLease {
                     "Textmodell wurde nicht als geladen bestätigt."
                 );
                 ensure!(!existing.contains(&instance), "Der Dienst hat eine bereits vorhandene Modellinstanz zurückgegeben; deren dauerhafte Reservierung ist nicht bestätigt und sie wird nicht entladen.");
+                let supports_reasoning_off = model["capabilities"]["reasoning"]["allowed_options"]
+                    .as_array()
+                    .is_some_and(|options| options.iter().any(|option| option == "off"));
                 Loaded::LmStudio {
                     instance: instance.to_owned(),
                     context_length,
+                    supports_reasoning_off,
                 }
             }
         };
@@ -391,30 +456,34 @@ impl ModelLease {
         Ok(())
     }
     /// Returns only routing policy for the selected model; never session or audio data.
-    pub(crate) fn inference(&self) -> Result<(LocalProvider, String, i64, Option<u64>)> {
+    pub(crate) fn inference(&self) -> Result<InferenceRoute> {
         let state = self
             .slot
             .state
             .lock()
             .map_err(|_| anyhow::anyhow!("Lokales Modell ist gesperrt."))?;
-        let (name, context_length) = match state
+        let (model, context_length, supports_reasoning_off) = match state
             .loaded
             .as_ref()
             .context("Lokales Modell wurde noch nicht geladen.")?
         {
-            Loaded::Ollama { context_length, .. } => (state.client.model.clone(), *context_length),
+            Loaded::Ollama { context_length, .. } => {
+                (state.client.model.clone(), *context_length, false)
+            }
             Loaded::LmStudio {
                 instance,
                 context_length,
-            } => (instance.clone(), *context_length),
+                supports_reasoning_off,
+            } => (instance.clone(), *context_length, *supports_reasoning_off),
         };
         ensure!(!state.refresh_failed, "Die lokale Modellreservierung konnte nicht erneuert werden. Modelldienst prüfen und Auswertung fortsetzen.");
-        Ok((
-            state.provider,
-            name,
-            ollama_keep_alive(&state).unwrap_or(0),
+        Ok(InferenceRoute {
+            provider: state.provider,
+            model,
+            keep_alive: ollama_keep_alive(&state).unwrap_or(0),
             context_length,
-        ))
+            supports_reasoning_off,
+        })
     }
     /// Compares logical slot identity without merging different routes or credentials.
     pub fn same_model(&self, other: &Self) -> bool {

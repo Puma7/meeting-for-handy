@@ -31,21 +31,6 @@ pub struct SavedWorkspace {
     pub workspace: WorkspaceState,
 }
 
-/// Map only known generations; no client-supplied path component is used.
-fn generations() -> [(&'static str, &'static str); 3] {
-    [
-        (workspace::PROMPT_VERSION, workspace::WORKSPACE_FOLDER),
-        (
-            workspace::PREVIOUS_PROMPT_VERSION,
-            workspace::PREVIOUS_WORKSPACE_FOLDER,
-        ),
-        (
-            workspace::LEGACY_PROMPT_VERSION,
-            workspace::LEGACY_WORKSPACE_FOLDER,
-        ),
-    ]
-}
-
 /// Validate the parent independently so a linked history root cannot redirect a run lookup.
 fn checked_root(root: &Path) -> Result<()> {
     let meta = std::fs::symlink_metadata(root)?;
@@ -58,7 +43,7 @@ fn checked_root(root: &Path) -> Result<()> {
 
 /// Read exactly the selected generation, retaining its original unlocked entities and full events.
 fn generation(root: &Path, run: &LoadedRun, version: &str) -> Result<SavedWorkspace> {
-    let name = generations()
+    let name = workspace::GENERATIONS
         .into_iter()
         .find(|(v, _)| *v == version)
         .map(|(_, name)| name)
@@ -100,7 +85,7 @@ pub fn list_workspace_history(root: &Path, meeting_id: &str) -> Result<Workspace
             unreadable_entries += 1;
             continue;
         }
-        for (version, name) in generations() {
+        for (version, name) in workspace::GENERATIONS {
             match std::fs::symlink_metadata(root.join(&run.run.id).join(name)) {
                 Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
                 Err(_) => {

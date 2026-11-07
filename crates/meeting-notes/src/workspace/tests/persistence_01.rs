@@ -527,7 +527,11 @@ fn assert_status_only_evidence_history(kind: &str, replace_text: bool, initial_q
         .into_iter()
         .take(initial_quotes - 1)
     {
-        let quote = format!("Zulu review checkpoint {label} was mentioned.");
+        let quote = if kind == "impulse" {
+            format!("Would someone confirm who approves phase 7 at checkpoint {label}?")
+        } else {
+            format!("Ich übernehme den Bericht für den Prüfpunkt {label}.")
+        };
         req.transcript_sources[0]
             .text
             .push_str(&format!(" {quote}"));
@@ -645,7 +649,7 @@ fn assert_status_only_evidence_history(kind: &str, replace_text: bool, initial_q
         }
         let quote = if i == 5 {
             if kind == "impulse" {
-                "The approval question was discussed and resolved.".to_owned()
+                format!("Dana approved phase {}.", if replace_text { 8 } else { 7 })
             } else {
                 "Robin: Der Bericht ist erledigt.".to_owned()
             }
@@ -830,14 +834,24 @@ fn six_initial_quotes_select_required_number_witnesses_without_raising_the_budge
         validate::apply(&mut state, &req, &answer.to_string()).unwrap();
         let history = serde_json::to_vec(&state.events).unwrap();
         let before = serde_json::to_vec(&state).unwrap();
-        req.state = state.entities.clone();
-        req.transcript_sources.push(Source {
+        let done = Source {
             id: "s_done".into(),
             source: "system".into(),
             start_ms: 3000,
             end_ms: 6000,
             text: "The phase review was discussed and resolved.".into(),
-        });
+        };
+        let mut sources = req.transcript_sources.clone();
+        sources.push(done.clone());
+        req = Request::new(
+            req.request_id,
+            &state.context,
+            &state,
+            state.entities.clone(),
+            std::slice::from_ref(&done),
+            sources,
+        );
+        req.purpose = "reconcile".into();
         let change = &mut answer["changes"][0];
         change["targetId"] = json!(state.entities[0].id);
         change["targetRevision"] = json!(1);
@@ -878,6 +892,8 @@ fn promised_task_is_open_and_repeated_result_is_deduplicated() {
 fn absent_impulses_survive_later_empty_update() {
     let (mut state, mut req, mut answer) = setup();
     req.purpose = "reconcile".into();
+    req.transcript_sources[0].text = "Wer gibt den Entwurf frei?".into();
+    answer["changes"][0]["evidence"][0]["quote"] = json!("Wer gibt den Entwurf frei?");
     answer["changes"][0]["kind"] = json!("impulse");
     answer["changes"][0]["text"] = json!("Wer gibt den Entwurf frei?");
     answer["changes"][0]["due"] = json!(null);
@@ -910,8 +926,17 @@ fn incomplete_and_foreign_answers_do_not_advance_state() {
         } else {
             json!(true)
         };
-        assert!(validate::apply(&mut state, &req, &answer.to_string()).is_err());
+        let error = validate::apply(&mut state, &req, &answer.to_string()).unwrap_err();
+        if key == "moreChangesPossible" {
+            assert!(matches!(
+                error.downcast_ref::<crate::transport::BudgetError>(),
+                Some(crate::transport::BudgetError::WorkspaceChanges)
+            ));
+        } else {
+            assert!(!crate::transport::is_budget_error(&error));
+        }
         assert_eq!(state.revision, 0);
+        assert!(state.entities.is_empty());
     }
 }
 #[test]
@@ -1313,6 +1338,10 @@ fn completion_accepts_explicit_reports_but_rejects_uncertainty() {
         "I sent the report yesterday.",
         "We have submitted the report.",
         "Die Freigabe ist erteilt.",
+        "Robin sagt: Der Versandbericht ist fertig und wurde verschickt.",
+        "Leon sagt: Den Schlüssel für den zweiten Standort habe ich abgeholt.",
+        "Nora sagt: Die Anleitung ist fertig.",
+        "Der Versandbericht wurde verschickt.",
     ] {
         assert!(validate::completion_quote_allowed(quote), "{quote}");
     }
@@ -1324,6 +1353,17 @@ fn completion_accepts_explicit_reports_but_rejects_uncertainty() {
         "I might have sent the report.",
         "Is it done?",
         "Ich habe den Bericht. Danach: Thema verschickt laut Notiz.",
+        "Die Anleitung ist noch nicht fertig.",
+        "Die Anleitung ist fast fertig.",
+        "Die Anleitung ist fertig geplant.",
+        "Ich hoffe, dass die Anleitung fertig ist.",
+        "Wenn die Anleitung fertig ist, schicke sie mir.",
+        "Die Anleitung ist fertig?",
+        "Ich habe den Schlüssel noch nicht abgeholt.",
+        "Ich werde den Schlüssel abgeholt haben.",
+        "Der Versandbericht wurde noch nicht verschickt.",
+        "Der Versandbericht muss verschickt werden.",
+        "Der Versandbericht wurde vielleicht verschickt.",
     ] {
         assert!(!validate::completion_quote_allowed(quote), "{quote}");
     }
@@ -1524,6 +1564,11 @@ fn review22_status_cases(status_name: &str, kinds: &[&str], cases: &[(&str, bool
             answer["changes"][0]["text"] = json!("Pilotstart beschlossen");
             answer["changes"][0]["status"] = json!("recorded");
             answer["changes"][0]["evidence"][0]["quote"] = json!("Wir beschließen den Pilotstart.");
+        } else if status_name == "completed" {
+            request.transcript_sources[0].text = "Ich werde den Bericht verschicken.".into();
+            answer["changes"][0]["text"] = json!("Bericht verschicken");
+            answer["changes"][0]["evidence"][0]["quote"] =
+                json!("Ich werde den Bericht verschicken.");
         }
         answer["changes"][0]["due"] = json!(null);
         validate::apply(&mut state, &request, &answer.to_string()).unwrap();

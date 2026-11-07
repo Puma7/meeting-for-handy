@@ -1504,6 +1504,7 @@ pub(super) fn completion_quote_allowed(quote: &str) -> bool {
         &["ist", "erledigt"][..],
         &["ist", "erteilt"],
         &["ist", "abgeschlossen"],
+        &["wurde", "verschickt"],
         &["is", "complete"],
         &["is", "done"],
         &["has", "been", "approved"],
@@ -1511,6 +1512,17 @@ pub(super) fn completion_quote_allowed(quote: &str) -> bool {
     .iter()
     .any(|sequence| phrase(sequence))
     {
+        return true;
+    }
+    // In a finite assertion, "ist fertig" is a completed state. Do not
+    // mistake "ist fertig geplant" for completion of the work itself.
+    if clauses.iter().any(|range| {
+        (range.start + 1..range.end).any(|index| {
+            words[index - 1..=index] == ["ist", "fertig"]
+                && (index + 1 == range.end || ["und", "aber"].contains(&words[index + 1]))
+                && !unasserted_embedding(&words, &original_words, &sentences, index)
+        })
+    }) {
         return true;
     }
     let english = [
@@ -1549,6 +1561,7 @@ pub(super) fn completion_quote_allowed(quote: &str) -> bool {
         return true;
     }
     let german = [
+        "abgeholt",
         "erledigt",
         "freigegeben",
         "abgeschlossen",

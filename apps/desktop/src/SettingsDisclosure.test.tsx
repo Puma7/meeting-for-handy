@@ -30,7 +30,9 @@ function renderChildMaintenance(api: DesktopApi) {
       onTheme={noop}
     />,
   );
-  return screen.getByText("Daten und Wartung").closest("details")!;
+  return screen
+    .getByText("Aufbewahrung, Archiv und Suchindex")
+    .closest("details")!;
 }
 function childPolicy() {
   return {
@@ -215,7 +217,9 @@ it("keeps a rejected maintenance save visible after its settings close", async (
       onTheme={noop}
     />,
   );
-  const detail = screen.getByText("Daten und Wartung").closest("details")!;
+  const detail = screen
+    .getByText("Aufbewahrung, Archiv und Suchindex")
+    .closest("details")!;
   await userEvent.click(detail.querySelector("summary")!);
   const days = await screen.findByLabelText(
     "Meetings zunächst unangetastet lassen · Tage",
@@ -286,7 +290,9 @@ it("keeps a running maintenance job and cancellation outside collapsed settings"
     />,
   );
 
-  const disclosure = screen.getByText("Daten und Wartung").closest("details")!;
+  const disclosure = screen
+    .getByText("Aufbewahrung, Archiv und Suchindex")
+    .closest("details")!;
   expect(disclosure.open).toBe(false);
   const job = await screen.findByRole("status", {
     name: "Aufbewahrung und Archiv",
@@ -328,7 +334,9 @@ it("keeps the exact legacy import control visible when settings collapse during 
     onTheme: noop,
   };
   const view = render(<SettingsView {...props} />);
-  const disclosure = screen.getByText("Daten und Wartung").closest("details")!;
+  const disclosure = screen
+    .getByText("Aufbewahrung, Archiv und Suchindex")
+    .closest("details")!;
   await userEvent.click(disclosure.querySelector("summary")!);
   const button = screen.getByRole("button", {
     name: "Sitzungsdatei auswählen und nur lesbar öffnen …",

@@ -90,6 +90,7 @@ pub struct LiveRunner {
     diagnostic_warning: std::cell::RefCell<Option<String>>,
     overview_attempt: std::cell::Cell<(u32, usize, usize)>,
     workspace: Option<crate::workspace::WorkspaceRunner>,
+    workspace_presentation: String,
 }
 
 impl LiveRunner {
@@ -109,7 +110,14 @@ impl LiveRunner {
         connection: Connection,
         language: &str,
     ) -> Result<Self> {
-        Self::start_versioned(root, meeting_id, connection, language, LIVE_PROMPT_VERSION)
+        Self::start_versioned(
+            root,
+            meeting_id,
+            connection,
+            language,
+            LIVE_PROMPT_VERSION,
+            "",
+        )
     }
 
     /// Start/resume only the matching workspace prompt generation; older model runs remain immutable.
@@ -119,12 +127,24 @@ impl LiveRunner {
         connection: Connection,
         language: &str,
     ) -> Result<Self> {
+        Self::start_workspace_with_prompt(root, meeting_id, connection, language, "")
+    }
+
+    /// Bind customized presentation to a separate run without storing its text in the run metadata.
+    pub fn start_workspace_with_prompt(
+        root: &Path,
+        meeting_id: &str,
+        connection: Connection,
+        language: &str,
+        presentation: &str,
+    ) -> Result<Self> {
         Self::start_versioned(
             root,
             meeting_id,
             connection,
             language,
             crate::workspace::PROMPT_VERSION,
+            crate::workspace::normalize_prompt(presentation)?,
         )
     }
 
@@ -135,9 +155,14 @@ impl LiveRunner {
         connection: Connection,
         language: &str,
         prompt_version: &str,
+        presentation: &str,
     ) -> Result<Self> {
+        use sha2::{Digest, Sha256};
+
         anyhow::ensure!(
-            ["de", "en"].contains(&language),
+            ["de", "en"].contains(&language)
+                || (prompt_version == crate::workspace::PROMPT_VERSION
+                    && crate::workspace::supports_output_language(language)),
             "Unbekannte Sprache der Live-Zusammenfassung."
         );
         let client = TextClient::new(&connection)?;
@@ -149,6 +174,8 @@ impl LiveRunner {
             mode: connection.mode.clone(),
             endpoint: client.base.to_string(),
             prompt_version: prompt_version.to_string(),
+            prompt_profile_hash: (!presentation.is_empty())
+                .then(|| format!("{:x}", Sha256::digest(presentation.as_bytes()))),
             language: language.to_string(),
         };
         let (runs, damaged_runs) = list_runs(root)?;
@@ -159,6 +186,7 @@ impl LiveRunner {
                 && run.mode == identity.mode
                 && run.endpoint == identity.endpoint
                 && run.prompt_version == identity.prompt_version
+                && run.prompt_profile_hash == identity.prompt_profile_hash
                 && run.language == identity.language
         });
         let state = match existing {
@@ -173,6 +201,7 @@ impl LiveRunner {
             diagnostic_warning: Default::default(),
             overview_attempt: Default::default(),
             workspace: None,
+            workspace_presentation: presentation.into(),
         })
     }
 
@@ -203,6 +232,7 @@ impl LiveRunner {
                     && run.mode == identity.mode
                     && run.endpoint == identity.endpoint
                     && run.prompt_version == identity.prompt_version
+                    && run.prompt_profile_hash == identity.prompt_profile_hash
                     && run.language == identity.language
             }) {
                 Some(state) => state,
@@ -234,6 +264,7 @@ impl LiveRunner {
         if let Some(state) = previous.and_then(|view| view.workspace) {
             workspace.inherit_manual(&state)?;
         }
+        workspace.set_presentation(self.workspace_presentation.clone());
         self.workspace = Some(workspace);
         Ok(self)
     }
@@ -648,11 +679,7 @@ fn read_workspace_if_present(folder: &Path) -> Result<Option<crate::workspace::W
 /// Recognize only the explicit current and readable application-owned generations; never follow links.
 fn workspace_folders(run_folder: &Path) -> Result<Vec<std::path::PathBuf>> {
     let mut folders = Vec::new();
-    for name in [
-        crate::workspace::WORKSPACE_FOLDER,
-        crate::workspace::PREVIOUS_WORKSPACE_FOLDER,
-        crate::workspace::LEGACY_WORKSPACE_FOLDER,
-    ] {
+    for (_, name) in crate::workspace::GENERATIONS {
         let path = run_folder.join(name);
         match std::fs::symlink_metadata(&path) {
             Ok(metadata) => {

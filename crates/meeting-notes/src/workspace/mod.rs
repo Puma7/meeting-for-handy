@@ -1,6 +1,7 @@
 //! Stable, source-backed workspace updates. Models receive only explicit text DTOs.
 mod assertions;
 mod context_store;
+mod matching;
 pub(crate) mod memory;
 mod model;
 mod store;
@@ -20,10 +21,12 @@ use std::{
 };
 
 pub const CONTRACT_VERSION: &str = "meeting-update-1";
-pub const PROMPT_VERSION: &str = "handymeeting-workspace-11";
+pub const PROMPT_VERSION: &str = "handymeeting-workspace-13";
+const V12_PROMPT_VERSION: &str = "handymeeting-workspace-12";
+const V11_PROMPT_VERSION: &str = "handymeeting-workspace-11";
 pub const PREVIOUS_PROMPT_VERSION: &str = "handymeeting-workspace-10";
 pub const LEGACY_PROMPT_VERSION: &str = "handymeeting-workspace-9";
-pub const WORKSPACE_FOLDER: &str = "workspace-v11";
+pub const WORKSPACE_FOLDER: &str = "workspace-v13";
 pub const PREVIOUS_WORKSPACE_FOLDER: &str = "workspace-v10";
 pub const LEGACY_WORKSPACE_FOLDER: &str = "workspace-v9";
 /// Read shared-input chronology without treating model output or confirmations as new releases.
@@ -33,7 +36,34 @@ pub(crate) fn shared_context_timestamp(
 ) -> Result<Option<chrono::DateTime<chrono::FixedOffset>>> {
     context_store::shared_timestamp(folder, context)
 }
-const PROMPT: &str = include_str!("system.de.txt");
+pub(crate) const GENERATIONS: [(&str, &str); 5] = [
+    (PROMPT_VERSION, WORKSPACE_FOLDER),
+    (V12_PROMPT_VERSION, "workspace-v12"),
+    (V11_PROMPT_VERSION, "workspace-v11"),
+    (PREVIOUS_PROMPT_VERSION, PREVIOUS_WORKSPACE_FOLDER),
+    (LEGACY_PROMPT_VERSION, LEGACY_WORKSPACE_FOLDER),
+];
+const PROMPT: &str = include_str!("prompts/system.en.txt");
+const PRESENTATION: &str = include_str!("prompts/presentation.en.txt");
+
+pub fn supports_output_language(language: &str) -> bool {
+    matches!(language, "auto" | "de" | "en" | "ru" | "zh")
+}
+
+/// Validate editable instructions and canonicalize the bundled default to an empty override.
+pub fn normalize_prompt(text: &str) -> Result<&str> {
+    let text = text.trim();
+    ensure!(
+        text.chars().count() <= 600
+            && !text.chars().any(|c| c.is_control() && !matches!(c, '\n' | '\r' | '\t')),
+        "Eigene Auswertungsanweisungen dürfen höchstens 600 Zeichen und keinen Steuertext enthalten. / Custom analysis instructions must be at most 600 characters with no control characters."
+    );
+    Ok(if text == PRESENTATION.trim() {
+        ""
+    } else {
+        text
+    })
+}
 const MAX_REQUEST_CHARS: usize = 24_000;
 pub(crate) const WORKSPACE_CONTEXT_LENGTH: u64 = 8192;
 
@@ -42,6 +72,7 @@ pub struct WorkspaceRunner {
     state: WorkspaceState,
     pub context: Arc<Mutex<WorkspaceContext>>,
     _writer: File,
+    presentation: String,
     observed: std::cell::RefCell<Option<Vec<LiveSource>>>,
 }
 
@@ -63,8 +94,13 @@ impl WorkspaceRunner {
             context: Arc::new(Mutex::new(input)),
             state,
             _writer: writer,
+            presentation: String::new(),
             observed: Default::default(),
         })
+    }
+
+    pub(crate) fn set_presentation(&mut self, presentation: String) {
+        self.presentation = presentation;
     }
 
     /// Import newer human confirmations on both fresh and resumed model runs,
@@ -564,6 +600,11 @@ impl WorkspaceRunner {
                 );
                 req.purpose = phase.into();
                 req.language = language.into();
+                req.presentation_instructions = if self.presentation.is_empty() {
+                    PRESENTATION.trim().into()
+                } else {
+                    self.presentation.clone()
+                };
                 req.compact_titles();
                 let input = serde_json::to_string(&req)?;
                 if input.chars().count() > MAX_REQUEST_CHARS {
@@ -600,10 +641,7 @@ impl WorkspaceRunner {
                 let extra = if phase == "tasks" {
                     let base = schema["properties"]["changes"]["items"].clone();
                     let mut branches = Vec::new();
-                    let task_evidence=req.transcript_sources.iter().filter(|source|required.iter().any(|s|s.id==source.id)).filter_map(|source| {
-                        let quotes=quote_options(&source.text).into_iter().filter(|q|validate::task_quote_allowed(q)).collect::<Vec<_>>();
-                        (!quotes.is_empty()).then(||serde_json::json!({"type":"object","additionalProperties":false,"required":["sourceId","quote"],"properties":{"sourceId":{"type":"string","enum":[source.id]},"quote":{"type":"string","enum":quotes}}}))
-                    }).collect::<Vec<_>>();
+                    let task_evidence = fresh_assertion_schema(&req, validate::task_quote_allowed);
                     if !task_evidence.is_empty() {
                         let mut branch = base.clone();
                         branch["properties"]["kind"]["enum"] = serde_json::json!(["task"]);
@@ -625,16 +663,34 @@ impl WorkspaceRunner {
                             serde_json::json!({"type":"string","enum":[e.id]});
                         branch["properties"]["targetRevision"] =
                             serde_json::json!({"type":"integer","enum":[e.revision]});
-                        branch["properties"]["status"]["enum"] =
-                            serde_json::json!(validate::allowed_statuses("task"));
-                        branches.push(branch);
+                        for (status, allowed_quote) in [
+                            ("open", validate::task_quote_allowed as fn(&str) -> bool),
+                            ("completed", validate::completion_quote_allowed),
+                            ("withdrawn", validate::withdrawal_quote_allowed),
+                        ] {
+                            let evidence = fresh_quote_schema(&req, |quote| {
+                                allowed_quote(quote) && matching::task_subject_matches(e, quote)
+                            });
+                            if evidence.is_empty() {
+                                continue;
+                            }
+                            let mut status_branch = branch.clone();
+                            status_branch["properties"]["status"]["enum"] =
+                                serde_json::json!([status]);
+                            status_branch["properties"]["evidence"]["items"] =
+                                serde_json::json!({"anyOf": evidence});
+                            if status != "open" {
+                                status_branch["properties"]["text"]["type"] = "null".into();
+                            }
+                            branches.push(status_branch);
+                        }
                     }
                     schema["properties"]["changes"]["items"] =
                         serde_json::json!({"anyOf":branches});
                     if branches.is_empty() {
                         continue;
                     }
-                    "PHASE AUFGABEN: Antworte ausschließlich mit kind=task. Suche jede ausdrückliche Übernahme oder Zuweisung in requiredSourceIds. Ich schreibe den Bericht bis Freitag muss zwingend als task/open erscheinen, niemals nur als Fakt. Neue Aufgaben benötigen einen ausdrücklichen Übernahmebeleg. Fehlende Zusagen, offene Freigaben, Fragen, Wünsche und unverbindliche Vorschläge sind KEINE Aufgaben. Owner und due nur wörtlich belegt, sonst null. Status completed nur für eine vorhandene passende Aufgabe mit ausdrücklichem Erledigungsbeleg. Verändere keine menschlich geschützten Aufgaben. Keine Fakten, Entscheidungen, Agenda oder Impulse in dieser Phase. Wähle die Aufgaben für overviewRefs."
+                    include_str!("prompts/tasks.en.txt").trim_end()
                 } else if phase == "facts" {
                     let base = schema["properties"]["changes"]["items"].clone();
                     let mut variants = Vec::new();
@@ -653,6 +709,17 @@ impl WorkspaceRunner {
                         for field in ["owner", "due"] {
                             branch["properties"][field] = serde_json::json!({"type":"null"});
                         }
+                        if kind == "decision" {
+                            let evidence = fresh_assertion_schema(
+                                &req,
+                                validate::recorded_decision_quote_allowed,
+                            );
+                            if evidence.is_empty() {
+                                continue;
+                            }
+                            branch["properties"]["evidence"]["items"] =
+                                serde_json::json!({"anyOf": evidence});
+                        }
                         variants.push(branch);
                     }
                     // Tasks may be present as overview context but cannot be retagged as facts.
@@ -668,15 +735,42 @@ impl WorkspaceRunner {
                         branch["properties"]["targetRevision"] =
                             serde_json::json!({"type":"integer","enum":[entity.revision]});
                         branch["properties"]["status"]["enum"] =
-                            serde_json::json!(validate::allowed_statuses(&entity.kind));
+                            serde_json::json!(validate::allowed_statuses(&entity.kind)
+                                .iter()
+                                .filter(|status| **status != "withdrawn")
+                                .collect::<Vec<_>>());
                         for field in ["owner", "due"] {
                             branch["properties"][field] = serde_json::json!({"type":"null"});
+                        }
+                        if entity.kind == "decision" {
+                            let evidence = fresh_quote_schema(&req, |quote| {
+                                validate::withdrawal_quote_allowed(quote)
+                                    && matching::shares_topic(&entity.text, quote)
+                            });
+                            if !evidence.is_empty() {
+                                let mut withdrawal = branch.clone();
+                                withdrawal["properties"]["status"]["enum"] =
+                                    serde_json::json!(["withdrawn"]);
+                                withdrawal["properties"]["text"]["type"] = "null".into();
+                                withdrawal["properties"]["evidence"]["items"] =
+                                    serde_json::json!({"anyOf": evidence});
+                                variants.push(withdrawal);
+                            }
+                            let evidence = fresh_assertion_schema(&req, |quote| {
+                                validate::recorded_decision_quote_allowed(quote)
+                                    && matching::shares_topic(&entity.text, quote)
+                            });
+                            if evidence.is_empty() {
+                                continue;
+                            }
+                            branch["properties"]["evidence"]["items"] =
+                                serde_json::json!({"anyOf": evidence});
                         }
                         variants.push(branch);
                     }
                     schema["properties"]["changes"]["items"] =
                         serde_json::json!({"anyOf":variants});
-                    "PHASE FAKTEN UND BESCHLÜSSE: Nur kind=fact oder decision. Bereits in state enthaltene Aufgaben nicht als allgemeinen Fakt wiederholen. fact/recorded oder unclear für wichtige weitere Beobachtungen. Eine fehlende Budgetzusage ist eine offene Tatsache, keine Aufgabe. decision/recorded ausschließlich für einen ausdrücklichen Beschluss; withdrawn nur ausdrücklich belegte Rücknahme einer vorhandenen Entscheidung. Owner/due immer null. Keine Aufgaben, Impulse oder Agenda. overviewRefs wählt bis zu 8 wichtige vorhandene Aufgaben aus state sowie Fakten/Beschlüsse; neue Einträge über proposalId referenzieren."
+                    include_str!("prompts/facts.en.txt").trim_end()
                 } else {
                     let base = schema["properties"]["changes"]["items"].clone();
                     let mut variants = Vec::new();
@@ -695,7 +789,28 @@ impl WorkspaceRunner {
                         branch["properties"]["status"]["enum"] = if e.kind == "agenda" {
                             serde_json::json!(["touched", "discussed", "unclear"])
                         } else {
-                            serde_json::json!(["discussed", "unclear"])
+                            let evidence = fresh_quote_schema(&req, |quote| {
+                                validate::impulse_answer_allowed(&e.text, quote)
+                            });
+                            if !evidence.is_empty() {
+                                let mut discussed = branch.clone();
+                                discussed["properties"]["status"]["enum"] =
+                                    serde_json::json!(["discussed"]);
+                                discussed["properties"]["evidence"]["items"] =
+                                    serde_json::json!({"anyOf": evidence});
+                                variants.push(discussed);
+                            }
+                            if req.language == "auto" {
+                                let evidence = fresh_quote_schema(&req, |quote| {
+                                    validate::question_topic_matches(&e.text, quote)
+                                });
+                                if evidence.is_empty() {
+                                    continue;
+                                }
+                                branch["properties"]["evidence"]["items"] =
+                                    serde_json::json!({"anyOf": evidence});
+                            }
+                            serde_json::json!(["unclear"])
                         };
                         variants.push(branch);
                     }
@@ -705,6 +820,14 @@ impl WorkspaceRunner {
                     new_impulse["properties"]["text"]["type"] = "string".into();
                     for field in ["targetId", "targetRevision", "owner", "due"] {
                         new_impulse["properties"][field] = serde_json::json!({"type":"null"});
+                    }
+                    let mut fresh = fresh_quote_schema(&req, validate::explicit_question);
+                    if fresh.is_empty() {
+                        fresh = fresh_quote_schema(&req, validate::new_impulse_evidence_allowed);
+                    }
+                    if !fresh.is_empty() {
+                        new_impulse["properties"]["evidence"]["items"] =
+                            serde_json::json!({"anyOf": &fresh});
                     }
                     // A small model can otherwise satisfy this phase by touching the agenda
                     // and omit the already acknowledged open question. Give that question
@@ -720,11 +843,17 @@ impl WorkspaceRunner {
                         new_impulse["properties"]["evidence"]["items"] =
                             serde_json::json!({"anyOf":witnesses});
                     }
-                    variants.push(new_impulse);
-                    schema["properties"]["changes"]["items"] =
-                        serde_json::json!({"anyOf":variants});
+                    if needs_question || !fresh.is_empty() {
+                        variants.push(new_impulse);
+                    }
+                    if variants.is_empty() {
+                        schema["properties"]["changes"]["maxItems"] = 0.into();
+                    } else {
+                        schema["properties"]["changes"]["items"] =
+                            serde_json::json!({"anyOf":variants});
+                    }
                     schema["properties"]["overviewRefs"]["maxItems"] = 0.into();
-                    "PHASE IMPULSABGLEICH: Ausschließlich kind=impulse oder agenda. KEINE task, KEINE fact, KEINE decision, auch wenn sie in state stehen. Neue Fragen immer kind=impulse, status=open, attention=clarification, owner/due null, targetId/targetRevision null. Zu einer ausdrücklich fehlenden Antwort oder Zusage MUSS mindestens der wichtigste neue konkrete Frageimpuls ergänzt werden, sofern kein gleichbedeutender vorhanden ist: fehlende Budgetzusage ergibt die Frage Wie wird das Budget freigegeben. Ein Fakt über eine fehlende Zusage oder ein touched-Agendaeintrag ersetzt diesen Frageimpuls nicht. Keine Aufgabe daraus machen. Neue Impulse benötigen einen wörtlichen Beleg für das offene Thema. Vorhandene Impulse behalten; nur eine passende ausdrückliche Antwort darf ihren Status zu discussed ändern, Text bleibt null. Eine noch offene Freigabe ist keine erfolgte Freigabe. Agenda nur vorhandene id/revision: touched bei angerissenem Thema, discussed nur bei ausreichender inhaltlicher Antwort, unclear bei unklarem Bezug. Agendatext nicht ändern. Menschlich geschützte Einträge nicht ändern. overviewRefs bleibt in dieser Phase leer."
+                    include_str!("prompts/reconcile.en.txt").trim_end()
                 };
                 let question_only =
                     phase == "reconcile" && schema["properties"]["changes"]["minItems"] == 1;
@@ -732,7 +861,7 @@ impl WorkspaceRunner {
                     let repair = if attempt == 0 {
                         ""
                     } else {
-                        "\nDie vorherige Antwort wurde vollständig verworfen. Erzeuge den Auftrag erneut: ausschließlich Typen dieser Phase; jede proposalId innerhalb der Antwort genau einmal (p_1, p_2, ...); targetId/revision nur aus state oder null; neue Aufgaben nur aus window.requiredSourceIds; alle Belege wörtlich aus transcriptSources; relatedEntityIds immer []; keine fehlende Zusage als Aufgabe. Keine zuvor ungültige Antwort wird übernommen."
+                        "\nPrevious answer rejected. Retry the entire phase. Use its allowed kinds only, unique proposalIds, exact state IDs and revisions, literal source quotes and relatedEntityIds=[]. New tasks require a fresh explicit commitment."
                     };
                     let answer = match client.workspace_json(
                         &format!("{PROMPT}\n{extra}{repair}"),
@@ -889,7 +1018,7 @@ fn quote_options(text: &str) -> Vec<String> {
         }
     };
     add(text);
-    for sentence in text.split_inclusive(['.', '!', '?', '\n']) {
+    for sentence in evidence_sentences(text) {
         add(sentence);
     }
     let chars = text.chars().collect::<Vec<_>>();
@@ -900,6 +1029,72 @@ fn quote_options(text: &str) -> Vec<String> {
         add(&part);
     }
     options
+}
+
+/// Keep decimal points and spoken ordinal dates inside their literal sentence.
+fn evidence_sentences(text: &str) -> impl Iterator<Item = &str> {
+    let mut start = 0;
+    text.char_indices()
+        .chain(std::iter::once((text.len(), '\n')))
+        .filter_map(move |(index, ch)| {
+            if !matches!(ch, '.' | '!' | '?' | '。' | '！' | '？' | '\n') {
+                return None;
+            }
+            let end = (index + ch.len_utf8()).min(text.len());
+            if ch == '.'
+                && text[..index].ends_with(|c: char| c.is_ascii_digit())
+                && (text[end..].starts_with(|c: char| c.is_ascii_digit())
+                    || crate::validation::starts_named_month(&text[end..]))
+            {
+                return None;
+            }
+            let sentence = text[start..end].trim();
+            start = end;
+            (!sentence.is_empty()).then_some(sentence)
+        })
+}
+
+fn fresh_assertion_schema(
+    request: &Request,
+    allowed: impl Fn(&str) -> bool,
+) -> Vec<serde_json::Value> {
+    fresh_evidence_schema(request, |text| {
+        evidence_sentences(text)
+            .filter(|quote| (8..=600).contains(&quote.chars().count()) && allowed(quote))
+            .map(str::to_owned)
+            .collect()
+    })
+}
+
+/// Limit a structured status change to witnesses from the current window.
+fn fresh_quote_schema(request: &Request, allowed: impl Fn(&str) -> bool) -> Vec<serde_json::Value> {
+    fresh_evidence_schema(request, |text| {
+        quote_options(text)
+            .into_iter()
+            .filter(|quote| allowed(quote))
+            .collect()
+    })
+}
+
+fn fresh_evidence_schema(
+    request: &Request,
+    quotes_for: impl Fn(&str) -> Vec<String>,
+) -> Vec<serde_json::Value> {
+    request
+        .transcript_sources
+        .iter()
+        .filter(|source| request.required_source_ids().contains(&source.id))
+        .filter_map(|source| {
+            let quotes = quotes_for(&source.text);
+            (!quotes.is_empty()).then(|| serde_json::json!({
+                "type": "object", "additionalProperties": false, "required": ["sourceId", "quote"],
+                "properties": {
+                    "sourceId": {"type": "string", "enum": [source.id]},
+                    "quote": {"type": "string", "enum": quotes},
+                },
+            }))
+        })
+        .collect()
 }
 
 /// Loads only immutable complete revisions; no client, writer lock or directory creation.
@@ -914,7 +1109,7 @@ pub fn update_context(
     context: &WorkspaceContext,
 ) -> Result<(WorkspaceContext, WorkspaceState)> {
     let state = store::read(folder)?;
-    ensure!(state.revision == 0 || state.prompt_version() == PROMPT_VERSION,
+    ensure!(state.prompt_version() == PROMPT_VERSION,
         "Diese Auswertung verwendet ältere Prompts und bleibt unverändert lesbar. Eine neue lokale Auswertung starten, um mit der aktuellen Fassung weiterzuarbeiten.");
     context_store::update(folder, context)
 }

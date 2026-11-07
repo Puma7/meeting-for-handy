@@ -30,6 +30,8 @@ pub struct LiveRun {
     pub mode: String,
     pub endpoint: String,
     pub prompt_version: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prompt_profile_hash: Option<String>,
     pub language: String,
 }
 
@@ -93,6 +95,9 @@ pub(crate) fn is_hex_id(id: &str) -> bool {
 }
 
 pub(crate) fn validate_run(run: &LiveRun) -> Result<()> {
+    let workspace = crate::workspace::GENERATIONS
+        .iter()
+        .any(|(version, _)| *version == run.prompt_version);
     ensure!(
         is_hex_id(&run.id)
             && !run.meeting_id.is_empty()
@@ -106,7 +111,11 @@ pub(crate) fn validate_run(run: &LiveRun) -> Result<()> {
             && !run.prompt_version.trim().is_empty()
             && run.prompt_version.len() <= 100
             && !run.prompt_version.chars().any(char::is_control)
-            && ["de", "en"].contains(&run.language.as_str())
+            && (["de", "en"].contains(&run.language.as_str())
+                || (workspace && crate::workspace::supports_output_language(&run.language)))
+            && run.prompt_profile_hash.as_ref().is_none_or(|hash| {
+                workspace && hash.len() == 64 && hash.bytes().all(|c| c.is_ascii_hexdigit())
+            })
             && chrono::DateTime::parse_from_rfc3339(&run.created_at).is_ok(),
         "Gespeicherte Live-Zusammenfassung ist beschädigt oder nicht kompatibel."
     );

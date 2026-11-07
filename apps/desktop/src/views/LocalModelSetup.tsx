@@ -169,6 +169,34 @@ export default function LocalModelSetup({
                         : "not found"}
                   </span>
                 </div>
+                {provider.id === "lmstudio" &&
+                  Boolean(provider.loadedModels?.length) && (
+                    <div className="local-provider-loaded">
+                      <ul
+                        aria-label={de ? "Geladene Modelle" : "Loaded models"}
+                      >
+                        {provider.loadedModels?.map(
+                          ({ model, contextLength }) => (
+                            <li key={model}>
+                              {model} · {de ? "geladen" : "loaded"}
+                              {contextLength !== null && (
+                                <>
+                                  {" "}
+                                  · {contextLength.toLocaleString(locale)}{" "}
+                                  {de ? "Tokens Kontext" : "context tokens"}
+                                </>
+                              )}
+                            </li>
+                          ),
+                        )}
+                      </ul>
+                      <p className="muted">
+                        {de
+                          ? "Für eine neue HandyMeeting-Auswertung: Falls das Modell gerade nicht gebraucht wird, in LM Studio entladen und den Server laufen lassen."
+                          : "For a new HandyMeeting analysis, unload the model in LM Studio when it is idle and leave the server running."}
+                      </p>
+                    </div>
+                  )}
                 {provider.reachable && provider.models.length > 0 && (
                   <div className="local-provider-models">
                     {(recommended && provider.recommendedInstalled

@@ -60,11 +60,91 @@ export default function SettingsView({
   const [speakerStatusRoot, setSpeakerStatusRoot] =
     useState<HTMLDivElement | null>(null);
   return (
-    <>
-      <div className="settings-sections">
-        {!preferencesPersistable && (
-          <div className="notice warning">{t.preferencesError}</div>
-        )}
+    <div className="settings-sections">
+      <nav
+        className="settings-shortcuts"
+        aria-label={de ? "Einstellungsbereiche" : "Settings sections"}
+      >
+        {[
+          ...(textModelSettings
+            ? [["text-model-settings", de ? "Textmodelle" : "Text models"]]
+            : []),
+          ["app-audio-settings", de ? "App und Audio" : "App and audio"],
+          ["settings-data", de ? "Daten und Wartung" : "Data and maintenance"],
+          ["app-update-settings", de ? "Updates" : "Updates"],
+        ].map(([id, label]) => (
+          <button
+            type="button"
+            key={id}
+            className="secondary"
+            onClick={() => document.getElementById(id)?.focus()}
+          >
+            {label}
+          </button>
+        ))}
+      </nav>
+      {!preferencesPersistable && (
+        <div className="notice warning">{t.preferencesError}</div>
+      )}
+      {textModelSettings && (
+        <section
+          className="settings-group"
+          id="text-model-settings"
+          tabIndex={-1}
+        >
+          <h2>{de ? "Textmodelle" : "Text models"}</h2>
+          {textModelSettings}
+        </section>
+      )}
+      {speakerModelSettings && (
+        <>
+          <div ref={setSpeakerStatusRoot} />
+          <details className="settings-disclosure">
+            <summary>
+              {de
+                ? "Sprecherfunktionen · optional"
+                : "Speaker features · optional"}
+            </summary>
+            {speakerModelSettings(speakerStatusRoot)}
+          </details>
+        </>
+      )}
+      <section className="settings-group" id="app-audio-settings" tabIndex={-1}>
+        <h2>{de ? "App und Audio" : "App and audio"}</h2>
+        <div className="settings-grid">
+          <label>
+            {t.language}
+            <select
+              value={locale}
+              onChange={(e) => onLocale(e.target.value as Locale)}
+            >
+              <option value="de">Deutsch</option>
+              <option value="en">English</option>
+            </select>
+          </label>
+          <label>
+            {t.theme}
+            <select
+              value={theme}
+              onChange={(e) => onTheme(e.target.value as Theme)}
+            >
+              <option value="system">{t.systemTheme}</option>
+              <option value="light">{t.light}</option>
+              <option value="dark">{t.dark}</option>
+            </select>
+          </label>
+        </div>
+        <details className="settings-disclosure">
+          <summary>{de ? "Audiogeräte" : "Audio devices"}</summary>
+          <button
+            className="secondary"
+            disabled={unavailable}
+            onClick={onRefreshDevices}
+          >
+            <RefreshCw size={15} />
+            {t.refreshDevices}
+          </button>
+        </details>
         <details className="settings-disclosure" open={!app?.handy?.executable}>
           <summary>{t.installation}</summary>
           <p>{t.executableHelp}</p>
@@ -107,62 +187,9 @@ export default function SettingsView({
               : "Choose another program in the operating system's file dialog. Manual approvals last for this app session; a typed path does not grant permission to start it."}
           </p>
         </details>
-        {textModelSettings && (
-          <section id="text-model-settings" tabIndex={-1}>
-            <h2>{de ? "Textmodelle" : "Text models"}</h2>
-            {textModelSettings}
-          </section>
-        )}
-        {speakerModelSettings && (
-          <>
-            <div ref={setSpeakerStatusRoot} />
-            <details className="settings-disclosure">
-              <summary>
-                {de
-                  ? "Sprecherfunktionen · optional"
-                  : "Speaker features · optional"}
-              </summary>
-              {speakerModelSettings(speakerStatusRoot)}
-            </details>
-          </>
-        )}
-        <section>
-          <h2>{t.theme}</h2>
-          <div className="settings-grid">
-            <label>
-              {t.language}
-              <select
-                value={locale}
-                onChange={(e) => onLocale(e.target.value as Locale)}
-              >
-                <option value="de">Deutsch</option>
-                <option value="en">English</option>
-              </select>
-            </label>
-            <label>
-              {t.theme}
-              <select
-                value={theme}
-                onChange={(e) => onTheme(e.target.value as Theme)}
-              >
-                <option value="system">{t.systemTheme}</option>
-                <option value="light">{t.light}</option>
-                <option value="dark">{t.dark}</option>
-              </select>
-            </label>
-          </div>
-        </section>
-        <details className="settings-disclosure">
-          <summary>{de ? "Audiogeräte" : "Audio devices"}</summary>
-          <button
-            className="secondary"
-            disabled={unavailable}
-            onClick={onRefreshDevices}
-          >
-            <RefreshCw size={15} />
-            {t.refreshDevices}
-          </button>
-        </details>
+      </section>
+      <section className="settings-group" id="settings-data" tabIndex={-1}>
+        <h2>{de ? "Daten und Wartung" : "Data and maintenance"}</h2>
         <details className="settings-disclosure">
           <summary>{t.storage}</summary>
           <p>{t.legacyHelp}</p>
@@ -170,8 +197,63 @@ export default function SettingsView({
             <code className="storage-path">{app.dataDirectory}</code>
           )}
         </details>
-      </div>
+        <div ref={setMaintenanceStatusRoot} />
+        <details className="settings-disclosure">
+          <summary>
+            {de
+              ? "Aufbewahrung, Archiv und Suchindex"
+              : "Retention, archive and search index"}
+          </summary>
+          {api.rebuildSearchIndex && (
+            <section className="legacy-panel">
+              <h2>{de ? "Lokaler Suchindex" : "Local search index"}</h2>
+              <p className="muted">
+                {de
+                  ? "Der Suchindex beschleunigt große Historien. Er wird lokal aus deinen Sitzungen aufgebaut; Originale werden nicht geändert."
+                  : "The local index speeds up large histories. Rebuilding never changes original sessions."}
+              </p>
+              <button
+                className="secondary"
+                disabled={unavailable}
+                onClick={onRebuildIndex}
+              >
+                <RefreshCw size={15} />
+                {de ? "Suchindex aktualisieren" : "Update search index"}
+              </button>
+            </section>
+          )}
+          <RetentionPanel
+            api={api}
+            locale={locale}
+            models={app?.handy?.models ?? []}
+            statusContainer={maintenanceStatusRoot}
+          />
+        </details>
+        <section className="legacy-panel">
+          <h2>{t.legacy}</h2>
+          <button
+            className="secondary"
+            disabled={unavailable || !api.chooseLegacyManifest}
+            onClick={onImportLegacy}
+          >
+            <FolderOpen size={15} />
+            {de
+              ? "Sitzungsdatei auswählen und nur lesbar öffnen …"
+              : "Choose session file and open read-only …"}
+          </button>
+          <details className="help-disclosure">
+            <summary>{de ? "Hinweise zum Öffnen" : "Opening guidance"}</summary>
+            <p className="muted">{t.legacyHelp}</p>
+            <p className="muted">
+              {de
+                ? "Wähle die vorhandene session.json im Dateidialog. Abbrechen verändert nichts; die Originaldateien bleiben erhalten."
+                : "Choose the existing session.json in the file dialog. Cancelling changes nothing; original files are preserved."}
+            </p>
+          </details>
+        </section>
+      </section>
       <section
+        className="settings-group"
         id="app-update-settings"
         tabIndex={-1}
         aria-label={de ? "App aktualisieren" : "Update app"}
@@ -182,56 +264,6 @@ export default function SettingsView({
           blocked={blocked || Boolean(app?.notesRunning)}
         />
       </section>
-      <div ref={setMaintenanceStatusRoot} />
-      <details className="settings-disclosure">
-        <summary>{de ? "Daten und Wartung" : "Data and maintenance"}</summary>
-        {api.rebuildSearchIndex && (
-          <section className="legacy-panel">
-            <h2>{de ? "Lokaler Suchindex" : "Local search index"}</h2>
-            <p className="muted">
-              {de
-                ? "Der Suchindex beschleunigt große Historien. Er wird lokal aus deinen Sitzungen aufgebaut; Originale werden nicht geändert."
-                : "The local index speeds up large histories. Rebuilding never changes original sessions."}
-            </p>
-            <button
-              className="secondary"
-              disabled={unavailable}
-              onClick={onRebuildIndex}
-            >
-              <RefreshCw size={15} />
-              {de ? "Suchindex aktualisieren" : "Update search index"}
-            </button>
-          </section>
-        )}
-        <RetentionPanel
-          api={api}
-          locale={locale}
-          models={app?.handy?.models ?? []}
-          statusContainer={maintenanceStatusRoot}
-        />
-      </details>
-      <section className="legacy-panel">
-        <h2>{t.legacy}</h2>
-        <button
-          className="secondary"
-          disabled={unavailable || !api.chooseLegacyManifest}
-          onClick={onImportLegacy}
-        >
-          <FolderOpen size={15} />
-          {de
-            ? "Sitzungsdatei auswählen und nur lesbar öffnen …"
-            : "Choose session file and open read-only …"}
-        </button>
-        <details className="help-disclosure">
-          <summary>{de ? "Hinweise zum Öffnen" : "Opening guidance"}</summary>
-          <p className="muted">{t.legacyHelp}</p>
-          <p className="muted">
-            {de
-              ? "Wähle die vorhandene session.json im Dateidialog. Abbrechen verändert nichts; die Originaldateien bleiben erhalten."
-              : "Choose the existing session.json in the file dialog. Cancelling changes nothing; original files are preserved."}
-          </p>
-        </details>
-      </section>
-    </>
+    </div>
   );
 }

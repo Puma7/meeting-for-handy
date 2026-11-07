@@ -21,6 +21,7 @@ fn saved_generation(
             mode: "local".into(),
             endpoint: "http://127.0.0.1:1/v1/".into(),
             prompt_version: version.into(),
+            prompt_profile_hash: None,
             language: "de".into(),
         };
         std::fs::write(metadata, serde_json::to_vec(&run).unwrap()).unwrap();
@@ -94,9 +95,18 @@ fn earlier_unlocked_generations_remain_accessible_without_merging_into_the_lates
         LEGACY_WORKSPACE_FOLDER,
         "Ältester offener Bericht",
     );
+    let v11_id = "44444444444444444444444444444444";
+    let v11 = saved_generation(
+        dir.path(),
+        v11_id,
+        "meeting",
+        V11_PROMPT_VERSION,
+        "workspace-v11",
+        "Entwurf aus der vorigen Fassung",
+    );
     let before = history_bytes(dir.path());
     let listing = crate::live::list_workspace_history(dir.path(), "meeting").unwrap();
-    assert_eq!(listing.entries.len(), 3);
+    assert_eq!(listing.entries.len(), 4);
     assert_eq!(listing.unreadable_entries, 0);
     let saved =
         crate::live::read_workspace_history(dir.path(), "meeting", old_id, PREVIOUS_PROMPT_VERSION)
@@ -119,7 +129,16 @@ fn earlier_unlocked_generations_remain_accessible_without_merging_into_the_lates
             .text,
         "Ältester offener Bericht"
     );
+    assert_eq!(
+        crate::live::read_workspace_history(dir.path(), "meeting", v11_id, V11_PROMPT_VERSION)
+            .unwrap()
+            .workspace
+            .entities[0]
+            .text,
+        "Entwurf aus der vorigen Fassung",
+    );
     assert_eq!(history_bytes(dir.path()), before);
+    assert!(WorkspaceRunner::open(&v11).is_err());
     assert!(WorkspaceRunner::open(&old).is_err());
     assert_eq!(
         read_state(&current).unwrap().entities[0].text,
@@ -192,5 +211,37 @@ fn damaged_newer_history_is_reported_without_hiding_or_repairing_the_older_gener
             .text,
         "Früherer Bericht"
     );
+    assert_eq!(history_bytes(dir.path()), before);
+}
+
+#[test]
+fn context_only_workspace_is_still_readable_under_its_original_prompt() {
+    let dir = tempfile::tempdir().unwrap();
+    let id = "11111111111111111111111111111111";
+    let folder = saved_generation(
+        dir.path(),
+        id,
+        "meeting",
+        V11_PROMPT_VERSION,
+        "workspace-v11",
+        "Earlier draft",
+    );
+    std::fs::remove_file(folder.join("revision-00000001.json")).unwrap();
+    let context = WorkspaceContext {
+        shared_notes: vec![SharedNote {
+            id: "h_note".into(),
+            revision: 1,
+            text: "A shared note from the older version".into(),
+        }],
+        ..Default::default()
+    };
+    let context = context_store::update(&folder, &context).unwrap().0;
+    let before = history_bytes(dir.path());
+    let saved =
+        crate::live::read_workspace_history(dir.path(), "meeting", id, V11_PROMPT_VERSION).unwrap();
+    assert_eq!(saved.workspace.revision, 0);
+    assert_eq!(saved.workspace.context, context);
+    assert_eq!(saved.workspace.prompt_version(), V11_PROMPT_VERSION);
+    assert!(update_context(&folder, &context).is_err());
     assert_eq!(history_bytes(dir.path()), before);
 }

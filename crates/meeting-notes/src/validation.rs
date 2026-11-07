@@ -275,6 +275,99 @@ const DATE_NOUNS: &[&str] = &[
     "december",
 ];
 
+pub(crate) fn starts_named_month(text: &str) -> bool {
+    let word = text
+        .trim_start()
+        .split(|c: char| !c.is_alphabetic())
+        .next()
+        .unwrap_or_default();
+    matches!(
+        word.to_lowercase().as_str(),
+        "januar"
+            | "februar"
+            | "märz"
+            | "april"
+            | "mai"
+            | "juni"
+            | "juli"
+            | "august"
+            | "september"
+            | "oktober"
+            | "november"
+            | "dezember"
+            | "january"
+            | "february"
+            | "march"
+            | "may"
+            | "june"
+            | "july"
+            | "october"
+            | "december"
+    )
+}
+
+/// Recover only an unambiguous literal weekday attached to this binding sentence.
+pub(crate) fn explicit_task_weekday(quote: &str) -> Option<&str> {
+    if new_task_commitment(quote) != Commitment::Binding {
+        return None;
+    }
+    let spans = commitment_word_spans(quote);
+    let lower: Vec<_> = spans.iter().map(|(_, word)| word.to_lowercase()).collect();
+    if lower.iter().any(|word| {
+        matches!(
+            word.as_str(),
+            "and" | "or" | "und" | "oder" | "then" | "dann"
+        )
+    }) {
+        return None;
+    }
+    let mut weekdays = lower.iter().enumerate().filter_map(|(index, marker)| {
+        if !matches!(marker.as_str(), "by" | "bis") {
+            return None;
+        }
+        let mut next = index + 1;
+        if lower.get(next).is_some_and(|word| word == "zum") {
+            next += 1;
+        }
+        if !matches!(
+            lower.get(next)?.as_str(),
+            "monday"
+                | "tuesday"
+                | "wednesday"
+                | "thursday"
+                | "friday"
+                | "saturday"
+                | "sunday"
+                | "montag"
+                | "dienstag"
+                | "mittwoch"
+                | "donnerstag"
+                | "freitag"
+                | "samstag"
+                | "sonntag"
+        ) {
+            return None;
+        }
+        let (day_start, day) = spans[next];
+        let between = &quote[spans[index].0 + spans[index].1.len()..day_start];
+        let tail = quote[day_start + day.len()..]
+            .trim()
+            .trim_end_matches(['.', '!']);
+        // Additional date detail or alternatives would make the bare weekday
+        // incomplete. Keep an ordinary German separable verb particle.
+        (!between.contains(|c: char| !c.is_whitespace() && !c.is_alphabetic())
+            && (tail.is_empty()
+                || (marker == "bis"
+                    && matches!(
+                        tail,
+                        "ab" | "an" | "auf" | "ein" | "mit" | "vor" | "zu" | "fertig"
+                    ))))
+        .then_some(day)
+    });
+    let weekday = weekdays.next()?;
+    weekdays.next().is_none().then_some(weekday)
+}
+
 /// Whether the words after a hedge form a date ("bis Freitag", "am 3. Mai", "next week").
 fn starts_date(words: &[&str]) -> bool {
     let is_date = |word: &&str| {

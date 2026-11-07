@@ -43,8 +43,11 @@ impl Server {
                         let (path, body) = read(&mut stream);
                         seen.lock().unwrap().push((path.clone(), body.clone()));
                         let (status, reply) = handler(&path, &body);
-                        let bytes = reply.to_string();
-                        let response = format!("HTTP/1.1 {status} Synthetic\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{bytes}", bytes.len());
+                        let (kind, bytes) = match reply {
+                            Value::String(stream) => ("text/event-stream", stream),
+                            value => ("application/json", value.to_string()),
+                        };
+                        let response = format!("HTTP/1.1 {status} Synthetic\r\nContent-Type: {kind}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{bytes}", bytes.len());
                         let _ = stream.write_all(response.as_bytes());
                     }
                     Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
@@ -595,6 +598,32 @@ fn ollama_pins_before_text_and_last_user_releases_after_all_client_clones() {
     );
 }
 
+#[test]
+fn lm_studio_setup_reports_loaded_context_without_changing_instances() {
+    let server = Server::new(|path, body| {
+        assert_eq!(path, "/api/v1/models");
+        assert!(body.is_null());
+        (
+            200,
+            json!({"models":[
+                {"type":"llm","key":"selected","loaded_instances":[{"id":"foreign","config":{"context_length":8192}}]},
+                {"type":"llm","key":"downloaded-only","loaded_instances":[]},
+                {"type":"llm","key":"two","loaded_instances":[{"id":"a","config":{"context_length":4096}},{"id":"b","config":{"context_length":8192}}]},
+                {"type":"embedding","key":"embedding","loaded_instances":[{"id":"c"}]}
+            ]}),
+        )
+    });
+    let found = meeting_notes::residency::lm_studio_loaded_models(&server.endpoint).unwrap();
+    assert_eq!(
+        serde_json::to_value(found).unwrap(),
+        json!([
+            {"model":"selected","contextLength":8192},
+            {"model":"two","contextLength":null}
+        ])
+    );
+    assert_eq!(server.seen().len(), 1);
+}
+
 /// Checks instance-specific inference and proves the unrelated loaded instance is never unloaded.
 #[test]
 fn lm_studio_uses_its_explicit_instance_and_never_unloads_the_foreign_one() {
@@ -626,6 +655,85 @@ fn lm_studio_uses_its_explicit_instance_and_never_unloads_the_foreign_one() {
     assert!(!seen
         .iter()
         .any(|(_, b)| b.get("instance_id") == Some(&json!("foreign"))));
+}
+
+/// A model can spend the entire structured response budget on reasoning before emitting JSON.
+#[test]
+fn workspace_disables_reasoning_only_when_selected_lm_studio_model_supports_it() {
+    use meeting_notes::live::{LiveRunner, LiveText, Trigger};
+    for supports_off in [true, false] {
+        let server = Server::new(move |path, body| match path {
+            "/api/v1/models" => {
+                let mut selected =
+                    json!({"type":"llm","key":"synthetic","size_bytes":1,"loaded_instances":[]});
+                if supports_off {
+                    selected["capabilities"]["reasoning"] =
+                        json!({"allowed_options":["on","off"],"default":"on"});
+                }
+                (
+                    200,
+                    json!({"models":[selected,{"type":"llm","key":"foreign","loaded_instances":[{"id":"foreign"}],"capabilities":{"reasoning":{"allowed_options":["on","off"]}}}]}),
+                )
+            }
+            "/v1/chat/completions" if body["stream"] == true => {
+                let selected_off = body["reasoning_effort"] == "none";
+                if selected_off != supports_off {
+                    return (200, json!("data: {\"choices\":[{\"delta\":{\"reasoning_content\":\"thinking\"},\"finish_reason\":\"length\"}]}\n"));
+                }
+                let input: Value =
+                    serde_json::from_str(body["messages"][1]["content"].as_str().unwrap()).unwrap();
+                let answer = json!({"contractVersion":"meeting-update-1","requestId":input["requestId"],"changes":[],"overviewRefs":[],"unresolvedContextIds":[],"moreChangesPossible":false});
+                let event = json!({"choices":[{"delta":{"content":answer.to_string()},"finish_reason":"stop"}]});
+                (200, json!(format!("data: {event}\n\n")))
+            }
+            _ => lm(path, body),
+        });
+        let conn = server.connection();
+        let pool = LocalModelPool::default();
+        let lease = pool.reserve(&conn, LocalProvider::LmStudio).unwrap();
+        let root = tempfile::tempdir().unwrap();
+        let mut runner = LiveRunner::start_workspace(root.path(), "synthetic-meeting", conn, "de")
+            .unwrap()
+            .with_workspace(Default::default())
+            .unwrap()
+            .with_residency(lease)
+            .unwrap();
+        let pending = runner.pending(&[LiveText {
+            key: "synthetic-tentative".into(),
+            track: "system".into(),
+            start_ms: 0,
+            end_ms: 3000,
+            text: "Vielleicht sprechen wir später über die Dokumentation.".into(),
+        }]);
+        runner
+            .update(&pending, Trigger::Manual, &AnalysisControl::default())
+            .unwrap();
+        assert_eq!(runner.view().workspace.as_ref().unwrap().revision, 1);
+        drop(runner);
+        let requests = server.seen();
+        let phases: Vec<_> = requests
+            .iter()
+            .filter(|(path, _)| path == "/v1/chat/completions")
+            .collect();
+        let purposes: Vec<_> = phases
+            .iter()
+            .map(|(_, body)| {
+                let input: Value =
+                    serde_json::from_str(body["messages"][1]["content"].as_str().unwrap()).unwrap();
+                input["purpose"].clone()
+            })
+            .collect();
+        assert_eq!(purposes, vec![json!("facts"), json!("reconcile")]);
+        for (_, body) in phases {
+            assert_eq!(body["model"], "owned");
+            assert_eq!(body["response_format"]["json_schema"]["strict"], true);
+            assert_eq!(
+                body.get("reasoning_effort"),
+                supports_off.then_some(&json!("none"))
+            );
+        }
+        assert_eq!(requests.last().unwrap().1["instance_id"], "owned");
+    }
 }
 
 /// Refuses a reused foreign instance instead of claiming ownership or sending text to it.

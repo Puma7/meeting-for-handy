@@ -375,6 +375,7 @@ export interface SavedWorkspace extends WorkspaceHistoryEntry {
 }
 export interface LiveNotesRequest {
   workspace?: WorkspaceContext;
+  workspacePrompt?: string;
   meetingId: string;
   endpoint: string;
   model: string;
@@ -383,8 +384,19 @@ export interface LiveNotesRequest {
   apiKey: string;
   useSavedKey: boolean;
   intervalMs: number;
-  language: Locale;
+  language: WorkspaceOutputLanguage;
 }
+
+export const WORKSPACE_OUTPUT_LANGUAGES = [
+  "auto",
+  "de",
+  "en",
+  "ru",
+  "zh",
+] as const;
+export type WorkspaceOutputLanguage =
+  (typeof WORKSPACE_OUTPUT_LANGUAGES)[number];
+
 export interface LocalModelProvider {
   id: "ollama" | "lmstudio";
   name: string;
@@ -392,6 +404,7 @@ export interface LocalModelProvider {
   reachable: boolean;
   models: string[];
   recommendedInstalled: boolean;
+  loadedModels?: { model: string; contextLength: number | null }[];
 }
 export interface LocalModelSetupInfo {
   totalMemoryBytes: number | null;

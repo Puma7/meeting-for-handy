@@ -72,20 +72,27 @@ export default function WorkspaceBridge({
   model,
   apiKey = "",
   useSavedKey = false,
+  outputLanguage,
+  workspacePrompt,
   ...presentation
 }: {
   api: DesktopApi;
   meeting: Meeting;
+  batchTranscription?: boolean;
   onBack: () => void;
   endpoint: string;
   selectedFile?: string | null;
   model: string;
   apiKey?: string;
   useSavedKey?: boolean;
+  outputLanguage?: import("../types").WorkspaceOutputLanguage;
+  workspacePrompt?: string | null;
   mode?: "local" | "cloud";
   theme?: "light" | "dark" | "system";
   onThemeChange?: (theme: "light" | "dark") => void;
   onModelSettings?: () => void;
+  onCopyTranscript?: () => void;
+  transcriptCopied?: boolean;
   onStopRecording?: () => void;
   stopping?: boolean;
   onTogglePause?: () => void;
@@ -132,6 +139,8 @@ export default function WorkspaceBridge({
           ...request,
           apiKey: useSavedKey ? "" : apiKey,
           useSavedKey,
+          language: outputLanguage ?? request.language,
+          ...(workspacePrompt?.trim() ? { workspacePrompt } : {}),
         }),
       stop: () => api.stopLiveNotes!(),
       refresh: () => api.refreshLiveNotes!(),
@@ -143,7 +152,7 @@ export default function WorkspaceBridge({
         ? (file: string) => api.getSourceAudio!(meeting.id, file)
         : undefined,
     }),
-    [api, meeting.id, apiKey, useSavedKey],
+    [api, meeting.id, apiKey, useSavedKey, outputLanguage, workspacePrompt],
   );
   if (
     !api.startLiveNotes ||

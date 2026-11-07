@@ -57,6 +57,7 @@ import {
   uid,
 } from "./domain";
 import { de, en, extraDe, extraEn } from "./i18n";
+import { WORKSPACE_OUTPUT_LANGUAGES } from "./types";
 import type {
   AnalysisResult,
   AnalysisStep,
@@ -72,6 +73,7 @@ import type {
   PendingAnalysis,
   SkippedAnalysis,
   Theme,
+  WorkspaceOutputLanguage,
 } from "./types";
 
 const PREFS_KEY = "handymeeting.rust.beta.preferences.v1";
@@ -114,12 +116,16 @@ const LIVE_PREFS_KEY = "handymeeting.rust.live-notes.v1";
 function loadLivePreferences(): LivePreferences & {
   endpoint: string | null;
   model: string | null;
+  workspaceLanguage: WorkspaceOutputLanguage;
+  workspacePrompt: string | null;
 } {
   const fallback = {
     auto: false,
     intervalMinutes: 3,
     endpoint: null,
     model: null,
+    workspaceLanguage: "auto" as const,
+    workspacePrompt: null,
   };
   try {
     const value = JSON.parse(localStorage.getItem(LIVE_PREFS_KEY) ?? "{}");
@@ -134,6 +140,15 @@ function loadLivePreferences(): LivePreferences & {
         : 3,
       endpoint: text(value.endpoint, 4096),
       model: text(value.model, 300),
+      workspaceLanguage:
+        WORKSPACE_OUTPUT_LANGUAGES.find(
+          (lang) => lang === value.workspaceLanguage,
+        ) ?? "auto",
+      workspacePrompt:
+        typeof value.workspacePrompt === "string" &&
+        value.workspacePrompt.length <= 600
+          ? value.workspacePrompt
+          : null,
     };
   } catch {
     return fallback;
@@ -179,6 +194,12 @@ export default function App({ api = desktopApi }: { api?: DesktopApi }) {
     auto: savedLive.auto,
     intervalMinutes: savedLive.intervalMinutes,
   });
+  const [workspaceLanguage, setWorkspaceLanguage] = useState(
+    savedLive.workspaceLanguage,
+  );
+  const [workspacePrompt, setWorkspacePrompt] = useState(
+    savedLive.workspacePrompt,
+  );
   const [liveFocus, setLiveFocus] = useState(false);
   const [locale, setLocale] = useState<Locale>(preferences.locale),
     [theme, setTheme] = useState<Theme>(preferences.theme);
@@ -576,12 +597,25 @@ export default function App({ api = desktopApi }: { api?: DesktopApi }) {
           : {};
       localStorage.setItem(
         LIVE_PREFS_KEY,
-        JSON.stringify({ ...base, ...livePreferences, ...local }),
+        JSON.stringify({
+          ...base,
+          ...livePreferences,
+          ...local,
+          workspaceLanguage,
+          workspacePrompt,
+        }),
       );
     } catch {
       // Preferences are a convenience; the live summary works without them.
     }
-  }, [livePreferences, mode, endpoint, textModel]);
+  }, [
+    livePreferences,
+    mode,
+    endpoint,
+    textModel,
+    workspaceLanguage,
+    workspacePrompt,
+  ]);
   useEffect(
     () => () => {
       if (copyTimer.current) clearTimeout(copyTimer.current);
@@ -1930,6 +1964,10 @@ export default function App({ api = desktopApi }: { api?: DesktopApi }) {
       refreshModels={() => void localTextModels.refresh()}
       manualModel={manualTextModel}
       setManualModel={setManualTextModel}
+      workspaceLanguage={workspaceLanguage}
+      setWorkspaceLanguage={setWorkspaceLanguage}
+      workspacePrompt={workspacePrompt}
+      setWorkspacePrompt={setWorkspacePrompt}
     />
   );
   /**
@@ -2114,6 +2152,12 @@ export default function App({ api = desktopApi }: { api?: DesktopApi }) {
           key={shownMeeting.id}
           api={api}
           meeting={shownMeeting}
+          batchTranscription={app?.handy?.models.some(
+            (model) =>
+              model.id === shownMeeting.modelId &&
+              !model.supportsStreaming &&
+              model.supportsBatch,
+          )}
           onBack={() => chooseClassicMeetingView(true)}
           notices={workspaceNotices}
           selectedFile={
@@ -2128,12 +2172,16 @@ export default function App({ api = desktopApi }: { api?: DesktopApi }) {
           mode={mode}
           theme={theme}
           onThemeChange={setTheme}
+          outputLanguage={workspaceLanguage}
+          workspacePrompt={workspacePrompt}
           onModelSettings={() => {
             void navigate("settings");
             requestAnimationFrame(() => {
               document.getElementById("text-model-settings")?.focus();
             });
           }}
+          onCopyTranscript={() => void copyFullTranscript(shownMeeting)}
+          transcriptCopied={copied === "transcript"}
           onStopRecording={
             page === "meeting" && recording ? () => void stop() : undefined
           }

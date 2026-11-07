@@ -310,6 +310,7 @@ pub(crate) struct Request {
     pub contract_version: String,
     pub request_id: String,
     pub language: String,
+    pub presentation_instructions: String,
     pub purpose: String,
     window: Window,
     #[serde(serialize_with = "serialize_sources")]
@@ -351,6 +352,7 @@ impl Request {
             contract_version: super::CONTRACT_VERSION.into(),
             request_id: id,
             language: "de".into(),
+            presentation_instructions: String::new(),
             purpose: "live_update".into(),
             window: Window {
                 source_revision: format!("tx_{}", previous.revision),
