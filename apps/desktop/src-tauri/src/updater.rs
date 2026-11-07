@@ -102,25 +102,22 @@ struct Asset {
     digest: Option<String>,
     browser_download_url: String,
 }
-fn version(value: &str) -> Result<(u32, u32, u32)> {
-    let parts = value
-        .split('.')
-        .map(str::parse::<u32>)
-        .collect::<std::result::Result<Vec<_>, _>>()
-        .map_err(|_| "Unsupported release version")?;
-    if parts.len() != 3 {
-        return Err("Unsupported release version".into());
-    }
-    Ok((parts[0], parts[1], parts[2]))
+fn version(value: &str) -> Result<semver::Version> {
+    semver::Version::parse(value).map_err(|_| "Unsupported release version".into())
 }
 fn candidate(release: Release, current: &str, platform: Platform) -> Result<Option<Candidate>> {
     let tag = release
         .tag_name
         .strip_prefix('v')
         .ok_or("Unexpected release tag")?;
-    let newer = version(tag)? > version(current)?;
+    let target = version(tag)?;
+    // The installed app may be a beta, but this channel only offers stable tags.
+    // Build metadata has no SemVer precedence and must never create an upgrade.
+    let newer = target.cmp_precedence(&version(current)?) == std::cmp::Ordering::Greater;
     if release.draft
         || release.prerelease
+        || !target.pre.is_empty()
+        || !target.build.is_empty()
         || release.html_url != format!("{RELEASES}/tag/{}", release.tag_name)
     {
         return Err("Unexpected official release metadata".into());
@@ -198,7 +195,9 @@ fn own_partial(name: &str) -> bool {
         .and_then(|rest| rest.strip_suffix(PARTIAL_SUFFIX))
         .and_then(|rest| rest.rsplit_once('-'))
         .is_some_and(|(release, id)| {
-            version(release).is_ok() && id.len() == 32 && id.bytes().all(|b| b.is_ascii_hexdigit())
+            version(release).is_ok_and(|v| v.pre.is_empty() && v.build.is_empty())
+                && id.len() == 32
+                && id.bytes().all(|b| b.is_ascii_hexdigit())
         })
 }
 /// Deletes its unfinished download unless the verified file was published.
@@ -531,6 +530,33 @@ mod tests {
         downloads: false,
     };
     #[test]
+    fn beta_current_version_can_select_the_stable_release_without_metadata_upgrades() {
+        let stable = || {
+            let mut r = release();
+            r.tag_name = "v1.1.0".into();
+            r.html_url = format!("{RELEASES}/tag/v1.1.0");
+            r
+        };
+        for current in ["1.1.0-beta.1", "1.1.0-beta.10+build.3", "1.0.7"] {
+            let found = candidate(stable(), current, LINUX).unwrap().unwrap();
+            assert_eq!(found.version, "1.1.0");
+            assert!(found.installer.is_none());
+        }
+        for current in ["1.1.0", "1.1.0+build.3", "1.1.1-beta.1", "2.0.0"] {
+            assert!(candidate(stable(), current, LINUX).unwrap().is_none());
+        }
+        for current in ["1.1", "01.1.0", "1.1.0-01", "1.1.0-", "1.1.0+"] {
+            assert!(candidate(stable(), current, LINUX).is_err());
+        }
+        for tag in ["1.2.0-beta.1", "1.2.0+build.3", "01.2.0"] {
+            let mut r = stable();
+            r.tag_name = format!("v{tag}");
+            r.html_url = format!("{RELEASES}/tag/v{tag}");
+            // Stable-channel checks reject even incorrectly labelled prerelease tags.
+            assert!(candidate(r, "1.1.0-beta.1", LINUX).is_err());
+        }
+    }
+    #[test]
     fn release_selection_rejects_drafts_bad_digests_and_foreign_origins() {
         assert!(candidate(release(), "1.0.1", WINDOWS).unwrap().is_some());
         assert!(candidate(release(), "1.0.2", WINDOWS).unwrap().is_none());
@@ -711,6 +737,8 @@ mod tests {
             "notes.partial".to_owned(),
             format!("HandyMeeting-1.0.3-short{PARTIAL_SUFFIX}"),
             format!("Other-1.0.3-{id}{PARTIAL_SUFFIX}"),
+            format!("HandyMeeting-1.1.0-beta.1-{id}{PARTIAL_SUFFIX}"),
+            format!("HandyMeeting-1.1.0+build.3-{id}{PARTIAL_SUFFIX}"),
         ];
         fs::write(root.join(&own), b"stale").unwrap();
         for name in &kept {

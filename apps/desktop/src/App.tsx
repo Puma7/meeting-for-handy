@@ -1,3 +1,6 @@
+import { workspaceStorageKey } from "./workspace/workspaceStorage";
+import { lazy, Suspense } from "react";
+const WorkspaceBridge = lazy(() => import("./workspace/WorkspaceBridge"));
 import EraseMeetingDialog from "./views/EraseMeetingDialog";
 import PendingErasures from "./views/PendingErasures";
 import MeetingLabels from "./views/MeetingLabels";
@@ -141,6 +144,28 @@ function loadLivePreferences(): LivePreferences & {
  * feedback. Child actions are bound to meeting IDs rather than display titles.
  */
 export default function App({ api = desktopApi }: { api?: DesktopApi }) {
+  const [classicMeetingView, setClassicMeetingView] = useState(() => {
+    try {
+      return (
+        localStorage.getItem("handymeeting.meeting-view.full-window.v1") !==
+        "workspace"
+      );
+    } catch {
+      return true;
+    }
+  });
+  /** Select the standard meeting view without discarding native recording or saved workspace state. */
+  function chooseClassicMeetingView(classic: boolean) {
+    setClassicMeetingView(classic);
+    try {
+      localStorage.setItem(
+        "handymeeting.meeting-view.full-window.v1",
+        classic ? "classic" : "workspace",
+      );
+    } catch {
+      // The view can still be changed for this window.
+    }
+  }
   const [erasureTarget, setErasureTarget] = useState<MeetingSummary | null>(
     null,
   );
@@ -392,7 +417,9 @@ export default function App({ api = desktopApi }: { api?: DesktopApi }) {
     handyRefreshFailure !== null ? [] : (app?.handy?.models ?? [])
   ).filter(
     (item) =>
-      item.isDownloaded && item.supportsStreaming && !item.compatibilityError,
+      item.isDownloaded &&
+      (item.supportsStreaming || item.supportsBatch) &&
+      !item.compatibilityError,
   );
   const canEraseMeeting = Boolean(
     api.previewMeetingErasure &&
@@ -402,6 +429,10 @@ export default function App({ api = desktopApi }: { api?: DesktopApi }) {
       api.cancelMaintenance,
   );
   const recording = app?.recording ?? false;
+  const agentOwnsCapture = Boolean(
+    app?.agent?.activeCapture &&
+      app.agent.ownedSessionId === app.activeMeeting?.id,
+  );
   const catchingUp =
     !recording &&
     ["catching-up", "streaming"].includes(app?.activeMeeting?.status ?? "");
@@ -675,7 +706,9 @@ export default function App({ api = desktopApi }: { api?: DesktopApi }) {
       }
     } else if (!initialModelSelected.current && models.length) {
       initialModelSelected.current = true;
-      setModelId(models[0].id);
+      setModelId(
+        (models.find((item) => item.supportsStreaming) ?? models[0]).id,
+      );
     }
   }, [app?.handy, modelId, handyRefreshFailure, t.modelUnavailable]);
   /**
@@ -1264,14 +1297,37 @@ export default function App({ api = desktopApi }: { api?: DesktopApi }) {
     setHistory((current) => current.filter((item) => item.id !== id));
     setErasureTarget(null);
     setErasureRevision((value) => value + 1);
+    let workspaceCleanupFailed = false;
+    try {
+      const base = workspaceStorageKey(id);
+      const keys = [];
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (key === base || key?.startsWith(base + ".")) keys.push(key);
+      }
+      // Enumerate first so removals cannot shift the next key past the cursor.
+      for (const key of keys) {
+        try {
+          localStorage.removeItem(key);
+        } catch {
+          workspaceCleanupFailed = true;
+        }
+      }
+    } catch {
+      workspaceCleanupFailed = true;
+    }
     setErasureNotice(
-      preservedAtomicRemnants > 0
+      workspaceCleanupFailed
         ? locale === "de"
-          ? `Zugeordnete Meetinginhalte entfernt. ${preservedAtomicRemnants} unterbrochene Dateien sind nicht sicher zuordenbar und bleiben erhalten. Sie können weiterhin Meetingdaten enthalten; bitte die Ablage manuell prüfen.`
-          : `Attributed meeting contents removed. ${preservedAtomicRemnants} interrupted files cannot be assigned safely and are preserved. They may still contain meeting data; inspect storage manually.`
-        : locale === "de"
-          ? "Meetinginhalte vollständig aus der HandyMeeting-Ablage entfernt."
-          : "Meeting contents completely removed from HandyMeeting storage.",
+          ? "Die zugeordneten nativen Meetingdaten wurden gelöscht. Der lokale Notizstand konnte nicht entfernt werden. Die Löschung ist unvollständig."
+          : "Attributed native meeting data was deleted. Local workspace notes could not be removed. Erasure is incomplete."
+        : preservedAtomicRemnants > 0
+          ? locale === "de"
+            ? `Zugeordnete Meetinginhalte entfernt. ${preservedAtomicRemnants} unterbrochene Dateien sind nicht sicher zuordenbar und bleiben erhalten. Sie können weiterhin Meetingdaten enthalten; bitte die Ablage manuell prüfen.`
+            : `Attributed meeting contents removed. ${preservedAtomicRemnants} interrupted files cannot be assigned safely and are preserved. They may still contain meeting data; inspect storage manually.`
+          : locale === "de"
+            ? "Meetinginhalte vollständig aus der HandyMeeting-Ablage entfernt."
+            : "Meeting contents completely removed from HandyMeeting storage.",
     );
     void refreshHistory().catch((failure) => setError(errorMessage(failure)));
     void api
@@ -1966,6 +2022,173 @@ export default function App({ api = desktopApi }: { api?: DesktopApi }) {
       />
     ) : undefined;
 
+  /** Apply a native pause change while retaining failures for the current recording. */
+  function changeCapturePause(paused: boolean) {
+    const id = app?.activeMeeting?.id;
+    if (!id || !api.setCapturePaused) return;
+    void action(async () => {
+      const state = await api.setCapturePaused!(id, paused);
+      requestSequence.current++;
+      setApp(state);
+    });
+  }
+  /** Change microphone muting through the native controller and surface failed actions. */
+  function changeMicrophoneMute(muted: boolean) {
+    const id = app?.activeMeeting?.id;
+    if (!id || !api.setMicrophoneMuted) return;
+    void action(async () => {
+      const state = await api.setMicrophoneMuted!(id, muted);
+      requestSequence.current++;
+      setApp(state);
+    });
+  }
+
+  const erasureStatus = erasureNotice ? (
+    <p role="status" className="notice">
+      {erasureNotice}
+    </p>
+  ) : undefined;
+  const deviceNotices = (
+    <DeviceNotices
+      losses={deviceLosses.filter((loss) => !loss.dismissed)}
+      locale={locale}
+      t={t}
+      onDismiss={(loss) =>
+        updateDeviceLosses(
+          deviceLossesRef.current.map((item) =>
+            item === loss ? { ...item, dismissed: true } : item,
+          ),
+        )
+      }
+    />
+  );
+  const pendingAgentRequest = app?.agent?.pending?.status === "pending";
+  const workspaceNotices =
+    pendingAgentRequest ||
+    erasureNotice ||
+    deviceLosses.some((loss) => !loss.dismissed) ? (
+      <>
+        {pendingAgentRequest && (
+          <div role="alert" className="notice warning workspace-agent-notice">
+            <span>
+              {locale === "de"
+                ? "Neue Aufnahmeanfrage eines Agenten."
+                : "New recording request from an agent."}
+            </span>
+            <button
+              type="button"
+              onClick={() => chooseClassicMeetingView(true)}
+            >
+              {locale === "de" ? "Anfrage prüfen" : "Review request"}
+            </button>
+          </div>
+        )}
+        {erasureStatus}
+        {deviceNotices}
+      </>
+    ) : undefined;
+  const meetingWorkspaceAvailable = Boolean(
+    (page === "meeting" || page === "detail") &&
+      shownMeeting &&
+      !shownMeeting.readOnly &&
+      api.startLiveNotes &&
+      api.getLiveNotes &&
+      api.setWorkspaceContext &&
+      api.stopLiveNotes &&
+      api.refreshLiveNotes &&
+      api.setLiveNotesInterval &&
+      api.localModelSetup,
+  );
+  const meetingWorkspace =
+    meetingWorkspaceAvailable && !classicMeetingView && shownMeeting ? (
+      <Suspense
+        fallback={
+          <div role="status">
+            {locale === "de"
+              ? "Meetingansicht wird geöffnet …"
+              : "Opening meeting workspace …"}
+          </div>
+        }
+      >
+        <WorkspaceBridge
+          key={shownMeeting.id}
+          api={api}
+          meeting={shownMeeting}
+          onBack={() => chooseClassicMeetingView(true)}
+          notices={workspaceNotices}
+          selectedFile={
+            searchSource?.meetingId === shownMeeting.id
+              ? searchSource.file
+              : null
+          }
+          endpoint={endpoint}
+          model={textModel}
+          apiKey={apiKey}
+          useSavedKey={useSavedKey}
+          mode={mode}
+          theme={theme}
+          onThemeChange={setTheme}
+          onModelSettings={() => {
+            void navigate("settings");
+            requestAnimationFrame(() => {
+              document.getElementById("text-model-settings")?.focus();
+            });
+          }}
+          onStopRecording={
+            page === "meeting" && recording ? () => void stop() : undefined
+          }
+          onTogglePause={
+            page === "meeting" &&
+            recording &&
+            connected &&
+            !agentOwnsCapture &&
+            api.setCapturePaused
+              ? () => changeCapturePause(!app?.captureControl?.paused)
+              : undefined
+          }
+          paused={Boolean(app?.captureControl?.paused)}
+          onToggleMute={
+            page === "meeting" &&
+            recording &&
+            connected &&
+            !agentOwnsCapture &&
+            micEnabled &&
+            api.setMicrophoneMuted
+              ? () =>
+                  changeMicrophoneMute(!app?.captureControl?.microphoneMuted)
+              : undefined
+          }
+          muted={Boolean(app?.captureControl?.microphoneMuted)}
+          captureError={app?.error}
+          actionError={error}
+          onDismissError={() => setError(null)}
+          stopping={isStopping}
+          language={locale}
+        />
+      </Suspense>
+    ) : undefined;
+  const classicViewSwitcher =
+    meetingWorkspaceAvailable && classicMeetingView ? (
+      <button
+        className="secondary"
+        type="button"
+        onClick={() => chooseClassicMeetingView(false)}
+      >
+        {locale === "de"
+          ? "Erweiterte Meetingansicht öffnen"
+          : "Open advanced meeting view"}
+      </button>
+    ) : undefined;
+
+  if (meetingWorkspace) {
+    return (
+      <>
+        {meetingWorkspace}
+        {livePreferences.auto && livePanel(true)}
+      </>
+    );
+  }
+
   return (
     <div className="app-shell">
       <Sidebar
@@ -2015,11 +2238,7 @@ export default function App({ api = desktopApi }: { api?: DesktopApi }) {
         }
       />
       <main ref={mainRef}>
-        {erasureNotice && (
-          <p role="status" className="notice">
-            {erasureNotice}
-          </p>
-        )}
+        {erasureStatus}
         {page === "history" && canEraseMeeting && (
           <PendingErasures
             api={api}
@@ -2175,18 +2394,7 @@ export default function App({ api = desktopApi }: { api?: DesktopApi }) {
             </button>
           </div>
         )}
-        <DeviceNotices
-          losses={deviceLosses.filter((loss) => !loss.dismissed)}
-          locale={locale}
-          t={t}
-          onDismiss={(loss) =>
-            updateDeviceLosses(
-              deviceLossesRef.current.map((item) =>
-                item === loss ? { ...item, dismissed: true } : item,
-              ),
-            )
-          }
-        />
+        {deviceNotices}
         {isStopping && (
           <div role="status" className="notice info">
             {t.stoppingDetail}
@@ -2216,7 +2424,9 @@ export default function App({ api = desktopApi }: { api?: DesktopApi }) {
           }
           devicesReady={Boolean(
             modelId &&
-              models.some((item) => item.id === modelId) &&
+              models.some(
+                (item) => item.id === modelId && item.supportsStreaming,
+              ) &&
               devices.some(
                 (item) => item.id === systemId && item.source === "system",
               ),
@@ -2302,24 +2512,8 @@ export default function App({ api = desktopApi }: { api?: DesktopApi }) {
                   }
                 : undefined
             }
-            onPause={(paused) => {
-              const id = app?.activeMeeting?.id;
-              if (!id || !api.setCapturePaused) return;
-              void action(async () => {
-                const state = await api.setCapturePaused!(id, paused);
-                requestSequence.current++;
-                setApp(state);
-              });
-            }}
-            onMute={(muted) => {
-              const id = app?.activeMeeting?.id;
-              if (!id || !api.setMicrophoneMuted) return;
-              void action(async () => {
-                const state = await api.setMicrophoneMuted!(id, muted);
-                requestSequence.current++;
-                setApp(state);
-              });
-            }}
+            onPause={changeCapturePause}
+            onMute={changeMicrophoneMute}
             isStopping={isStopping}
             connected={connected}
             title={title}
@@ -2373,6 +2567,7 @@ export default function App({ api = desktopApi }: { api?: DesktopApi }) {
             copyFullTranscript={() => copyFullTranscript(liveMeeting)}
             liveFocus={liveFocus}
             onLiveFocus={setLiveFocus}
+            workspaceSwitcher={classicViewSwitcher}
             liveNotes={livePanel(false)}
             refreshHandy={() => void action(() => refreshModels(false))}
             refreshDevices={() => void action(refreshDevices)}
@@ -2392,6 +2587,7 @@ export default function App({ api = desktopApi }: { api?: DesktopApi }) {
         {page === "detail" && meeting && (
           <MeetingDetail
             meeting={meeting}
+            workspaceSwitcher={classicViewSwitcher}
             onErase={
               canEraseMeeting ? () => openMeetingErasure(meeting) : undefined
             }

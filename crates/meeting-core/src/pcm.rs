@@ -8,6 +8,11 @@ use std::{
 };
 
 pub const SAMPLE_RATE: u32 = 16_000;
+// At least twenty seconds per section, then 450 ms of low amplitude can
+// close it early. The existing thirty-second hard limit still applies.
+const QUIET_SEARCH_AFTER: u64 = SAMPLE_RATE as u64 * 20;
+const QUIET_SAMPLES: usize = SAMPLE_RATE as usize * 450 / 1000;
+const QUIET_AMPLITUDE: u16 = 160;
 const CHECKPOINT_INTERVAL: Duration = Duration::from_millis(500);
 
 /// Hound serializes WAVE. Its flush updates the header and reaches sync_all here.
@@ -31,6 +36,7 @@ struct Chunk {
     writer: WaveWriter,
     part: AudioPart,
     digest: Sha256,
+    quiet_samples: usize,
 }
 
 /// One bounded writer per track. No model handles or ASR queues are involved.
@@ -124,6 +130,23 @@ impl PcmWriter {
             let count = input
                 .len()
                 .min((self.chunk_samples - chunk.part.sample_count) as usize);
+            let mut quiet_boundary = None;
+            if self.store.quiet_sections {
+                let search_from = QUIET_SEARCH_AFTER.saturating_sub(chunk.part.sample_count);
+                for (index, sample) in input[..count].iter().enumerate().skip(search_from as usize)
+                {
+                    if sample.unsigned_abs() <= QUIET_AMPLITUDE {
+                        chunk.quiet_samples += 1;
+                        if chunk.quiet_samples == QUIET_SAMPLES {
+                            quiet_boundary = Some(index + 1);
+                            break;
+                        }
+                    } else {
+                        chunk.quiet_samples = 0;
+                    }
+                }
+            }
+            let count = quiet_boundary.unwrap_or(count);
             for sample in &input[..count] {
                 chunk.writer.write_sample(*sample)?;
                 chunk.digest.update(sample.to_le_bytes());
@@ -132,7 +155,7 @@ impl PcmWriter {
             chunk.part.sample_count += count as u64;
             self.written += count as u64;
             input = &input[count..];
-            if chunk.part.sample_count == self.chunk_samples {
+            if quiet_boundary.is_some() || chunk.part.sample_count == self.chunk_samples {
                 self.close_chunk()?;
             } else {
                 self.checkpoint_if_due()?;
@@ -225,6 +248,7 @@ impl PcmWriter {
             writer,
             part,
             digest: Sha256::new(),
+            quiet_samples: 0,
         });
         Ok(())
     }

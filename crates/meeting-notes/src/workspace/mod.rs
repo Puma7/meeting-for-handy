@@ -1,0 +1,933 @@
+//! Stable, source-backed workspace updates. Models receive only explicit text DTOs.
+mod assertions;
+mod context_store;
+pub(crate) mod memory;
+mod model;
+mod store;
+#[cfg(test)]
+mod tests;
+mod validate;
+
+use crate::live::{self, LiveSource, LiveText};
+use crate::{AnalysisControl, Source, TextClient};
+use anyhow::{ensure, Context as _, Result};
+pub use model::*;
+use std::{
+    collections::HashSet,
+    fs::File,
+    path::Path,
+    sync::{Arc, Mutex},
+};
+
+pub const CONTRACT_VERSION: &str = "meeting-update-1";
+pub const PROMPT_VERSION: &str = "handymeeting-workspace-11";
+pub const PREVIOUS_PROMPT_VERSION: &str = "handymeeting-workspace-10";
+pub const LEGACY_PROMPT_VERSION: &str = "handymeeting-workspace-9";
+pub const WORKSPACE_FOLDER: &str = "workspace-v11";
+pub const PREVIOUS_WORKSPACE_FOLDER: &str = "workspace-v10";
+pub const LEGACY_WORKSPACE_FOLDER: &str = "workspace-v9";
+/// Read shared-input chronology without treating model output or confirmations as new releases.
+pub(crate) fn shared_context_timestamp(
+    folder: &Path,
+    context: &WorkspaceContext,
+) -> Result<Option<chrono::DateTime<chrono::FixedOffset>>> {
+    context_store::shared_timestamp(folder, context)
+}
+const PROMPT: &str = include_str!("system.de.txt");
+const MAX_REQUEST_CHARS: usize = 24_000;
+pub(crate) const WORKSPACE_CONTEXT_LENGTH: u64 = 8192;
+
+pub struct WorkspaceRunner {
+    folder: std::path::PathBuf,
+    state: WorkspaceState,
+    pub context: Arc<Mutex<WorkspaceContext>>,
+    _writer: File,
+    observed: std::cell::RefCell<Option<Vec<LiveSource>>>,
+}
+
+impl Drop for WorkspaceRunner {
+    fn drop(&mut self) {
+        // Explicitly end this owner's lease: an inherited/duplicated handle may
+        // otherwise retain the OS lock after our File has been closed.
+        let _ = fs2::FileExt::unlock(&self._writer);
+    }
+}
+
+impl WorkspaceRunner {
+    /// Acquire an isolated writer and restore model revisions plus the independent human-context journal.
+    pub fn open(folder: &Path) -> Result<Self> {
+        let (writer, state) = store::load(folder)?;
+        let input = context_store::read(folder, &state.context)?;
+        Ok(Self {
+            folder: folder.into(),
+            context: Arc::new(Mutex::new(input)),
+            state,
+            _writer: writer,
+            observed: Default::default(),
+        })
+    }
+
+    /// Import newer human confirmations on both fresh and resumed model runs,
+    /// retaining destination history and immutable original evidence.
+    pub fn inherit_manual(&mut self, previous: &WorkspaceState) -> Result<()> {
+        let context = self
+            .context
+            .lock()
+            .map_err(|_| anyhow::anyhow!("Meetingkontext ist gesperrt."))?
+            .clone();
+        let mut next = self.state.clone();
+        ensure!(
+            context_store::project(&self.folder, &mut next)? == context,
+            "Der Meetingkontext wurde inzwischen geändert. Aktuellen Stand verwenden."
+        );
+        let candidates: Vec<_> = previous
+            .entities
+            .iter()
+            .filter(|entity| entity.human_locked)
+            .filter(|entity| !previous.context_excluded_ids.contains(&entity.id))
+            .filter(|entity| {
+                !entity
+                    .evidence
+                    .iter()
+                    .any(|evidence| next.superseded_sources.contains(&evidence.source_id))
+            })
+            .filter(|entity| {
+                entity.kind != "agenda"
+                    || context
+                        .agenda
+                        .iter()
+                        .any(|a| a.id == entity.id && a.text == entity.text)
+            })
+            .cloned()
+            .collect();
+        let mut selected = HashSet::new();
+        for mut entity in candidates {
+            let incoming = previous.human_activity.get(&entity.id);
+            let current = next.human_activity.get(&entity.id);
+            if current.is_some_and(|at| incoming.is_none_or(|new| new <= at)) {
+                continue;
+            }
+            if let Some(old) = next.entities.iter().find(|old| old.id == entity.id) {
+                if incoming.is_none() && current.is_none() && old.human_locked {
+                    let mut same_confirmation = entity.clone();
+                    same_confirmation.revision = old.revision;
+                    ensure!(old == &same_confirmation,
+                        "Die Reihenfolge älterer menschlicher Änderungen ist unbekannt. Den gewünschten Stand im aktuellen Lauf neu bestätigen.");
+                    continue;
+                }
+                entity.revision = entity.revision.max(
+                    old.revision
+                        .checked_add(1)
+                        .context("Zu viele manuelle Eintragsfassungen.")?,
+                );
+            }
+            if let Some(at) = incoming {
+                next.human_activity.insert(entity.id.clone(), *at);
+            }
+            selected.insert(entity.id.clone());
+            // Journal replay replaces existing IDs in place. Keep the same
+            // order in memory; only genuinely new inherited IDs are appended.
+            if let Some(slot) = next.entities.iter_mut().find(|old| old.id == entity.id) {
+                *slot = entity;
+            } else {
+                next.entities.push(entity);
+            }
+        }
+        if selected.is_empty() {
+            return Ok(());
+        }
+        for event in previous
+            .events
+            .iter()
+            .filter(|event| selected.contains(&event.entity_id))
+        {
+            if !next.events.iter().any(|old| old.id == event.id) {
+                next.events.push(event.clone());
+            }
+        }
+        let source_ids: HashSet<_> = next
+            .entities
+            .iter()
+            .flat_map(|entity| entity.evidence.iter())
+            .chain(next.events.iter().flat_map(|event| event.evidence.iter()))
+            .map(|evidence| evidence.source_id.clone())
+            .collect();
+        let mut originals = Vec::new();
+        for source in previous
+            .originals
+            .iter()
+            .filter(|source| source_ids.contains(&source.id))
+        {
+            if let Some(old) = next.originals.iter().find(|old| old.id == source.id) {
+                ensure!(
+                    old == source,
+                    "Originalbeleg hat eine widersprüchliche Identität."
+                );
+            } else {
+                next.originals.push(source.clone());
+                originals.push(source.clone());
+            }
+        }
+        ensure!(
+            source_ids
+                .iter()
+                .all(|id| next.originals.iter().any(|source| &source.id == id)),
+            "Originalbelege der manuellen Änderungen fehlen."
+        );
+        for source in previous
+            .processed
+            .iter()
+            .chain(&previous.inherited_sources)
+            .filter(|source| source_ids.contains(&source_id(source)))
+        {
+            // Historical event evidence can refer to a withdrawn original.
+            // Import its retirement as well, so matching text cannot revive its authority.
+            let id = source_id(source);
+            if previous.superseded_sources.contains(&id) && !next.superseded_sources.contains(&id) {
+                next.superseded_sources.push(id);
+            }
+            if !next
+                .processed
+                .iter()
+                .chain(&next.inherited_sources)
+                .any(|old| source_id(old) == source_id(source))
+            {
+                next.inherited_sources.push(source.clone());
+            }
+        }
+        next.context_updated_at = Some(chrono::Utc::now().fixed_offset());
+        next.context = context.clone();
+        self.commit(
+            next,
+            originals,
+            vec![],
+            &AnalysisControl::default(),
+            &context,
+        )
+    }
+
+    /// Detect latest transcript chunks not yet processed, including corrections and reversions.
+    pub fn pending(&self, texts: &[LiveText]) -> Vec<LiveSource> {
+        *self.observed.borrow_mut() = Some(live::pending(&[], texts));
+        let latest = self.active_sources();
+        let mut pending = live::pending(&latest, texts);
+        // A reversion to an earlier wording is still a new current revision. Retain all
+        // original IDs in the ledger while comparing only against the latest slice.
+        let current = live::pending(&[], texts);
+        for source in &current {
+            if source.chunk == 1
+                && latest.iter().filter(|s| s.key == source.key).count()
+                    > current.iter().filter(|s| s.key == source.key).count()
+                && !pending.iter().any(|s| s.key == source.key)
+            {
+                pending.push(source.clone());
+            }
+        }
+        let mut used = self
+            .state
+            .processed
+            .iter()
+            .chain(&self.state.inherited_sources)
+            .map(|s| s.id.clone())
+            .collect::<HashSet<_>>();
+        let mut assigned = HashSet::new();
+        for source in &mut pending {
+            // A new model still processes this text, but unchanged inherited
+            // evidence retains its original identity for human-task deduplication.
+            if let Some(inherited) = self.state.inherited_sources.iter().find(|old| {
+                old.key == source.key
+                    && old.chunk == source.chunk
+                    && old.source == source.source
+                    && old.start_ms == source.start_ms
+                    && old.end_ms == source.end_ms
+                    && old.text == source.text
+                    && !assigned.contains(&old.id)
+                    && !self.state.superseded_sources.contains(&source_id(old))
+                    && !self
+                        .state
+                        .processed
+                        .iter()
+                        .any(|seen| seen.key == old.key && seen.chunk == old.chunk)
+            }) {
+                source.id.clone_from(&inherited.id);
+                assigned.insert(source.id.clone());
+                continue;
+            }
+            while used.contains(&source.id) {
+                source.id.push('r');
+            }
+            used.insert(source.id.clone());
+            assigned.insert(source.id.clone());
+        }
+        pending.sort_by(|a, b| {
+            (a.start_ms, &a.source, &a.key, a.chunk).cmp(&(b.start_ms, &b.source, &b.key, b.chunk))
+        });
+        pending
+    }
+
+    /// Select the newest processed revision of each independent transcript chunk.
+    fn active_sources(&self) -> Vec<LiveSource> {
+        latest_sources(&self.state.processed)
+            .into_iter()
+            .filter(|s| !self.state.superseded_sources.contains(&source_id(s)))
+            .collect()
+    }
+    /// Identify prior source authorities withdrawn by the current observed transcript.
+    fn changed_source_ids(&self) -> HashSet<String> {
+        self.observed
+            .borrow()
+            .as_ref()
+            .map(|current| {
+                self.state
+                    .processed
+                    .iter()
+                    .chain(&self.state.inherited_sources)
+                    .filter(|old| {
+                        !self.state.superseded_sources.contains(&source_id(old))
+                            && !current.iter().any(|new| {
+                                new.key == old.key && new.chunk == old.chunk && new.text == old.text
+                            })
+                    })
+                    .map(source_id)
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+    /// Project durable state together with the latest human context for the renderer.
+    pub fn view(&self) -> WorkspaceState {
+        let mut state = self.state.clone();
+        let mut projected = state.clone();
+        if context_store::project(&self.folder, &mut projected).is_ok() {
+            state = projected;
+        }
+        state
+    }
+    /// Report whether shared inputs changed or an original-source replay remains unfinished.
+    pub fn context_dirty(&self) -> bool {
+        !self.changed_source_ids().is_empty()
+            || self.state.replay_cursor.is_some()
+            || self.context.lock().is_ok_and(|c| *c != self.state.context)
+    }
+    /// Return the isolated workspace persistence directory for controlled context transactions.
+    pub fn folder(&self) -> std::path::PathBuf {
+        self.folder.clone()
+    }
+
+    /// Initialize context for a new run without overwriting a newer native revision.
+    pub fn set_context(&mut self, context: WorkspaceContext) -> Result<()> {
+        context.validate()?;
+        let mut current = self
+            .context
+            .lock()
+            .map_err(|_| anyhow::anyhow!("Meetingkontext ist gesperrt."))?;
+        // A restart may supply an older browser cache. Never overwrite the native revision.
+        if self.state.revision == 0 && current.revision == 0 {
+            *current = context_store::update(&self.folder, &context)?.0;
+        }
+        Ok(())
+    }
+
+    /// Append current native shared inputs without importing another run's override lineage.
+    pub(crate) fn restore_shared_context(&mut self, native: &WorkspaceContext) -> Result<()> {
+        native.validate()?;
+        let mut current = self
+            .context
+            .lock()
+            .map_err(|_| anyhow::anyhow!("Meetingkontext ist gesperrt."))?;
+        if current.agenda == native.agenda && current.shared_notes == native.shared_notes {
+            return Ok(());
+        }
+        let mut next = current.clone();
+        next.agenda.clone_from(&native.agenda);
+        next.shared_notes.clone_from(&native.shared_notes);
+        *current = context_store::update(&self.folder, &next)?.0;
+        Ok(())
+    }
+
+    /// One bounded source window and its whole active frontier are committed together.
+    /// No publication occurs until the source quotes and context revision all pass.
+    pub fn update(
+        &mut self,
+        client: &TextClient,
+        pending: &[LiveSource],
+        control: &AnalysisControl,
+        language: &str,
+    ) -> Result<usize> {
+        control.begin_workspace_update();
+        let context = self
+            .context
+            .lock()
+            .map_err(|_| anyhow::anyhow!("Meetingkontext ist gesperrt."))?
+            .clone();
+        let changed_inputs = context.agenda != self.state.context.agenda
+            || context.shared_notes != self.state.context.shared_notes;
+        let changed_sources = self.changed_source_ids();
+        // Removing or shortening a source shifts the retained replay sequence.
+        // Restart its bounded scan rather than reusing an index into the old prefix.
+        // The restart is published only with a fully validated window below.
+        let cursor = if !self.state.processed.is_empty()
+            && (changed_inputs
+                || (self.state.replay_cursor.is_some() && !changed_sources.is_empty()))
+        {
+            Some(0)
+        } else {
+            self.state.replay_cursor
+        };
+        let replay = pending.is_empty() && cursor.is_some();
+        // New text has priority. A changed shared agenda/note is then reconciled against
+        // every retained latest transcript slice in bounded windows, never summaries alone.
+        let prior = self
+            .active_sources()
+            .into_iter()
+            .filter(|s| !changed_sources.contains(&source_id(s)))
+            .collect::<Vec<_>>();
+        let input = if replay {
+            &prior[cursor.unwrap().min(prior.len())..]
+        } else {
+            pending
+        };
+        let mut count = live::next_window(input).len();
+        for depth in 0..=4 {
+            match self.update_window(client, &input[..count], control, cursor, replay, language) {
+                Err(error)
+                    if crate::transport::is_budget_error(&error) && count > 1 && depth < 4 =>
+                {
+                    count = count.div_ceil(2)
+                }
+                result => return result,
+            }
+        }
+        unreachable!()
+    }
+    /// Validate all phases against one bounded source window and commit only their complete transaction.
+    fn update_window(
+        &mut self,
+        client: &TextClient,
+        pending: &[LiveSource],
+        control: &AnalysisControl,
+        cursor: Option<usize>,
+        replay: bool,
+        language: &str,
+    ) -> Result<usize> {
+        control.check()?;
+        let context = self
+            .context
+            .lock()
+            .map_err(|_| anyhow::anyhow!("Meetingkontext ist gesperrt."))?
+            .clone();
+        context.validate_request_budget()?;
+        let mut next = self.state.clone();
+        let durable = context_store::project(&self.folder, &mut next)?;
+        ensure!(
+            durable == context,
+            "Der Meetingkontext wurde inzwischen geändert. Aktuellen Stand verwenden."
+        );
+        next.replay_cursor = cursor;
+        let window = live::next_window(pending);
+        // Preserve earlier originals and events while withdrawing their active authority
+        // after a recognition correction, reversion or removed trailing paragraph.
+        let old_ids = self.changed_source_ids();
+        for id in &old_ids {
+            if !next.superseded_sources.contains(id) {
+                next.superseded_sources.push(id.clone());
+            }
+        }
+        for e in &next.entities {
+            if e.evidence.iter().any(|v| old_ids.contains(&v.source_id))
+                && !next.context_excluded_ids.contains(&e.id)
+            {
+                next.context_excluded_ids.push(e.id.clone());
+            }
+        }
+        // Agenda titles remain shared human input, but assessments grounded in a
+        // superseded source must reopen before the reconciliation frontier is built.
+        next.apply_context(&context)?;
+        next.overview_refs
+            .retain(|id| !next.context_excluded_ids.contains(id));
+        if window.is_empty() {
+            next.replay_cursor = None;
+            if next.context != self.state.context
+                || next.replay_cursor != self.state.replay_cursor
+                || next.superseded_sources != self.state.superseded_sources
+            {
+                self.commit(next, vec![], vec![], control, &context)?;
+            }
+            return Ok(0);
+        }
+        let mut originals = next.originals.clone();
+        let mut fresh = Vec::new();
+        let mut required = Vec::new();
+        for s in &window {
+            let id = source_id(s);
+            let source = Source {
+                id,
+                source: s.source.clone(),
+                start_ms: s.start_ms,
+                end_ms: s.end_ms,
+                text: s.text.clone(),
+            };
+            required.push(source.clone());
+            if let Some(old) = originals.iter().find(|old| old.id == source.id) {
+                ensure!(
+                    old == &source,
+                    "Quellenkennung kollidiert; keine Änderung übernommen."
+                );
+            } else {
+                originals.push(source.clone());
+                fresh.push(source);
+            }
+        }
+        // Active questions are never discarded for an input cap. Process the entire frontier
+        // in bounded groups, while the durable state retains every older object.
+        let mut committed_changes = Vec::new();
+        // One coordinated transaction with two small tasks. A small local model should not
+        // have to classify obligations and generate/resolve questions in the same output.
+        let mut overview_selection: Option<Vec<String>> = None;
+        let incoming_overview: HashSet<_> = next.overview_refs.iter().cloned().collect();
+        for phase in ["tasks", "facts", "reconcile"] {
+            let frontier: Vec<Entity> = next
+                .entities
+                .iter()
+                .filter(|e| !next.context_excluded_ids.contains(&e.id))
+                .filter(|e| match phase {
+                    // Terminal identities relevant to this window are read-only
+                    // deduplication context, including their completion evidence.
+                    "tasks" => {
+                        e.kind == "task"
+                            && (e.status == "open"
+                                || e.evidence.iter().any(|evidence| {
+                                    required.iter().any(|s| s.id == evidence.source_id)
+                                }))
+                    }
+                    "facts" => {
+                        (e.kind == "fact" && incoming_overview.contains(&e.id))
+                            || (e.kind == "decision" && e.status != "withdrawn")
+                    }
+                    _ => {
+                        e.kind == "impulse"
+                            || (e.kind == "agenda" && context.agenda.iter().any(|a| a.id == e.id))
+                    }
+                })
+                .cloned()
+                .collect();
+            let mut groups: std::collections::VecDeque<(Vec<Entity>, bool)> = if frontier.is_empty()
+            {
+                vec![(vec![], true)].into()
+            } else {
+                frontier.chunks(6).map(|g| (g.to_vec(), true)).collect()
+            };
+            'groups: while let Some((mut group, seeds)) = groups.pop_front() {
+                // A preceding group's optional context may have updated one of
+                // these queued IDs. Requests must use its current revision.
+                for entity in &mut group {
+                    *entity = next
+                        .entities
+                        .iter()
+                        .find(|current| current.id == entity.id)
+                        .context("Ein Eintrag der Abgleichsfront fehlt.")?
+                        .clone();
+                }
+                group.retain(|entity| !next.context_excluded_ids.contains(&entity.id));
+                let base_group = group.clone();
+                control.check()?;
+                if ["facts", "reconcile"].contains(&phase) && seeds {
+                    group.extend(
+                        next.entities
+                            .iter()
+                            .rev()
+                            .filter(|e| !next.context_excluded_ids.contains(&e.id))
+                            .filter(|e| ["fact", "task", "decision"].contains(&e.kind.as_str()))
+                            .take(6)
+                            .cloned(),
+                    );
+                }
+                let mut seen_ids = HashSet::new();
+                group.retain(|e| seen_ids.insert(e.id.clone()));
+                let mut source_ids: HashSet<String> =
+                    required.iter().map(|s| s.id.clone()).collect();
+                for e in &group {
+                    source_ids.extend(e.evidence.iter().map(|v| v.source_id.clone()));
+                }
+                let selected: Vec<Source> = originals
+                    .iter()
+                    .filter(|s| source_ids.contains(&s.id))
+                    .cloned()
+                    .collect();
+                ensure!(selected.len() == source_ids.len(), "Originalbelege des bisherigen Stands fehlen; gespeicherte Daten bleiben erhalten.");
+                let mut req = Request::new(
+                    format!("r_{}", uuid::Uuid::new_v4().simple()),
+                    &context,
+                    &next,
+                    group,
+                    &required,
+                    selected,
+                );
+                req.purpose = phase.into();
+                req.language = language.into();
+                req.compact_titles();
+                let input = serde_json::to_string(&req)?;
+                if input.chars().count() > MAX_REQUEST_CHARS {
+                    if ["facts", "reconcile"].contains(&phase) && seeds {
+                        groups.push_front((base_group, false));
+                        continue;
+                    }
+                    if base_group.len() > 1 {
+                        let at = base_group.len() / 2;
+                        groups.push_front((base_group[at..].to_vec(), false));
+                        groups.push_front((base_group[..at].to_vec(), false));
+                        continue;
+                    }
+                    return Err(crate::transport::BudgetError::Context.into());
+                }
+                let mut schema: serde_json::Value =
+                    serde_json::from_str(include_str!("response.schema.json"))?;
+                schema["properties"]["changes"]["items"]["properties"]["text"]["maxLength"] =
+                    req.max_title_chars().into();
+                let evidence_options = req.transcript_sources.iter().filter_map(|source| {
+                    let quotes = quote_options(&source.text);
+                    (!quotes.is_empty()).then(|| serde_json::json!({
+                        "type":"object", "additionalProperties":false, "required":["sourceId","quote"],
+                        "properties":{"sourceId":{"type":"string","enum":[source.id]},"quote":{"type":"string","enum":quotes}}
+                    }))
+                }).collect::<Vec<_>>();
+                if evidence_options.is_empty() {
+                    continue;
+                }
+                schema["properties"]["changes"]["items"]["properties"]["evidence"]["items"] =
+                    serde_json::json!({"anyOf":evidence_options});
+                schema["properties"]["changes"]["items"]["properties"]["relatedEntityIds"]
+                    ["maxItems"] = 0.into();
+                let extra = if phase == "tasks" {
+                    let base = schema["properties"]["changes"]["items"].clone();
+                    let mut branches = Vec::new();
+                    let task_evidence=req.transcript_sources.iter().filter(|source|required.iter().any(|s|s.id==source.id)).filter_map(|source| {
+                        let quotes=quote_options(&source.text).into_iter().filter(|q|validate::task_quote_allowed(q)).collect::<Vec<_>>();
+                        (!quotes.is_empty()).then(||serde_json::json!({"type":"object","additionalProperties":false,"required":["sourceId","quote"],"properties":{"sourceId":{"type":"string","enum":[source.id]},"quote":{"type":"string","enum":quotes}}}))
+                    }).collect::<Vec<_>>();
+                    if !task_evidence.is_empty() {
+                        let mut branch = base.clone();
+                        branch["properties"]["kind"]["enum"] = serde_json::json!(["task"]);
+                        branch["properties"]["targetId"] = serde_json::json!({"type":"null"});
+                        branch["properties"]["targetRevision"] = serde_json::json!({"type":"null"});
+                        branch["properties"]["status"]["enum"] = serde_json::json!(["open"]);
+                        branch["properties"]["evidence"]["items"] =
+                            serde_json::json!({"anyOf":task_evidence});
+                        branches.push(branch);
+                    }
+                    for e in req
+                        .state
+                        .iter()
+                        .filter(|e| e.kind == "task" && e.status == "open" && !e.human_locked)
+                    {
+                        let mut branch = base.clone();
+                        branch["properties"]["kind"]["enum"] = serde_json::json!(["task"]);
+                        branch["properties"]["targetId"] =
+                            serde_json::json!({"type":"string","enum":[e.id]});
+                        branch["properties"]["targetRevision"] =
+                            serde_json::json!({"type":"integer","enum":[e.revision]});
+                        branch["properties"]["status"]["enum"] =
+                            serde_json::json!(validate::allowed_statuses("task"));
+                        branches.push(branch);
+                    }
+                    schema["properties"]["changes"]["items"] =
+                        serde_json::json!({"anyOf":branches});
+                    if branches.is_empty() {
+                        continue;
+                    }
+                    "PHASE AUFGABEN: Antworte ausschließlich mit kind=task. Suche jede ausdrückliche Übernahme oder Zuweisung in requiredSourceIds. Ich schreibe den Bericht bis Freitag muss zwingend als task/open erscheinen, niemals nur als Fakt. Neue Aufgaben benötigen einen ausdrücklichen Übernahmebeleg. Fehlende Zusagen, offene Freigaben, Fragen, Wünsche und unverbindliche Vorschläge sind KEINE Aufgaben. Owner und due nur wörtlich belegt, sonst null. Status completed nur für eine vorhandene passende Aufgabe mit ausdrücklichem Erledigungsbeleg. Verändere keine menschlich geschützten Aufgaben. Keine Fakten, Entscheidungen, Agenda oder Impulse in dieser Phase. Wähle die Aufgaben für overviewRefs."
+                } else if phase == "facts" {
+                    let base = schema["properties"]["changes"]["items"].clone();
+                    let mut variants = Vec::new();
+                    for kind in ["fact", "decision"] {
+                        let mut branch = base.clone();
+                        branch["properties"]["kind"]["enum"] = serde_json::json!([kind]);
+                        branch["properties"]["targetId"] = serde_json::json!({"type":"null"});
+                        branch["properties"]["targetRevision"] = serde_json::json!({"type":"null"});
+                        branch["properties"]["text"]["type"] = "string".into();
+                        branch["properties"]["status"]["enum"] =
+                            serde_json::json!(validate::allowed_statuses(kind)
+                                .iter()
+                                .filter(|status| !["completed", "withdrawn", "discussed"]
+                                    .contains(status))
+                                .collect::<Vec<_>>());
+                        for field in ["owner", "due"] {
+                            branch["properties"][field] = serde_json::json!({"type":"null"});
+                        }
+                        variants.push(branch);
+                    }
+                    // Tasks may be present as overview context but cannot be retagged as facts.
+                    for entity in req.state.iter().filter(|entity| {
+                        !entity.human_locked
+                            && ["fact", "decision"].contains(&entity.kind.as_str())
+                            && !(entity.kind == "decision" && entity.status == "withdrawn")
+                    }) {
+                        let mut branch = base.clone();
+                        branch["properties"]["kind"]["enum"] = serde_json::json!([entity.kind]);
+                        branch["properties"]["targetId"] =
+                            serde_json::json!({"type":"string","enum":[entity.id]});
+                        branch["properties"]["targetRevision"] =
+                            serde_json::json!({"type":"integer","enum":[entity.revision]});
+                        branch["properties"]["status"]["enum"] =
+                            serde_json::json!(validate::allowed_statuses(&entity.kind));
+                        for field in ["owner", "due"] {
+                            branch["properties"][field] = serde_json::json!({"type":"null"});
+                        }
+                        variants.push(branch);
+                    }
+                    schema["properties"]["changes"]["items"] =
+                        serde_json::json!({"anyOf":variants});
+                    "PHASE FAKTEN UND BESCHLÜSSE: Nur kind=fact oder decision. Bereits in state enthaltene Aufgaben nicht als allgemeinen Fakt wiederholen. fact/recorded oder unclear für wichtige weitere Beobachtungen. Eine fehlende Budgetzusage ist eine offene Tatsache, keine Aufgabe. decision/recorded ausschließlich für einen ausdrücklichen Beschluss; withdrawn nur ausdrücklich belegte Rücknahme einer vorhandenen Entscheidung. Owner/due immer null. Keine Aufgaben, Impulse oder Agenda. overviewRefs wählt bis zu 8 wichtige vorhandene Aufgaben aus state sowie Fakten/Beschlüsse; neue Einträge über proposalId referenzieren."
+                } else {
+                    let base = schema["properties"]["changes"]["items"].clone();
+                    let mut variants = Vec::new();
+                    for e in req.state.iter().filter(|e| {
+                        !e.human_locked && ["agenda", "impulse"].contains(&e.kind.as_str())
+                    }) {
+                        let mut branch = base.clone();
+                        branch["properties"]["kind"]["enum"] = serde_json::json!([e.kind]);
+                        branch["properties"]["targetId"] =
+                            serde_json::json!({"type":"string","enum":[e.id]});
+                        branch["properties"]["targetRevision"] =
+                            serde_json::json!({"type":"integer","enum":[e.revision]});
+                        for field in ["text", "owner", "due"] {
+                            branch["properties"][field] = serde_json::json!({"type":"null"});
+                        }
+                        branch["properties"]["status"]["enum"] = if e.kind == "agenda" {
+                            serde_json::json!(["touched", "discussed", "unclear"])
+                        } else {
+                            serde_json::json!(["discussed", "unclear"])
+                        };
+                        variants.push(branch);
+                    }
+                    let mut new_impulse = base;
+                    new_impulse["properties"]["kind"]["enum"] = serde_json::json!(["impulse"]);
+                    new_impulse["properties"]["status"]["enum"] = serde_json::json!(["open"]);
+                    new_impulse["properties"]["text"]["type"] = "string".into();
+                    for field in ["targetId", "targetRevision", "owner", "due"] {
+                        new_impulse["properties"][field] = serde_json::json!({"type":"null"});
+                    }
+                    // A small model can otherwise satisfy this phase by touching the agenda
+                    // and omit the already acknowledged open question. Give that question
+                    // one constrained request before the ordinary agenda/status reconciliation.
+                    let needs_question = validate::initial_question_needed(&next, &req);
+                    if needs_question {
+                        variants.clear();
+                        schema["properties"]["changes"]["minItems"] = 1.into();
+                        let witnesses = validate::initial_question_evidence(&next, &req).into_iter().map(|evidence| serde_json::json!({
+                            "type":"object", "additionalProperties":false, "required":["sourceId","quote"],
+                            "properties":{"sourceId":{"type":"string","enum":[evidence.source_id]},"quote":{"type":"string","enum":[evidence.quote]}}
+                        })).collect::<Vec<_>>();
+                        new_impulse["properties"]["evidence"]["items"] =
+                            serde_json::json!({"anyOf":witnesses});
+                    }
+                    variants.push(new_impulse);
+                    schema["properties"]["changes"]["items"] =
+                        serde_json::json!({"anyOf":variants});
+                    schema["properties"]["overviewRefs"]["maxItems"] = 0.into();
+                    "PHASE IMPULSABGLEICH: Ausschließlich kind=impulse oder agenda. KEINE task, KEINE fact, KEINE decision, auch wenn sie in state stehen. Neue Fragen immer kind=impulse, status=open, attention=clarification, owner/due null, targetId/targetRevision null. Zu einer ausdrücklich fehlenden Antwort oder Zusage MUSS mindestens der wichtigste neue konkrete Frageimpuls ergänzt werden, sofern kein gleichbedeutender vorhanden ist: fehlende Budgetzusage ergibt die Frage Wie wird das Budget freigegeben. Ein Fakt über eine fehlende Zusage oder ein touched-Agendaeintrag ersetzt diesen Frageimpuls nicht. Keine Aufgabe daraus machen. Neue Impulse benötigen einen wörtlichen Beleg für das offene Thema. Vorhandene Impulse behalten; nur eine passende ausdrückliche Antwort darf ihren Status zu discussed ändern, Text bleibt null. Eine noch offene Freigabe ist keine erfolgte Freigabe. Agenda nur vorhandene id/revision: touched bei angerissenem Thema, discussed nur bei ausreichender inhaltlicher Antwort, unclear bei unklarem Bezug. Agendatext nicht ändern. Menschlich geschützte Einträge nicht ändern. overviewRefs bleibt in dieser Phase leer."
+                };
+                let question_only =
+                    phase == "reconcile" && schema["properties"]["changes"]["minItems"] == 1;
+                for attempt in 0..2 {
+                    let repair = if attempt == 0 {
+                        ""
+                    } else {
+                        "\nDie vorherige Antwort wurde vollständig verworfen. Erzeuge den Auftrag erneut: ausschließlich Typen dieser Phase; jede proposalId innerhalb der Antwort genau einmal (p_1, p_2, ...); targetId/revision nur aus state oder null; neue Aufgaben nur aus window.requiredSourceIds; alle Belege wörtlich aus transcriptSources; relatedEntityIds immer []; keine fehlende Zusage als Aufgabe. Keine zuvor ungültige Antwort wird übernommen."
+                    };
+                    let answer = match client.workspace_json(
+                        &format!("{PROMPT}\n{extra}{repair}"),
+                        &input,
+                        schema.clone(),
+                        control,
+                    ) {
+                        Ok(answer) => answer,
+                        Err(error)
+                            if matches!(
+                                error.downcast_ref::<crate::transport::BudgetError>(),
+                                Some(crate::transport::BudgetError::Context)
+                            ) =>
+                        {
+                            if seeds && ["facts", "reconcile"].contains(&phase) {
+                                groups.push_front((base_group, false));
+                                continue 'groups;
+                            }
+                            if base_group.len() > 1 {
+                                let at = base_group.len() / 2;
+                                groups.push_front((base_group[at..].to_vec(), false));
+                                groups.push_front((base_group[..at].to_vec(), false));
+                                continue 'groups;
+                            }
+                            return Err(error);
+                        }
+                        Err(error) => return Err(error),
+                    };
+                    match validate::apply(&mut next, &req, &answer) {
+                        Ok(events) => {
+                            ensure!(!question_only || next.entities.iter().any(|entity|
+                                entity.kind == "impulse" && !next.context_excluded_ids.contains(&entity.id)),
+                                "Der angeforderte Frageimpuls fehlt; keine Änderung wurde veröffentlicht.");
+                            if phase == "facts" {
+                                let selected = overview_selection.get_or_insert_with(Vec::new);
+                                for id in &next.overview_refs {
+                                    if !selected.contains(id) {
+                                        selected.push(id.clone());
+                                    }
+                                }
+                            }
+                            committed_changes.extend(events);
+                            if question_only {
+                                let mut followup = base_group.clone();
+                                followup.extend(
+                                    next.entities
+                                        .iter()
+                                        .filter(|entity| {
+                                            entity.kind == "impulse"
+                                                && !next.context_excluded_ids.contains(&entity.id)
+                                        })
+                                        .cloned(),
+                                );
+                                groups.push_front((followup, true));
+                            }
+                            break;
+                        }
+                        Err(error)
+                            if attempt == 0
+                                && !crate::transport::is_budget_error(&error)
+                                && !crate::is_cancelled(&error) =>
+                        {
+                            control.record_validation_retry();
+                        }
+                        Err(error) => return Err(error),
+                    }
+                }
+            }
+        }
+        if let Some(selected) = overview_selection {
+            next.overview_refs = selected;
+        } else if next.overview_refs.is_empty() {
+            next.overview_refs = next
+                .entities
+                .iter()
+                .rev()
+                .filter(|e| !next.context_excluded_ids.contains(&e.id))
+                .filter(|e| {
+                    ["fact", "task", "decision"].contains(&e.kind.as_str())
+                        && !e.evidence.is_empty()
+                })
+                .take(8)
+                .map(|e| e.id.clone())
+                .collect();
+            next.overview_refs.reverse();
+        }
+        next.originals = originals;
+        if replay {
+            let at = cursor.unwrap_or(0) + window.len();
+            next.replay_cursor = (at
+                < latest_sources(&next.processed)
+                    .iter()
+                    .filter(|s| !next.superseded_sources.contains(&source_id(s)))
+                    .count())
+            .then_some(at);
+        } else {
+            next.processed.extend(window.clone());
+        }
+        next.updated_at = Some(chrono::Utc::now().to_rfc3339());
+        self.commit(next, fresh, committed_changes, control, &context)?;
+        Ok(if replay { 0 } else { window.len() })
+    }
+
+    /// Recheck both native context versions under the short disk lease before durable publication.
+    fn commit(
+        &mut self,
+        mut next: WorkspaceState,
+        originals: Vec<Source>,
+        events: Vec<Event>,
+        control: &AnalysisControl,
+        expected: &WorkspaceContext,
+    ) -> Result<()> {
+        // Hold the small context lock only across the final durable commit, never inference.
+        let current = self
+            .context
+            .lock()
+            .map_err(|_| anyhow::anyhow!("Meetingkontext ist gesperrt."))?;
+        let shared_same = |context: &WorkspaceContext| {
+            context.revision >= expected.revision
+                && context.agenda == expected.agenda
+                && context.shared_notes == expected.shared_notes
+                && context.overrides.starts_with(&expected.overrides)
+        };
+        ensure!(shared_same(&current), "Der Meetingkontext wurde während der Auswertung geändert. Der neue Stand wird erneut abgeglichen.");
+        let _disk_guard = context_store::lock(&self.folder)?;
+        let durable = context_store::human_suffix(&self.folder, expected)?;
+        ensure!(durable == *current && shared_same(&durable), "Der Meetingkontext wurde in einem anderen Fenster geändert. Der aktuelle Stand bleibt erhalten.");
+        next.apply_context(&durable)?;
+        control.check()?;
+        next.revision = self.state.revision + 1;
+        let delta = store::Delta::between(&self.state, &next, originals, events);
+        store::append(&self.folder, &delta).context(
+            "Meetingstand konnte nicht gesichert werden. Der letzte gültige Stand bleibt erhalten.",
+        )?;
+        self.state = next;
+        Ok(())
+    }
+}
+
+/// Bind an original identifier to exact recognized text as well as chunk identity.
+fn source_id(source: &LiveSource) -> String {
+    use sha2::{Digest, Sha256};
+    let digest = Sha256::digest(format!("{}\0{}", source.id, source.text).as_bytes());
+    format!("s_{}", &format!("{digest:x}")[..16])
+}
+
+/// Offer bounded literal quote alternatives from the actual original source.
+fn quote_options(text: &str) -> Vec<String> {
+    let mut options = Vec::new();
+    let mut add = |s: &str| {
+        let s = s.trim();
+        if (8..=600).contains(&s.chars().count()) && !options.iter().any(|old| old == s) {
+            options.push(s.to_owned());
+        }
+    };
+    add(text);
+    for sentence in text.split_inclusive(['.', '!', '?', '\n']) {
+        add(sentence);
+    }
+    let chars = text.chars().collect::<Vec<_>>();
+    for start in (0..chars.len()).step_by(300) {
+        let part = chars[start..(start + 500).min(chars.len())]
+            .iter()
+            .collect::<String>();
+        add(&part);
+    }
+    options
+}
+
+/// Loads only immutable complete revisions; no client, writer lock or directory creation.
+pub fn read_state(folder: &Path) -> Result<WorkspaceState> {
+    let mut state = store::read(folder)?;
+    context_store::project(folder, &mut state)?;
+    Ok(state)
+}
+/// Explicit human input update. Caller binds this folder to its admitted meeting/run.
+pub fn update_context(
+    folder: &Path,
+    context: &WorkspaceContext,
+) -> Result<(WorkspaceContext, WorkspaceState)> {
+    let state = store::read(folder)?;
+    ensure!(state.revision == 0 || state.prompt_version() == PROMPT_VERSION,
+        "Diese Auswertung verwendet ältere Prompts und bleibt unverändert lesbar. Eine neue lokale Auswertung starten, um mit der aktuellen Fassung weiterzuarbeiten.");
+    context_store::update(folder, context)
+}
+
+/// Keep the last processed revision independently for each transcript key and chunk.
+fn latest_sources(processed: &[LiveSource]) -> Vec<LiveSource> {
+    let mut latest = std::collections::BTreeMap::new();
+    for source in processed {
+        latest.insert((&source.key, source.chunk), source.clone());
+    }
+    let mut sources = latest.into_values().collect::<Vec<_>>();
+    sources.sort_by(|a, b| {
+        (a.start_ms, &a.source, &a.key, a.chunk).cmp(&(b.start_ms, &b.source, &b.key, b.chunk))
+    });
+    sources
+}

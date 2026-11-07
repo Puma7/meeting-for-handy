@@ -31,6 +31,8 @@ pub(crate) const DEFAULT_INTERVAL_MS: u64 = 3 * 60_000;
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct LiveNotesRequest {
+    #[serde(default)]
+    workspace: Option<meeting_notes::workspace::WorkspaceContext>,
     meeting_id: String,
     endpoint: String,
     model: String,
@@ -49,6 +51,10 @@ pub(crate) struct LiveNotesRequest {
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct LiveNotesStatus {
+    workspace_context: Option<meeting_notes::workspace::WorkspaceContext>,
+    response_bytes: u64,
+    response_idle_ms: u64,
+    update_elapsed_ms: u64,
     meeting_id: String,
     /// off | starting | waiting | updating | finished | partial | stopped | failed
     status: String,
@@ -65,6 +71,7 @@ pub(crate) struct LiveNotesStatus {
 
 struct Shared {
     status: String,
+    update_started: Option<Instant>,
     waiting_for_transcript: bool,
     error: Option<String>,
     pending_chars: usize,
@@ -75,6 +82,8 @@ struct Shared {
 }
 
 struct Job {
+    workspace_folder: Option<std::path::PathBuf>,
+    workspace_context: Option<Arc<Mutex<meeting_notes::workspace::WorkspaceContext>>>,
     meeting_id: String,
     control: AnalysisControl,
     manual: Arc<AtomicBool>,
@@ -92,6 +101,10 @@ impl Job {
     /// Reads one job's scalar progress and retained view. Terminal jobs never advertise
     /// a pending transcript wait, and retry backoff can only postpone the next update.
     fn status(&self) -> LiveNotesStatus {
+        let input_context = self
+            .workspace_context
+            .as_ref()
+            .and_then(|c| c.lock().ok().map(|c| c.clone()));
         let interval_ms = self.interval_ms.load(Ordering::Acquire);
         let shared = self.shared.lock();
         let Ok(shared) = shared else {
@@ -110,6 +123,16 @@ impl Job {
             })
         });
         LiveNotesStatus {
+            workspace_context: input_context,
+            response_bytes: self.control.response_bytes(),
+            response_idle_ms: self.control.response_idle_ms(),
+            update_elapsed_ms: if shared.status == "updating" {
+                shared
+                    .update_started
+                    .map_or(0, |at| at.elapsed().as_millis() as u64)
+            } else {
+                0
+            },
             meeting_id: self.meeting_id.clone(),
             status: shared.status.clone(),
             running,
@@ -127,6 +150,12 @@ impl Job {
 
 fn off(meeting_id: &str, view: Option<LiveView>, error: Option<String>) -> LiveNotesStatus {
     LiveNotesStatus {
+        workspace_context: view
+            .as_ref()
+            .and_then(|v| v.workspace.as_ref().map(|w| w.context.clone())),
+        response_bytes: 0,
+        response_idle_ms: 0,
+        update_elapsed_ms: 0,
         meeting_id: meeting_id.into(),
         status: "off".into(),
         running: false,
@@ -188,10 +217,13 @@ pub(crate) struct Snapshot {
     active: bool,
     /// Only living recognizers can consume compute for their own pending track.
     recognizing_tracks: [bool; 2],
+    /// Batch recognition can consume closed sections only.
+    batch_recognition: bool,
 }
 impl Snapshot {
     /// A living recognizer owns the compute budget while its track has over five seconds
-    /// unprocessed. Completed same-model parts, ended workers and archived meetings never
+    /// actionable audio unprocessed; batch sections must already be closed.
+    /// Completed same-model parts, ended workers and archived meetings never
     /// defer confirmed-text analysis, including after a resume with older progress counters.
     fn recognition_needs_priority(&self) -> bool {
         if !self.active {
@@ -199,6 +231,11 @@ impl Snapshot {
         }
         let mut tracks = [0_u64; 2];
         for part in &self.data.parts {
+            // An open batch section cannot be submitted yet. Its capture continues
+            // independently; only closed sections represent actionable ASR backlog.
+            if self.batch_recognition && !part.audio_closed {
+                continue;
+            }
             let same_model = part.model_id.as_deref() == Some(self.data.model_id.as_str());
             let pending = if same_model && part.status == "complete" {
                 0
@@ -221,6 +258,17 @@ impl Snapshot {
     }
 }
 
+/// Batch workers service both inputs. Their closed pending sections retain priority;
+/// open sections awaiting closure do not yet represent actionable recognition work.
+fn mark_recognizing_track(tracks: &mut [bool; 2], source: &str) {
+    match source {
+        "system" => tracks[0] = true,
+        "microphone" => tracks[1] = true,
+        "batch" => *tracks = [true; 2],
+        _ => {}
+    }
+}
+
 impl Service {
     /// A snapshot of one meeting for the live worker. It prefers the stores the application
     /// already holds. A meeting that left both slots has finished; its last snapshot is reused
@@ -234,27 +282,26 @@ impl Service {
             (
                 inner.active.as_ref().map(|a| {
                     let mut recognizing_tracks = [false; 2];
+                    let mut batch_recognition = false;
                     for worker in &a.workers {
                         if !worker.handle.is_finished() {
-                            match worker.source.as_str() {
-                                "system" => recognizing_tracks[0] = true,
-                                "microphone" => recognizing_tracks[1] = true,
-                                _ => {}
-                            }
+                            mark_recognizing_track(&mut recognizing_tracks, &worker.source);
+                            batch_recognition |= worker.source == "batch";
                         }
                     }
-                    (a.store.clone(), recognizing_tracks)
+                    (a.store.clone(), recognizing_tracks, batch_recognition)
                 }),
                 inner.view.clone(),
             )
         };
-        if let Some((store, recognizing_tracks)) = active_store {
+        if let Some((store, recognizing_tracks, batch_recognition)) = active_store {
             if let Ok(data) = store.snapshot() {
                 if data.id == id {
                     return Ok(Snapshot {
                         data,
                         active: true,
                         recognizing_tracks,
+                        batch_recognition,
                     });
                 }
             }
@@ -266,6 +313,7 @@ impl Service {
                         data,
                         active: false,
                         recognizing_tracks: [false; 2],
+                        batch_recognition: false,
                     });
                 }
             }
@@ -275,9 +323,20 @@ impl Service {
                 data: data.clone(),
                 active: false,
                 recognizing_tracks: [false; 2],
+                batch_recognition: false,
             });
         }
         let folder = self.root.join("sessions").join(id);
+        if let Some(data) = meeting_core::archive::read_archived_transcript(&folder)
+            .map_err(|_| "Der archivierte Transkriptstand konnte nicht gegen seine Originalquellen geprüft werden.")?
+        {
+            return Ok(Snapshot {
+                data,
+                active: false,
+                recognizing_tracks: [false; 2],
+                batch_recognition: false,
+            });
+        }
         let store = meeting_core::SessionStore::open(&folder)
             .map_err(|_| "Die Sitzung ist gerade nicht lesbar.")?;
         let data = store
@@ -290,6 +349,7 @@ impl Service {
             data,
             active: false,
             recognizing_tracks: [false; 2],
+            batch_recognition: false,
         })
     }
 }
@@ -348,12 +408,46 @@ impl LiveNotes {
         cleanup();
     }
 
+    #[cfg(test)]
     pub(crate) fn status(&self, service: &Service, meeting_id: &str) -> AppResult<LiveNotesStatus> {
+        self.status_with_preference(service, meeting_id, false)
+    }
+
+    /// Expose current job controls together with the requested saved analysis view without changing job ownership.
+    pub(crate) fn status_with_preference(
+        &self,
+        service: &Service,
+        meeting_id: &str,
+        prefer_workspace: bool,
+    ) -> AppResult<LiveNotesStatus> {
         validate_id(meeting_id)?;
-        if let Some(job) = self.lock()?.as_ref().filter(|j| j.meeting_id == meeting_id) {
-            return Ok(job.status());
+        let active = self
+            .lock()?
+            .as_ref()
+            .filter(|j| {
+                j.meeting_id == meeting_id
+                    && (!prefer_workspace || j.running() || j.workspace_folder.is_some())
+            })
+            .map(|job| (job.status(), job.workspace_folder.is_some()));
+        if let Some((mut status, workspace_job)) = active {
+            if prefer_workspace && !workspace_job {
+                // Preserve the active job's controls while the advanced view displays
+                // its own saved cards. No workspace context writer is advertised.
+                if let Ok(Some(saved)) =
+                    live::read_latest_workspace(&live_root(service, meeting_id), meeting_id)
+                {
+                    status.view = Some(saved);
+                }
+            }
+            return Ok(status);
         }
-        match live::read_latest(&live_root(service, meeting_id), meeting_id) {
+        let root = live_root(service, meeting_id);
+        let saved = if prefer_workspace {
+            live::read_latest_workspace(&root, meeting_id)
+        } else {
+            live::read_latest(&root, meeting_id)
+        };
+        match saved {
             Ok(view) => Ok(off(meeting_id, view, None)),
             Err(_) => Ok(off(
                 meeting_id,
@@ -370,6 +464,91 @@ impl LiveNotes {
             .filter(|j| j.running())
             .map(|j| j.manual.store(true, Ordering::Release))
             .is_some())
+    }
+
+    /// Return false for shared-input edits deferred during inference; human-only actions remain durable. Keep progress/context lock ordering consistent and publish under the short context lease.
+    pub(crate) fn set_workspace_context(
+        &self,
+        service: &Arc<Service>,
+        meeting_id: &str,
+        run_id: &str,
+        context: meeting_notes::workspace::WorkspaceContext,
+    ) -> AppResult<bool> {
+        validate_id(meeting_id)?;
+        context.validate().map_err(|e| e.to_string())?;
+        let _operation = service.reserve_operation(crate::operations::Kind::Mutation)?;
+        let _publication = meeting_core::archive::source_publication_lease(&service.root)
+            .map_err(|_| "Meetingdaten werden gerade geändert. Erneut versuchen.")?;
+        let guard = self.lock()?;
+        let job = guard
+            .as_ref()
+            .filter(|j| j.meeting_id == meeting_id && j.workspace_folder.is_some());
+        let folder = if let Some(folder) = job.and_then(|j| j.workspace_folder.clone()) {
+            folder
+        } else {
+            let saved = live::read_latest_workspace(&live_root(service, meeting_id), meeting_id)
+                .map_err(|e| e.to_string())?
+                .ok_or("Kein gespeicherter Kachelstand.")?;
+            if saved.workspace.is_none() {
+                return Err("Dieser Meetingstand verwendet noch keine Kachelanbindung.".into());
+            }
+            let run_folder =
+                live_root(service, meeting_id).join(saved.run_id.ok_or("Laufkennung fehlt.")?);
+            live::workspace_folder(&run_folder)
+                .map_err(|error| error.to_string())?
+                .ok_or("Kein gespeicherter Kachelstand.")?
+        };
+        if folder
+            .parent()
+            .and_then(|path| path.file_name())
+            .and_then(|name| name.to_str())
+            != Some(run_id)
+        {
+            return Err("Der Auswertungslauf hat gewechselt. Bitte erneut versuchen.".into());
+        }
+        // Match Job::status lock order: shared progress first, then context.
+        // Hold the short publication gate until the context write has completed.
+        let mut shared = job
+            .map(|job| job.shared.lock().map_err(|_| "Live-Zustand ist gesperrt."))
+            .transpose()?;
+        let handle = job.and_then(|j| j.workspace_context.clone());
+        let mut current = handle
+            .as_ref()
+            .map(|c| c.lock().map_err(|_| "Meetingkontext ist gesperrt."))
+            .transpose()?;
+        if shared
+            .as_ref()
+            .is_some_and(|shared| shared.status == "updating")
+            && current.as_ref().is_some_and(|current| {
+                current.agenda != context.agenda || current.shared_notes != context.shared_notes
+            })
+        {
+            return Ok(false);
+        }
+        let (next, projected) = match meeting_notes::workspace::update_context(&folder, &context) {
+            Ok(value) => value,
+            Err(error) => {
+                if let (Some(current), Ok(saved)) = (
+                    current.as_mut(),
+                    meeting_notes::workspace::read_state(&folder),
+                ) {
+                    **current = saved.context;
+                }
+                return Err(error.to_string());
+            }
+        };
+        if let Some(current) = current.as_mut() {
+            **current = next;
+        }
+        if let Some(job) = job {
+            job.manual.store(true, Ordering::Release);
+            if let Some(shared) = shared.as_mut() {
+                if let Some(view) = shared.view.as_mut() {
+                    view.attach_workspace(projected);
+                }
+            }
+        }
+        Ok(true)
     }
 
     pub(crate) fn set_interval(&self, interval_ms: u64) -> AppResult<bool> {
@@ -420,6 +599,9 @@ impl LiveNotes {
         if !["de", "en"].contains(&request.language.as_str()) {
             return Err("Unbekannte Sprache.".into());
         }
+        if request.workspace.is_some() && (request.mode != "local" || request.cloud_consent) {
+            return Err("Automatische Kachelauswertung benötigt ein lokales Modell.".into());
+        }
         let mut guard = self.lock()?;
         if guard.as_ref().is_some_and(Job::running) {
             return Err(
@@ -461,7 +643,12 @@ impl LiveNotes {
             crate::local_models::provider_for_endpoint(&connection.endpoint),
         )?;
         let model_lease = model_work.as_ref().map(|work| work.lease()).transpose()?;
-        let runner = LiveRunner::start(
+        let start = if request.workspace.is_some() {
+            LiveRunner::start_workspace
+        } else {
+            LiveRunner::start
+        };
+        let runner = start(
             &live_root(service, &request.meeting_id),
             &request.meeting_id,
             connection,
@@ -474,9 +661,15 @@ impl LiveNotes {
                 .map_err(|e| e.to_string())?,
             None => runner,
         };
+        let runner = if let Some(context) = request.workspace {
+            runner.with_workspace(context).map_err(|e| e.to_string())?
+        } else {
+            runner
+        };
         let (texts, _) = live_texts(&data);
         let shared = Arc::new(Mutex::new(Shared {
             status: "starting".into(),
+            update_started: None,
             waiting_for_transcript: false,
             error: None,
             pending_chars: live::pending_chars(&runner.pending(&texts)),
@@ -487,6 +680,8 @@ impl LiveNotes {
         }));
         let pending_at_start = shared.lock().is_ok_and(|s| s.pending_chars > 0);
         let mut job = Job {
+            workspace_folder: runner.workspace_folder(),
+            workspace_context: runner.workspace_context(),
             meeting_id: request.meeting_id.clone(),
             control: AnalysisControl::default(),
             // Text that already exists is summarized right away instead of after the interval.
@@ -580,8 +775,9 @@ impl Worker {
     /// Publishes the stored state even after a stop, so a window saved just before the stop
     /// is shown and not only after the next start.
     fn publish(&self, runner: &LiveRunner) {
+        let view = runner.view();
         if let Ok(mut shared) = self.shared.lock() {
-            shared.view = Some(runner.view());
+            shared.view = Some(view);
         }
     }
 
@@ -606,7 +802,12 @@ impl Worker {
     /// over later progress, and completed windows remain available after a stop.
     fn run(self, mut runner: LiveRunner) {
         if let Some(lease) = &self.model_lease {
-            if let Err(error) = lease.prepare(&self.control) {
+            let prepared = if runner.workspace_context().is_some() {
+                Ok(())
+            } else {
+                lease.prepare(&self.control)
+            };
+            if let Err(error) = prepared {
                 if self.control.is_cancelled() {
                     if let Some(work) = &self.model_work {
                         work.finish();
@@ -658,11 +859,14 @@ impl Worker {
                 .map(|s| (s.last_update.elapsed(), s.retry_at))
                 .unwrap_or((Duration::ZERO, None));
             self.set(|s| s.pending_chars = pending_chars);
-            let defer = snapshot.recognition_needs_priority();
-            self.set(|s| s.waiting_for_transcript = defer);
+            let recognition_defer = snapshot.recognition_needs_priority();
+            // Local-model load admission verifies current memory at the actual load.
+            // A model already resident can process text without waiting for load headroom.
+            let defer = recognition_defer;
+            self.set(|s| s.waiting_for_transcript = recognition_defer);
             if defer {
                 let since = deferred_since.get_or_insert_with(Instant::now);
-                if since.elapsed() >= Duration::from_secs(120) {
+                if recognition_defer && since.elapsed() >= Duration::from_secs(120) {
                     self.set(|s| s.error = Some(RECOGNITION_WAIT.into()));
                 }
                 // Keep manual requests queued, but never busy-spin on them while ASR
@@ -685,6 +889,9 @@ impl Worker {
             );
             trigger = with_retry(trigger, &mut carry, backing_off, pending_chars);
             // A missing overview is retried at a bounded pace, also after the meeting ended.
+            if trigger.is_none() && runner.workspace_replay_due() && !backing_off {
+                trigger = Some(Trigger::Manual);
+            }
             let overview_open = runner.overview_due() && overview_failures < MAX_OVERVIEW_FAILURES;
             if trigger.is_none()
                 && overview_retry(
@@ -719,7 +926,11 @@ impl Worker {
             }
             match trigger {
                 Some(trigger) if !backing_off || manual => {
-                    self.set(|s| s.status = "updating".into());
+                    let update_started = Instant::now();
+                    self.set(|s| {
+                        s.status = "updating".into();
+                        s.update_started = Some(update_started);
+                    });
                     overview_attempt = Some(Instant::now());
                     let result = runner.update(&pending, trigger, &self.control);
                     if self.control.is_cancelled() {
@@ -748,7 +959,7 @@ impl Worker {
                                     .or(outcome.diagnostic_warning.clone());
                                 // An overview-only retry does not postpone the next text update.
                                 if summarized {
-                                    s.last_update = Instant::now();
+                                    s.last_update = update_started;
                                     s.last_trigger = Some(trigger);
                                 }
                                 s.retry_at = None;
@@ -796,11 +1007,27 @@ impl Worker {
 }
 
 #[cfg(test)]
+#[path = "workspace_slow_tests.rs"]
+mod workspace_slow_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use meeting_core::SessionStore;
 
     /// A transient native preload refusal must leave the worker alive until explicit cancellation.
+
+    #[test]
+    fn batch_worker_claims_recognition_priority_on_both_tracks() {
+        let mut tracks = [false; 2];
+        mark_recognizing_track(&mut tracks, "batch");
+        assert_eq!(tracks, [true, true]);
+        let mut tracks = [false; 2];
+        mark_recognizing_track(&mut tracks, "system");
+        assert_eq!(tracks, [true, false]);
+        mark_recognizing_track(&mut tracks, "microphone");
+        assert_eq!(tracks, [true, true]);
+    }
     #[test]
     fn transient_preload_failure_keeps_the_live_loop_and_anchor_available() {
         use std::io::{Read, Write};
@@ -854,6 +1081,7 @@ mod tests {
             .unwrap();
         let shared = Arc::new(Mutex::new(Shared {
             status: "starting".into(),
+            update_started: None,
             waiting_for_transcript: false,
             error: None,
             pending_chars: 0,
@@ -912,8 +1140,348 @@ mod tests {
     }
 
     #[test]
+    fn protocol_edits_are_deferred_at_native_publication_gate_until_inference_finishes() {
+        let root = fixture_root("deferred-protocol");
+        let service = Arc::new(Service::new(root.clone()).unwrap());
+        let store = meeting_core::SessionStore::create(
+            &root.join("sessions"),
+            "Synthetic active meeting",
+            "synthetic",
+            "synthetic-system",
+            None,
+        )
+        .unwrap();
+        let meeting_id = store.snapshot().unwrap().id;
+        let manifest = store.folder().join("session.json");
+        let original_manifest = std::fs::read(&manifest).unwrap();
+        let recording_lease = service
+            .reserve_operation(crate::operations::Kind::Recording)
+            .unwrap();
+        let live_lease = service
+            .reserve_operation(crate::operations::Kind::LiveNotes)
+            .unwrap();
+        let publication = meeting_core::archive::source_publication_lease(&root).unwrap();
+        let (finish, wait) = std::sync::mpsc::channel();
+        // A live synthetic worker keeps the Active slot through admission reaping.
+        // Dropping the sender during unwinding also releases this owned worker.
+        let worker = thread::spawn(move || {
+            let _ = wait.recv();
+        });
+        service.lock().unwrap().active = Some(crate::Active {
+            _operation: Some(recording_lease),
+            owner: None,
+            store,
+            capture: None,
+            stop: Arc::new(AtomicBool::new(false)),
+            workers: vec![crate::asr::RecognitionWorker {
+                source: "system".into(),
+                handle: worker,
+            }],
+        });
+        let assert_recording_untouched = || {
+            let inner = service.lock().unwrap();
+            let active = inner.active.as_ref().unwrap();
+            assert_eq!(active.store.snapshot().unwrap().id, meeting_id);
+            assert!(!active.stop.load(Ordering::Acquire));
+            assert!(!active.workers[0].handle.is_finished());
+            assert_eq!(std::fs::read(&manifest).unwrap(), original_manifest);
+        };
+        let connection = meeting_notes::Connection {
+            endpoint: "http://127.0.0.1:1235/v1/".into(),
+            model: "synthetic".into(),
+            mode: "local".into(),
+            cloud_consent: false,
+            api_key: String::new(),
+        };
+        let runner = LiveRunner::start(
+            &live_root(&service, &meeting_id),
+            &meeting_id,
+            connection,
+            "en",
+        )
+        .unwrap()
+        .with_workspace(meeting_notes::workspace::WorkspaceContext {
+            agenda: vec![meeting_notes::workspace::Agenda {
+                id: "e_topic".into(),
+                revision: 1,
+                text: "Synthetic agenda".into(),
+            }],
+            ..Default::default()
+        })
+        .unwrap();
+        let folder = runner.workspace_folder().unwrap().to_path_buf();
+        let handle = runner.workspace_context().unwrap();
+        let run_id = runner.run().id.clone();
+        let context = handle.lock().unwrap().clone();
+        *service.live_notes.lock().unwrap() = Some(Job {
+            workspace_folder: Some(folder.clone()),
+            workspace_context: Some(Arc::clone(&handle)),
+            meeting_id: meeting_id.clone(),
+            control: AnalysisControl::default(),
+            manual: Arc::new(AtomicBool::new(false)),
+            interval_ms: Arc::new(AtomicU64::new(DEFAULT_INTERVAL_MS)),
+            shared: Arc::new(Mutex::new(Shared {
+                status: "updating".into(),
+                update_started: Some(Instant::now()),
+                waiting_for_transcript: false,
+                error: None,
+                pending_chars: 200,
+                last_update: Instant::now(),
+                last_trigger: None,
+                retry_at: None,
+                view: None,
+            })),
+            worker: None,
+            models: crate::model_sessions::Models::default(),
+        });
+        let before = std::fs::read_dir(&folder).unwrap().count();
+        let mut edit = context.clone();
+        edit.shared_notes
+            .push(meeting_notes::workspace::SharedNote {
+                id: "h_note".into(),
+                revision: 1,
+                text: "Synthetic committed edit".into(),
+            });
+        assert!(!service
+            .live_notes
+            .set_workspace_context(&service, &meeting_id, &run_id, edit.clone())
+            .unwrap());
+        assert_eq!(*handle.lock().unwrap(), context);
+        assert_eq!(std::fs::read_dir(&folder).unwrap().count(), before);
+        assert_recording_untouched();
+        let mut human = context.clone();
+        human.overrides.push(meeting_notes::workspace::Override {
+            id: "e_topic".into(),
+            expected_revision: 1,
+            status: "discussed".into(),
+            saved: false,
+        });
+        assert!(service
+            .live_notes
+            .set_workspace_context(&service, &meeting_id, &run_id, human)
+            .unwrap());
+        assert_eq!(
+            meeting_notes::workspace::read_state(&folder)
+                .unwrap()
+                .entities[0]
+                .status,
+            "discussed"
+        );
+        assert_eq!(
+            meeting_notes::workspace::read_state(&folder)
+                .unwrap()
+                .context
+                .overrides,
+            handle.lock().unwrap().overrides
+        );
+        assert_recording_untouched();
+        edit.revision = handle.lock().unwrap().revision;
+        edit.overrides = handle.lock().unwrap().overrides.clone();
+        service
+            .live_notes
+            .lock()
+            .unwrap()
+            .as_ref()
+            .unwrap()
+            .shared
+            .lock()
+            .unwrap()
+            .status = "waiting".into();
+        assert!(service
+            .live_notes
+            .set_workspace_context(&service, &meeting_id, &run_id, edit)
+            .unwrap());
+        assert_eq!(
+            handle.lock().unwrap().shared_notes[0].text,
+            "Synthetic committed edit"
+        );
+        assert_recording_untouched();
+        service.live_notes.stop().unwrap();
+        drop(runner);
+        assert_eq!(
+            meeting_notes::workspace::read_state(&folder)
+                .unwrap()
+                .context
+                .shared_notes[0]
+                .text,
+            "Synthetic committed edit"
+        );
+        assert_recording_untouched();
+        assert!(service
+            .reserve_operation(crate::operations::Kind::Maintenance)
+            .is_err());
+        let mut active = service.lock().unwrap().active.take().unwrap();
+        finish.send(()).unwrap();
+        for worker in active.workers.drain(..) {
+            worker.handle.join().unwrap();
+        }
+        drop(active);
+        drop((live_lease, publication));
+        drop(service);
+        remove_fixture_root(root);
+    }
+    #[test]
+    fn classic_job_controls_and_saved_workspace_are_both_visible() {
+        let root = fixture_root("classic-and-workspace");
+        let service = Service::new(root.clone()).unwrap();
+        let meeting_id = "d".repeat(32);
+        let connection = meeting_notes::Connection {
+            endpoint: "http://127.0.0.1:1235/v1/".into(),
+            model: "saved-model".into(),
+            mode: "local".into(),
+            cloud_consent: false,
+            api_key: String::new(),
+        };
+        let saved = LiveRunner::start(
+            &live_root(&service, &meeting_id),
+            &meeting_id,
+            connection,
+            "en",
+        )
+        .unwrap()
+        .with_workspace(Default::default())
+        .unwrap();
+        let saved_id = saved.run().id.clone();
+        drop(saved);
+        *service.live_notes.lock().unwrap() = Some(Job {
+            workspace_folder: None,
+            workspace_context: None,
+            meeting_id: meeting_id.clone(),
+            control: AnalysisControl::default(),
+            manual: Arc::new(AtomicBool::new(false)),
+            interval_ms: Arc::new(AtomicU64::new(DEFAULT_INTERVAL_MS)),
+            shared: Arc::new(Mutex::new(Shared {
+                status: "waiting".into(),
+                update_started: None,
+                waiting_for_transcript: false,
+                error: None,
+                pending_chars: 200,
+                last_update: Instant::now(),
+                last_trigger: None,
+                retry_at: None,
+                view: None,
+            })),
+            worker: None,
+            models: crate::model_sessions::Models::default(),
+        });
+        let advanced = service
+            .live_notes
+            .status_with_preference(&service, &meeting_id, true)
+            .unwrap();
+        assert!(advanced.running);
+        assert_eq!(
+            advanced.view.unwrap().run_id.as_deref(),
+            Some(saved_id.as_str())
+        );
+        assert!(advanced.workspace_context.is_none());
+        assert!(service
+            .live_notes
+            .status(&service, &meeting_id)
+            .unwrap()
+            .view
+            .is_none());
+        service.live_notes.stop().unwrap();
+        drop(service);
+        remove_fixture_root(root);
+    }
+
+    #[test]
+    fn manual_action_refreshes_classic_projection_of_a_stopped_workspace_job() {
+        let root = fixture_root("stopped-workspace-projection");
+        let service = Arc::new(Service::new(root.clone()).unwrap());
+        let meeting_id = "c".repeat(32);
+        let mut runner = LiveRunner::start(
+            &live_root(&service, &meeting_id),
+            &meeting_id,
+            meeting_notes::Connection {
+                endpoint: "http://127.0.0.1:1235/v1/".into(),
+                model: "synthetic".into(),
+                mode: "local".into(),
+                cloud_consent: false,
+                api_key: String::new(),
+            },
+            "en",
+        )
+        .unwrap()
+        .with_workspace(Default::default())
+        .unwrap();
+        let folder = runner.workspace_folder().unwrap();
+        let context = runner.workspace_context().unwrap();
+        let run_id = runner.run().id.clone();
+        // A deterministic persisted model result: no network or user meeting is involved.
+        let evidence =
+            serde_json::json!([{"sourceId":"s_budget","quote":"Who confirms the budget?"}]);
+        let entity = serde_json::json!({"id":"e_question","revision":1,"kind":"impulse","text":"Who confirms the budget?","status":"open","attention":"current","owner":null,"due":null,"evidence":evidence,"humanLocked":false});
+        std::fs::write(folder.join("revision-00000001.json"), serde_json::to_vec(&serde_json::json!({
+            "schema": meeting_notes::workspace::PROMPT_VERSION,"revision":1,"updatedAt":null,"context":*context.lock().unwrap(),"entities":[entity],"events":[],"overviewRefs":[],"originals":[{"id":"s_budget","source":"microphone","startMs":0,"endMs":3000,"text":"Who confirms the budget?"}],"processed":[]
+        })).unwrap()).unwrap();
+        // Reopen so the retained job view uses the persisted checkpoint.
+        drop(runner);
+        runner = LiveRunner::start(
+            &live_root(&service, &meeting_id),
+            &meeting_id,
+            meeting_notes::Connection {
+                endpoint: "http://127.0.0.1:1235/v1/".into(),
+                model: "synthetic".into(),
+                mode: "local".into(),
+                cloud_consent: false,
+                api_key: String::new(),
+            },
+            "en",
+        )
+        .unwrap()
+        .with_workspace(Default::default())
+        .unwrap();
+        let context = runner.workspace_context().unwrap();
+        let view = runner.view();
+        assert_eq!(view.questions.len(), 1);
+        *service.live_notes.lock().unwrap() = Some(Job {
+            workspace_folder: Some(runner.workspace_folder().unwrap()),
+            workspace_context: Some(context.clone()),
+            meeting_id: meeting_id.clone(),
+            control: AnalysisControl::default(),
+            manual: Arc::new(AtomicBool::new(false)),
+            interval_ms: Arc::new(AtomicU64::new(DEFAULT_INTERVAL_MS)),
+            shared: Arc::new(Mutex::new(Shared {
+                status: "stopped".into(),
+                update_started: None,
+                waiting_for_transcript: false,
+                error: None,
+                pending_chars: 0,
+                last_update: Instant::now(),
+                last_trigger: None,
+                retry_at: None,
+                view: Some(view),
+            })),
+            worker: None,
+            models: crate::model_sessions::Models::default(),
+        });
+        let mut action = context.lock().unwrap().clone();
+        action.overrides.push(meeting_notes::workspace::Override {
+            id: "e_question".into(),
+            expected_revision: 1,
+            status: "discussed".into(),
+            saved: false,
+        });
+        assert!(service
+            .live_notes
+            .set_workspace_context(&service, &meeting_id, &run_id, action)
+            .unwrap());
+        let classic = service.live_notes.status(&service, &meeting_id).unwrap();
+        assert_eq!(classic.status, "stopped");
+        assert!(classic.view.as_ref().unwrap().questions.is_empty());
+        assert_eq!(
+            classic.view.unwrap().workspace.unwrap().entities[0].status,
+            "discussed"
+        );
+        drop(runner);
+        drop(service);
+        remove_fixture_root(root);
+    }
+    #[test]
     fn terminal_status_never_reports_waiting_for_transcript() {
         let shared = Arc::new(Mutex::new(Shared {
+            update_started: None,
             status: "waiting".into(),
             waiting_for_transcript: true,
             error: None,
@@ -924,6 +1492,8 @@ mod tests {
             view: None,
         }));
         let job = Job {
+            workspace_folder: None,
+            workspace_context: None,
             meeting_id: "a".repeat(32),
             control: AnalysisControl::default(),
             manual: Arc::new(AtomicBool::new(false)),
@@ -953,6 +1523,7 @@ mod tests {
             data: data.clone(),
             active: true,
             recognizing_tracks: [true; 2],
+            batch_recognition: false,
         }
         .recognition_needs_priority());
         data.parts[0].processed_samples = 80_000;
@@ -960,6 +1531,7 @@ mod tests {
             data: data.clone(),
             active: true,
             recognizing_tracks: [true; 2],
+            batch_recognition: false,
         }
         .recognition_needs_priority());
         data.parts[0].processed_samples = 160_000;
@@ -967,6 +1539,7 @@ mod tests {
             data: data.clone(),
             active: true,
             recognizing_tracks: [true; 2],
+            batch_recognition: false,
         }
         .recognition_needs_priority());
         data.parts[0].model_id = Some("another-model".into());
@@ -974,12 +1547,14 @@ mod tests {
             data: data.clone(),
             active: true,
             recognizing_tracks: [true; 2],
+            batch_recognition: false,
         }
         .recognition_needs_priority());
         assert!(!Snapshot {
             data,
             active: false,
             recognizing_tracks: [false; 2],
+            batch_recognition: false,
         }
         .recognition_needs_priority());
     }
@@ -1007,6 +1582,7 @@ mod tests {
                     data,
                     active: true,
                     recognizing_tracks: [true; 2],
+                    batch_recognition: false,
                 };
                 assert_eq!(
                     live_texts(&snapshot.data).0[0].text,
@@ -1107,6 +1683,23 @@ mod tests {
         }
     }
 
+    // Only freshly generated roots owned by the tests above may be removed.
+    fn remove_fixture_root(root: std::path::PathBuf) {
+        let temp = std::fs::canonicalize(std::env::temp_dir()).unwrap();
+        let absolute = std::fs::canonicalize(&root).unwrap();
+        assert_eq!(absolute.parent(), Some(temp.as_path()));
+        assert!(absolute
+            .file_name()
+            .unwrap()
+            .to_string_lossy()
+            .starts_with("handymeeting-live-"));
+        assert!(!std::fs::symlink_metadata(&root)
+            .unwrap()
+            .file_type()
+            .is_symlink());
+        std::fs::remove_dir_all(absolute).unwrap();
+    }
+
     fn fixture_root(label: &str) -> std::path::PathBuf {
         let nonce = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -1120,6 +1713,7 @@ mod tests {
 
     fn request(meeting_id: &str, mode: &str, endpoint: &str) -> LiveNotesRequest {
         LiveNotesRequest {
+            workspace: None,
             meeting_id: meeting_id.into(),
             endpoint: endpoint.into(),
             model: "synthetic".into(),
@@ -1142,6 +1736,56 @@ mod tests {
             assert!(Instant::now() < deadline, "still {}", status.status);
             thread::sleep(Duration::from_millis(20));
         }
+    }
+
+    #[test]
+    fn archived_live_sources_use_verified_retained_transcript() {
+        let root = fixture_root("archived-sources");
+        let service = Service::new(root.clone()).unwrap();
+        let store = meeting_core::SessionStore::create(
+            &root.join("sessions"),
+            "Synthetic archived source",
+            "fixture-model",
+            "system",
+            None,
+        )
+        .unwrap();
+        let mut writer = meeting_core::PcmWriter::new(store.clone(), "system").unwrap();
+        writer.append(&[42; 1600]).unwrap();
+        writer.finish().unwrap();
+        drop(writer);
+        let data = store.snapshot().unwrap();
+        let id = data.id;
+        let original = "Original retained text";
+        store
+            .append_transcript(meeting_core::TranscriptCheckpoint {
+                sequence: 0,
+                at: String::new(),
+                file: data.parts[0].file.clone(),
+                model_id: "fixture-model".into(),
+                full: original.into(),
+                committed: original.into(),
+                tentative: String::new(),
+                processed_samples: 1600,
+                final_text: true,
+                revision_after_restart: false,
+            })
+            .unwrap();
+        store.set_status("recorded").unwrap();
+        store.set_status("complete").unwrap();
+        drop(store);
+        meeting_core::archive::archive_audio(&root, &id, 0, &AtomicBool::new(false), |_, _| {})
+            .unwrap();
+        let snapshot = service.live_snapshot(&id, None).unwrap();
+        assert!(snapshot.data.read_only);
+        assert_eq!(live_texts(&snapshot.data).0[0].text, original);
+
+        let marker = root.join("sessions").join(&id).join("audio-archive.json");
+        std::fs::write(&marker, b"broken").unwrap();
+        assert!(service.live_snapshot(&id, None).is_err());
+        assert_eq!(std::fs::read(marker).unwrap(), b"broken");
+        drop(service);
+        remove_fixture_root(root);
     }
 
     #[test]
@@ -1414,5 +2058,43 @@ mod tests {
             1
         );
         let _ = std::fs::remove_dir_all(root);
+    }
+}
+
+#[cfg(test)]
+mod batch_admission_regression {
+    use super::*;
+    #[test]
+    fn closed_batch_backlog_yields_to_live_notes_between_six_second_cycles() {
+        // Accelerated six-minute, two-track scheduling simulation: no physical devices.
+        let rate = u64::from(meeting_core::SAMPLE_RATE);
+        for cycle in 1..=12_u64 {
+            for second in 0..30_u64 {
+                let parts = ["system", "microphone"].into_iter().flat_map(|source| {
+                    [serde_json::json!({"file":format!("{source}-closed.wav"),"source":source,"startSample":(cycle-1)*30*rate,"sampleCount":30*rate,"confirmedSampleCount":30*rate,"audioClosed":true,"processedSamples":if second>=6 {30*rate}else{0},"modelId":"batch-model","status":if second>=6 {"complete"}else{"pending"},"text":if second>=6 {Some("Confirmed new text.")}else{None}}),
+                     serde_json::json!({"file":format!("{source}-open.wav"),"source":source,"startSample":cycle*30*rate,"sampleCount":second*rate,"confirmedSampleCount":second*rate,"audioClosed":false,"processedSamples":0,"modelId":"batch-model","status":"pending"})]
+                }).collect::<Vec<_>>();
+                let data: SessionData=serde_json::from_value(serde_json::json!({"schemaVersion":2,"id":"a".repeat(32),"title":"Synthetic batch admission","startedAt":"2026-11-04T00:00:00Z","status":"recording","modelId":"batch-model","parts":parts})).unwrap();
+                let before = serde_json::to_vec(&data).unwrap();
+                let mut snapshot = Snapshot {
+                    data,
+                    active: true,
+                    recognizing_tracks: [true; 2],
+                    batch_recognition: true,
+                };
+                assert_eq!(
+                    snapshot.recognition_needs_priority(),
+                    second < 6,
+                    "cycle {cycle} second {second}"
+                );
+                assert_eq!(serde_json::to_vec(&snapshot.data).unwrap(), before);
+                if second >= 6 {
+                    assert_eq!(live_texts(&snapshot.data).0.len(), 2);
+                }
+                // Streaming can process an open section, so its original five-second protection remains.
+                snapshot.batch_recognition = false;
+                assert!(snapshot.recognition_needs_priority());
+            }
+        }
     }
 }

@@ -1,0 +1,285 @@
+/* Shared reading density for both approved presets and their full tabs. */
+.prototype .panel-heading {
+  padding: 7px 10px 6px;
+  min-height: 38px;
+  gap: 5px;
+}
+.prototype .panel-heading .panel-actions {
+  flex-wrap: nowrap;
+  gap: 2px;
+  flex-shrink: 0;
+}
+.prototype .panel-heading > .panel-actions > .icon-button {
+  height: 26px;
+  width: 26px;
+  min-height: 26px;
+  padding: 4px;
+}
+.prototype .panel-heading .heading-meta {
+  margin-left: 1px;
+}
+.prototype .transcript-tools {
+  flex-wrap: nowrap;
+  gap: 6px;
+  padding: 0 10px 7px;
+}
+.prototype .transcript-tools > select {
+  flex: 0 0 auto;
+  max-width: 115px;
+}
+.prototype .transcript-tools .search-input {
+  min-width: 0;
+  max-width: none;
+  flex: 1;
+}
+.prototype .transcript-tools .search-input input {
+  min-width: 0;
+  width: 100%;
+}
+.prototype .transcript-panel > .panel-heading {
+  flex-wrap: nowrap;
+}
+.prototype .transcript-panel .panel-heading h2 {
+  gap: 5px;
+}
+.prototype .transcript-panel .panel-heading .icon-button.selected {
+  color: var(--accent);
+  background: var(--tint);
+  border-color: var(--line);
+}
+.filter-count {
+  font-size: 9px;
+  position: absolute;
+  top: 0;
+  right: 0;
+  background: var(--accent);
+  color: var(--surface);
+  border-radius: 4px;
+  padding: 0 2px;
+}
+.transcript-panel .panel-heading .icon-button {
+  position: relative;
+}
+.prototype .transcript-row {
+  padding: 7px 6px;
+}
+.prototype .transcript-meta {
+  margin-bottom: 3px;
+  gap: 6px;
+}
+.prototype .transcript-row p {
+  line-height: 1.5;
+}
+.prototype .listen-link {
+  margin-top: 3px;
+}
+.prototype .tab-transcript .transcript-row {
+  padding: 10px 12px;
+}
+.prototype .tab-transcript .transcript-row p {
+  font-size: 15px;
+}
+.prototype .tab-transcript .transcript-tools {
+  padding: 3px 12px 8px;
+}
+.prototype .tab-transcript .transcript-tools .search-input {
+  max-width: 500px;
+}
+.prototype .topic-sharing {
+  font-size: 10px;
+  min-height: 24px;
+  white-space: nowrap;
+  padding: 2px 4px;
+}
+.prototype .topic-filter {
+  margin-bottom: 5px;
+}
+.prototype .topic-row {
+  padding: 6px 0;
+}
+.prototype .topic-status {
+  margin-top: 2px;
+}
+.prototype .topic-detail {
+  padding-top: 5px;
+}
+.prototype .topic-bottom {
+  padding: 6px 10px;
+}
+.prototype .details-full {
+  gap: 10px;
+  padding: 12px;
+}
+.prototype .details-full .detail-cell {
+  padding: 12px;
+}
+.prototype .details-full .detail-cell h3 {
+  font-size: 16px;
+  margin: 7px 0 5px;
+}
+.prototype .details-full .detail-cell p {
+  margin-top: 8px;
+  line-height: 1.5;
+}
+.prototype .details-full .detail-cell .quote {
+  font-size: 13px;
+}
+.prototype .impulse-row {
+  padding: 7px 0;
+}
+.prototype .impulse-row .quote {
+  margin: 3px 0;
+  line-height: 1.5;
+}
+.prototype .impulse-actions {
+  margin-top: 2px;
+  gap: 12px;
+}
+.prototype .impulse-filters {
+  padding-bottom: 5px;
+  gap: 6px;
+}
+.prototype .tab-impulses .impulse-row {
+  padding: 9px 6px;
+}
+.prototype .tab-impulses .impulse-title {
+  font-size: 14px;
+}
+.prototype .change-row {
+  padding: 6px 0;
+  gap: 7px;
+}
+.prototype .history-layout .change-row {
+  padding: 9px 8px;
+}
+.prototype .history-layout .change-title {
+  font-size: 13px;
+}
+.prototype .history-layout .change-row .quote {
+  font-size: 12px;
+}
+.prototype .change-actions {
+  gap: 8px;
+  margin-top: 3px;
+}
+.prototype .history-entry {
+  padding: 7px 0;
+  gap: 9px;
+  line-height: 1.5;
+}
+.prototype .relevant-items {
+  gap: 7px;
+  padding: 0 10px 10px;
+}
+.prototype .relevant-items .now-item {
+  min-height: 0;
+  padding: 7px 8px;
+  gap: 3px;
+}
+.prototype .relevant-items .now-item b {
+  line-height: 1.4;
+}
+.prototype dialog.wide-modal .panel-heading {
+  padding: 8px 12px;
+  min-height: 40px;
+}
+.prototype dialog.wide-modal .panel-heading h2 {
+  font-size: 15px;
+}
+
+/* Height is a separate view preference; text and note-version saving are unchanged. */
+.notes-resizable {
+  position: relative;
+}
+.notes-resizable.notes-open {
+  height: var(--notes-height);
+  display: flex;
+  flex-direction: column;
+}
+.notes-resizable .notes-heading {
+  min-height: 38px;
+  flex-shrink: 0;
+  padding-top: 5px;
+  padding-bottom: 5px;
+}
+.notes-resizable .notes-input-wrap {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  padding-bottom: 16px;
+}
+.notes-resizable .notes-input-wrap textarea {
+  height: 100%;
+  flex: 1;
+  min-height: 36px;
+  max-height: none;
+  resize: none;
+  overflow: auto;
+  line-height: 1.5;
+}
+.notes-size-grip {
+  position: absolute;
+  top: -4px;
+  left: 0;
+  right: 0;
+  height: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: ns-resize;
+  touch-action: none;
+  z-index: 6;
+  color: var(--muted);
+  outline-offset: 2px;
+}
+.notes-size-grip > svg {
+  height: 8px;
+  width: 34px;
+  border-radius: 5px;
+  background: var(--surface);
+  transition:
+    background 0.12s,
+    color 0.12s;
+}
+.notes-size-grip:hover > svg,
+.notes-size-grip:focus-visible > svg {
+  background: var(--tint);
+  color: var(--accent);
+}
+.notes-key-hint {
+  position: absolute;
+  left: 16px;
+  bottom: 2px;
+  font-size: 9px;
+  color: var(--muted);
+  visibility: hidden;
+  pointer-events: none;
+}
+.notes-input-wrap:focus-within .notes-key-hint {
+  visibility: visible;
+}
+@container (max-width:480px) {
+  .prototype .transcript-panel > .panel-heading h2 {
+    font-size: 12px;
+    gap: 4px;
+  }
+  .prototype .transcript-panel > .panel-heading .heading-meta {
+    font-size: 9px;
+  }
+  .prototype .panel-heading .panel-actions {
+    gap: 0;
+  }
+  .prototype .topic-sharing {
+    font-size: 9px;
+    padding: 2px;
+  }
+  .notes-key-hint {
+    left: 12px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .notes-size-grip > svg {
+    transition: none;
+  }
+}

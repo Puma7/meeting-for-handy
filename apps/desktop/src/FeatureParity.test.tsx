@@ -8,6 +8,7 @@ import {
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import App from "./App";
+import SourceAudioPreview from "./workspace/SourceAudioPreview";
 import { defaultTemplate } from "./domain";
 import { testServices } from "./test-services";
 import { TEMPLATE_KEY } from "./useTemplateLibrary";
@@ -504,3 +505,151 @@ it("passes only the approved agent scope and current UI devices without starting
   );
   expect(data.api.startMeeting).not.toHaveBeenCalled();
 });
+
+it.each([true, false])(
+  "prefers streaming initially and preserves explicit batch capture (stream available: %s)",
+  async (hasStreaming) => {
+    const data = fixture();
+    const current = data.getState();
+    data.setState({
+      ...current,
+      activeMeeting: null,
+      handy: {
+        ...current.handy!,
+        models: [
+          {
+            id: "parakeet-ultra",
+            name: "Parakeet Ultra",
+            isDownloaded: true,
+            supportsStreaming: false,
+            supportsBatch: true,
+          },
+          ...(hasStreaming ? current.handy!.models : []),
+        ],
+      },
+      agent: {
+        connected: true,
+        label: "Synthetic agent",
+        ownerId: "fixture-owner",
+        revoked: false,
+        pending: {
+          requestId: "fixture-batch-request",
+          title: "Explicit request",
+          includeMicrophone: false,
+          maxDurationSeconds: 600,
+          status: "pending",
+        },
+        ownedSessionId: null,
+        expiresAtUnixMs: null,
+      },
+    });
+    render(<App api={data.api} />);
+    const approve = await screen.findByRole("button", {
+      name: "Diese Aufnahme erlauben",
+    });
+    await waitFor(() =>
+      expect((approve as HTMLButtonElement).disabled).toBe(!hasStreaming),
+    );
+    expect(
+      (screen.getByLabelText("Erkennungsmodell aus Handy") as HTMLSelectElement)
+        .value,
+    ).toBe(hasStreaming ? "streaming" : "parakeet-ultra");
+    await userEvent.selectOptions(
+      screen.getByLabelText("Erkennungsmodell aus Handy"),
+      "parakeet-ultra",
+    );
+    expect(
+      (
+        screen.getByRole("button", {
+          name: "Aufnahme starten",
+        }) as HTMLButtonElement
+      ).disabled,
+    ).toBe(false);
+    expect((approve as HTMLButtonElement).disabled).toBe(true);
+    await userEvent.click(approve);
+    expect(data.api.agentDecideRecording).not.toHaveBeenCalled();
+    await userEvent.click(
+      screen.getByRole("button", { name: "Aktualisieren" }),
+    );
+    await waitFor(() => expect(data.api.refreshHandy).toHaveBeenCalledOnce());
+    expect(
+      (screen.getByLabelText("Erkennungsmodell aus Handy") as HTMLSelectElement)
+        .value,
+    ).toBe("parakeet-ultra");
+    expect((approve as HTMLButtonElement).disabled).toBe(true);
+    if (hasStreaming) {
+      await userEvent.selectOptions(
+        screen.getByLabelText("Erkennungsmodell aus Handy"),
+        "streaming",
+      );
+      expect((approve as HTMLButtonElement).disabled).toBe(false);
+    }
+  },
+);
+
+it("never attaches a revoked preview URL when retrying a media failure", async () => {
+  const revoked = new Set<string>();
+  const committed: string[] = [];
+  let index = 0;
+  const originalCreate = Object.getOwnPropertyDescriptor(
+    URL,
+    "createObjectURL",
+  );
+  const originalRevoke = Object.getOwnPropertyDescriptor(
+    URL,
+    "revokeObjectURL",
+  );
+  Object.defineProperty(URL, "createObjectURL", {
+    configurable: true,
+    value: vi.fn(() => `blob:preview-${++index}`),
+  });
+  Object.defineProperty(URL, "revokeObjectURL", {
+    configurable: true,
+    value: vi.fn((url: string) => revoked.add(url)),
+  });
+  const originalSet = Element.prototype.setAttribute;
+  const setter = vi
+    .spyOn(Element.prototype, "setAttribute")
+    .mockImplementation(function (this: Element, name: string, value: string) {
+      if (this.tagName === "AUDIO" && name === "src") committed.push(value);
+      return originalSet.call(this, name, value);
+    });
+  const load = vi.fn(async () => new ArrayBuffer(44));
+  const view = render(
+    <SourceAudioPreview file="synthetic.wav" load={load} offsetSeconds={2} />,
+  );
+  try {
+    fireEvent.click(
+      screen.getByRole("button", { name: "Audiovorschau laden" }),
+    );
+    const audio = await screen.findByLabelText(
+      "Audiovorschau des Originalabschnitts",
+    );
+    expect(audio.getAttribute("src")).toBe("blob:preview-1");
+    fireEvent.error(audio);
+    expect(revoked.has("blob:preview-1")).toBe(true);
+    fireEvent.click(
+      screen.getByRole("button", { name: "Audiovorschau laden" }),
+    );
+    await waitFor(() =>
+      expect(
+        screen
+          .getByLabelText("Audiovorschau des Originalabschnitts")
+          .getAttribute("src"),
+      ).toBe("blob:preview-2"),
+    );
+    expect(committed).toEqual(["blob:preview-1", "blob:preview-2"]);
+    expect(load).toHaveBeenCalledTimes(2);
+    view.unmount();
+    expect([...revoked]).toEqual(["blob:preview-1", "blob:preview-2"]);
+  } finally {
+    view.unmount();
+    setter.mockRestore();
+    if (originalCreate)
+      Object.defineProperty(URL, "createObjectURL", originalCreate);
+    else Reflect.deleteProperty(URL, "createObjectURL");
+    if (originalRevoke)
+      Object.defineProperty(URL, "revokeObjectURL", originalRevoke);
+    else Reflect.deleteProperty(URL, "revokeObjectURL");
+  }
+}, 5_000);

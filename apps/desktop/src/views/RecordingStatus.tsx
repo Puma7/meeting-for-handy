@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import { Cpu } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { Cpu, TriangleAlert } from "lucide-react";
 import { clock } from "../domain";
 import type { AudioPart, DesktopApi, Locale, SystemLoad } from "../types";
 
@@ -106,6 +106,9 @@ export default function RecordingStatus({
   const gb = (bytes: number) => number(bytes / 1024 ** 3, 1);
   const text = recentText(parts);
   const behind = backlogMs !== null && backlogMs >= 30_000;
+  const recordingNotices = de
+    ? `${warningCount} ${warningCount === 1 ? "Hinweis" : "Hinweise"} zur Aufnahme`
+    : `${warningCount} recording ${warningCount === 1 ? "notice" : "notices"}`;
   const audioNote = microphoneSilent
     ? de
       ? "Mikrofon nimmt nicht auf"
@@ -115,12 +118,51 @@ export default function RecordingStatus({
         ? "Mikrofon stummgeschaltet"
         : "Microphone muted"
       : warningCount > 0
-        ? de
-          ? `${warningCount} ${warningCount === 1 ? "Hinweis" : "Hinweise"} zur Aufnahme`
-          : `${warningCount} recording ${warningCount === 1 ? "notice" : "notices"}`
+        ? recordingNotices
         : de
           ? "Keine Störung gemeldet"
           : "No problem reported";
+  const warning = microphoneSilent || warningCount > 0 || behind;
+  const backlogNote = de ? "Erkennung im Rückstand" : "Transcription behind";
+  const checkLabel = de ? "Aufnahme prüfen" : "Check recording";
+  const warningTitle = `${checkLabel}: ${[
+    microphoneSilent || microphoneMuted ? audioNote : null,
+    warningCount > 0 ? recordingNotices : null,
+    behind ? backlogNote : null,
+  ]
+    .filter(Boolean)
+    .join(" · ")}`;
+  const warningMessage = `${checkLabel}: ${[
+    microphoneSilent
+      ? de
+        ? "Mikrofon nimmt nicht auf"
+        : "Microphone is not recording"
+      : null,
+    warningCount > 0 ? recordingNotices : null,
+    behind ? backlogNote : null,
+  ]
+    .filter(Boolean)
+    .join(" · ")}`;
+  const previousWarnings = useRef({ microphoneSilent, warningCount, behind });
+  const [announcement, setAnnouncement] = useState("");
+  // Keep the region mounted even in the collapsed sidebar. Only newly reported
+  // reasons announce; initial state, time/load polling and removals stay quiet.
+  useEffect(() => {
+    const previous = previousWarnings.current;
+    if (
+      (microphoneSilent && !previous.microphoneSilent) ||
+      warningCount > previous.warningCount ||
+      (behind && !previous.behind)
+    )
+      setAnnouncement(warningMessage);
+    else if (
+      microphoneSilent !== previous.microphoneSilent ||
+      warningCount !== previous.warningCount ||
+      behind !== previous.behind
+    )
+      setAnnouncement("");
+    previousWarnings.current = { microphoneSilent, warningCount, behind };
+  }, [microphoneSilent, warningCount, behind, warningMessage]);
   const status = paused
     ? de
       ? "Aufnahme pausiert"
@@ -132,18 +174,41 @@ export default function RecordingStatus({
     <section
       className="sidebar-recording"
       data-paused={paused || undefined}
+      data-warning={warning || undefined}
       aria-label={de ? "Aufnahmestatus" : "Recording status"}
     >
       <button
         type="button"
         className="sidebar-recording-head"
-        title={de ? "Zur laufenden Aufnahme" : "Go to the recording"}
+        title={
+          warning
+            ? warningTitle
+            : de
+              ? "Zur laufenden Aufnahme"
+              : "Go to the recording"
+        }
         onClick={onOpen}
       >
-        <span className="recording-pulse" aria-hidden="true" />
+        {warning ? (
+          <TriangleAlert
+            className="recording-warning"
+            size={17}
+            aria-label={de ? "Aufnahme prüfen" : "Check recording"}
+          />
+        ) : (
+          <span className="recording-pulse" aria-hidden="true" />
+        )}
         <span className="sidebar-recording-label">{status}</span>
         <span className="sidebar-recording-time">{clock(durationMs)}</span>
       </button>
+      <p
+        role="status"
+        aria-live="polite"
+        aria-atomic="true"
+        className="sr-only"
+      >
+        {announcement}
+      </p>
       <dl className="sidebar-recording-facts">
         <div
           title={

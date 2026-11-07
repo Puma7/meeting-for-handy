@@ -57,11 +57,35 @@ pub(crate) fn screen_facts(
     template_id: &str,
     limit: usize,
 ) -> CheckedAnswer {
+    screen_facts_with_obligation_check(facts, sources, kind, template_id, limit, true)
+}
+
+/// Existing task statuses are not new obligations: "no longer needed" can
+/// withdraw a task. Keep all prior literal/number/metadata/uncertainty checks;
+/// workspace validation separately requires explicit completion/withdrawal evidence.
+pub(crate) fn screen_task_status_facts(
+    facts: Vec<Fact>,
+    sources: &[Source],
+    kind: &Kind,
+    template_id: &str,
+    limit: usize,
+) -> CheckedAnswer {
+    screen_facts_with_obligation_check(facts, sources, kind, template_id, limit, false)
+}
+
+fn screen_facts_with_obligation_check(
+    facts: Vec<Fact>,
+    sources: &[Source],
+    kind: &Kind,
+    template_id: &str,
+    limit: usize,
+    require_new_commitment: bool,
+) -> CheckedAnswer {
     let allowed = allowed_sources(sources);
     let mut checked = CheckedAnswer::default();
     for fact in facts {
         let reason = check_fact(&fact, &allowed, kind)
-            .or_else(|| generation_check(&fact, kind))
+            .or_else(|| generation_check(&fact, kind, require_new_commitment))
             .or_else(|| {
                 crate::name_candidates::check_item(template_id, &fact)
                     .err()
@@ -83,7 +107,11 @@ pub(crate) fn screen_facts(
 
 /// Additional conservative rules for newly generated answers only. Historical checkpoints
 /// still use their original literal-source contract; reading never rewrites older work.
-fn generation_check(fact: &Fact, kind: &Kind) -> Option<RejectionReason> {
+fn generation_check(
+    fact: &Fact,
+    kind: &Kind,
+    require_new_commitment: bool,
+) -> Option<RejectionReason> {
     let quoted: HashSet<String> = fact
         .evidence
         .iter()
@@ -101,7 +129,17 @@ fn generation_check(fact: &Fact, kind: &Kind) -> Option<RejectionReason> {
         return Some(RejectionReason::NumberNotQuoted);
     }
     if *kind == Kind::Tasks {
-        let commitments: Vec<_> = fact.evidence.iter().map(|e| commitment(&e.quote)).collect();
+        let commitments: Vec<_> = fact
+            .evidence
+            .iter()
+            .map(|e| {
+                if require_new_commitment {
+                    new_task_commitment(&e.quote)
+                } else {
+                    commitment(&e.quote)
+                }
+            })
+            .collect();
         if commitments.iter().all(|c| *c == Commitment::Nonbinding) {
             return Some(RejectionReason::NonbindingTask);
         }
@@ -253,17 +291,354 @@ const AFFIRMING_NEGATIONS: &[&str] = &[
     "nicht vergessen",
     "nicht vergisst",
     "nicht liegen lassen",
+    "kein problem",
+    "keine sorge",
+    "not a problem",
+    "no problem",
+    "no later than",
+    "no earlier than",
+    "don't worry",
+    "do not worry",
+    "don't forget",
+    "can't wait",
+    "cannot wait",
+    "don't mind",
+    "doesn't matter",
     "not forget",
     "won't forget",
 ];
 
+/// Remove whole affirming phrases while keeping every independent refusal word.
+/// Apostrophe normalization is only for screening; original evidence stays literal.
+/// A longer word such as "Sorgepflicht" must not turn a refusal into a promise.
+fn without_affirming_negations(text: &str) -> String {
+    let mut text = text.replace('’', "'");
+    let part_of_word = |c: char| c.is_alphanumeric() || c == '_';
+    for phrase in AFFIRMING_NEGATIONS {
+        let ranges: Vec<_> = text
+            .match_indices(*phrase)
+            .filter(|(start, phrase)| {
+                !text[..*start].chars().next_back().is_some_and(part_of_word)
+                    && !text[*start + phrase.len()..]
+                        .chars()
+                        .next()
+                        .is_some_and(part_of_word)
+            })
+            .map(|(start, phrase)| (start, start + phrase.len()))
+            .collect();
+        for (start, end) in ranges.into_iter().rev() {
+            text.replace_range(start..end, " ");
+        }
+    }
+    text
+}
+
+/// Existing explicit task markers shared by admission and commitment scoping.
+pub(crate) const ENGLISH_TASK_PLEDGES: &[&str] = &[
+    "i promise to ",
+    "we promise to ",
+    "i commit to ",
+    "we commit to ",
+    "i will ",
+    "we will ",
+    "i'll ",
+    "we'll ",
+    "i won't forget to ",
+    "we won't forget to ",
+    "i take ",
+    "we take ",
+    "takes on ",
+    "will handle",
+    "will prepare",
+    "will send",
+    "will check ",
+    "will ask ",
+    "is assigned",
+    "are assigned",
+    "commits to",
+];
+
+/// Existing explicit task markers shared by admission and commitment scoping.
+pub(crate) const GERMAN_TASK_PLEDGES: &[&str] = &[
+    "übernehme",
+    "übernimmt",
+    "übernehmen",
+    "ich werde",
+    "wir werden",
+    "ich schreibe",
+    "wir schreiben",
+    "schreibt ",
+    "ich erstelle",
+    "wir erstellen",
+    "erstellt ",
+    "ich prüfe",
+    "wir prüfen",
+    "prüft ",
+    "ich gebe",
+    "wir geben",
+    "ich kümmere",
+    "wir kümmern",
+    "ich erledige",
+    "wir erledigen",
+    "ich mache",
+    "wir machen",
+    "ich liefere",
+    "wir liefern",
+    "ich schicke",
+    "wir schicken",
+    "ich sende",
+    "wir senden",
+    "ich aktualisiere",
+    "wir aktualisieren",
+    "ich bestätige",
+    "wir bestätigen",
+    "ich verspreche",
+    "wir versprechen",
+    "beauftragt",
+];
+
+/// Auxiliaries that can make "erstellt" a completed-state participle.
+const COMPLETED_CREATION_AUXILIARIES: &[&str] = &[
+    "wurde", "wurden", "ist", "sind", "war", "waren", "hat", "haben", "hatte", "hatten",
+];
+
+/// Read completion within the current clause, including intervening modifiers.
+/// A clause boundary or coordination stops the backward screen before another assertion.
+fn completed_creation_before(text: &str) -> bool {
+    let clause = text
+        .rsplit([',', ';', '.', '!', '?', '\n', ':'])
+        .next()
+        .unwrap_or(text);
+    for word in clause
+        .split(|c: char| !c.is_alphabetic())
+        .filter(|word| !word.is_empty())
+        .rev()
+    {
+        if ["und", "oder", "aber", "doch", "sondern", "jedoch"].contains(&word) {
+            return false;
+        }
+        if COMPLETED_CREATION_AUXILIARIES.contains(&word) {
+            return true;
+        }
+    }
+    false
+}
+
+/// Locate a supported assertion at whole-word boundaries, retaining required continuations.
+pub(crate) fn task_pledge_end(text: &str, markers: &[&str]) -> Option<usize> {
+    let mut earliest: Option<usize> = None;
+    let word_char = |c: char| c.is_alphanumeric() || c == '_';
+    for marker in markers {
+        let continues = marker.ends_with(' ');
+        let marker = marker.trim_end();
+        for (start, found) in text.match_indices(marker) {
+            let end = start + found.len();
+            if text[..start].chars().next_back().is_some_and(word_char)
+                || text[end..].chars().next().is_some_and(word_char)
+            {
+                continue;
+            }
+            if continues
+                && !text[end..]
+                    .chars()
+                    .next()
+                    .is_some_and(|c| c.is_whitespace() || c == ',')
+            {
+                continue;
+            }
+            if marker == "erstellt" && completed_creation_before(&text[..start]) {
+                continue;
+            }
+            let count = text[..end]
+                .split(|c: char| !c.is_alphabetic())
+                .filter(|word| !word.is_empty())
+                .count();
+            earliest = Some(earliest.map_or(count, |old| old.min(count)));
+        }
+    }
+    earliest
+}
+
+/// Recognize an embedded question only after an explicit English assertion.
+pub(crate) fn embedded_english_question(
+    words: &[&str],
+    index: usize,
+    assertion_end: Option<usize>,
+) -> bool {
+    assertion_end.is_some_and(|end| index >= end)
+        && index > 0
+        && words[index] == "if"
+        && ["check", "ask"].contains(&words[index - 1])
+}
+
+/// Keep independent conditions distinct from a promised check-if/ask-if question.
+pub(crate) fn task_condition_present(text: &str) -> bool {
+    let words: Vec<_> = text
+        .split(|c: char| !c.is_alphabetic())
+        .filter(|word| !word.is_empty())
+        .collect();
+    let english = task_pledge_end(text, ENGLISH_TASK_PLEDGES);
+    words.iter().enumerate().any(|(index, word)| {
+        ["if", "unless", "falls", "wenn", "sofern"].contains(word)
+            && !embedded_english_question(&words, index, english)
+    })
+}
+
+/// Borrow word spans from normalized admission text, preserving UTF-8 slice boundaries.
+fn commitment_word_spans(text: &str) -> Vec<(usize, &str)> {
+    let mut spans = Vec::new();
+    let mut start = None;
+    for (index, character) in text
+        .char_indices()
+        .chain(std::iter::once((text.len(), ' ')))
+    {
+        if character.is_alphabetic() {
+            start.get_or_insert(index);
+        } else if let Some(begin) = start.take() {
+            spans.push((begin, &text[begin..index]));
+        }
+    }
+    spans
+}
+
+/// Screen the promise rather than a negated subject of its first subordinate clause.
+/// Conditions and questions retain whole-quote screening. Later clauses/coordination
+/// stay in the screen conservatively, so an independent refusal cannot be hidden.
+pub(crate) fn commitment_assertion_text(quote: &str) -> String {
+    let text = quote.to_lowercase().replace('’', "'");
+    if text.contains('?') || task_condition_present(&text) {
+        return text;
+    }
+    let spans = commitment_word_spans(&text);
+    let words: Vec<_> = spans.iter().map(|(_, word)| *word).collect();
+    let english = task_pledge_end(&text, ENGLISH_TASK_PLEDGES);
+    let german = task_pledge_end(&text, GERMAN_TASK_PLEDGES);
+    let subject = words.iter().enumerate().find_map(|(index, word)| {
+        ((["that", "whether"].contains(word) && english.is_some_and(|end| index >= end))
+            || embedded_english_question(&words, index, english)
+            || (english.is_some_and(|end| index >= end)
+                && *word == "nothing"
+                && (words[..index].ends_with(&["make", "sure"])
+                    || words[..index].ends_with(&["ensure"])))
+            || (german.is_some_and(|end| index >= end)
+                && *word == "nichts"
+                && (words[..index].ends_with(&["darauf", "achten"])
+                    || words[..index].ends_with(&["sicherstellen"])))
+            || (["ob", "dass"].contains(word) && german.is_some_and(|end| index >= end)))
+        .then_some(index)
+    });
+    let Some(subject) = subject else {
+        return text;
+    };
+    let prefix = &text[..spans[subject].0];
+    let suffix = ((subject + 1)..spans.len()).find_map(|index| {
+        let previous_end = spans[index - 1].0 + spans[index - 1].1.len();
+        let separator = &text[previous_end..spans[index].0];
+        (separator
+            .chars()
+            .any(|c| [',', ';', '\n', '.', '!'].contains(&c))
+            || [
+                "and",
+                "or",
+                "but",
+                "however",
+                "though",
+                "although",
+                "und",
+                "oder",
+                "aber",
+                "jedoch",
+                "doch",
+                "sondern",
+                "allerdings",
+            ]
+            .contains(&spans[index].1))
+        .then_some(spans[index].0)
+    });
+    match suffix {
+        Some(start) => format!("{prefix} {}", &text[start..]),
+        None => prefix.to_owned(),
+    }
+}
+
+/// Share the actual generation screen with workspace schema admission.
+pub(crate) fn has_new_task_commitment(quote: &str) -> bool {
+    new_task_commitment(quote) != Commitment::Nonbinding
+}
+
+/// New work must reject independent conditions in both classic and workspace paths.
+fn new_task_commitment(quote: &str) -> Commitment {
+    let text = quote.to_lowercase().replace('’', "'");
+    let assertion = commitment_assertion_text(quote);
+    let completed_creation = commitment_word_spans(&assertion)
+        .iter()
+        .any(|(start, word)| {
+            *word == "erstellt" && completed_creation_before(&assertion[..*start])
+        });
+    let explicit_pledge = task_pledge_end(&assertion, GERMAN_TASK_PLEDGES).is_some()
+        || task_pledge_end(&assertion, ENGLISH_TASK_PLEDGES).is_some();
+    if task_condition_present(&text)
+        || commitment_refused(quote)
+        || (completed_creation && !explicit_pledge)
+    {
+        Commitment::Nonbinding
+    } else {
+        commitment(quote)
+    }
+}
+
+/// Refusal screen for newly generated obligations, shared with workspace schema
+/// admission. Existing literal checkpoints are not reinterpreted by this rule.
+pub(crate) fn commitment_refused(quote: &str) -> bool {
+    let text = commitment_assertion_text(quote);
+    let without_affirmation = without_affirming_negations(&text);
+    let words: Vec<_> = without_affirmation
+        .split(|c: char| !c.is_alphabetic())
+        .filter(|word| !word.is_empty())
+        .collect();
+    // A negative actor before the pledge cannot accept work. Scope is already
+    // limited to the assertion; "check that no one ..." keeps its positive promise.
+    let predicate = words
+        .iter()
+        .position(|word| ["will", "shall", "ll"].contains(word))
+        .or_else(|| task_pledge_end(&without_affirmation, ENGLISH_TASK_PLEDGES));
+    let negative_actor = predicate.is_some_and(|end| words[..end].contains(&"no"));
+    negative_actor
+        || without_affirmation.contains("n't")
+        || without_affirmation
+            .split(|c: char| !c.is_alphabetic())
+            .any(|word| {
+                [
+                    "nicht",
+                    "nie",
+                    "niemals",
+                    "keineswegs",
+                    "kein",
+                    "keine",
+                    "keinen",
+                    "keinem",
+                    "keiner",
+                    "keines",
+                    "niemand",
+                    "nichts",
+                    "not",
+                    "never",
+                    "nobody",
+                    "nothing",
+                    "noone",
+                    "none",
+                    "neither",
+                    "cannot",
+                ]
+                .contains(&word)
+            })
+}
+
 /// Conservative commitment reading of one literal quote. Hedges and refusals reject the task;
 /// a hedge directly before a date only makes the date unverified.
 fn commitment(quote: &str) -> Commitment {
-    let text = quote.to_lowercase();
-    let negation = AFFIRMING_NEGATIONS
-        .iter()
-        .fold(text.clone(), |text, phrase| text.replace(phrase, " "));
+    let text = commitment_assertion_text(quote);
+    let negation = without_affirming_negations(&text);
     if [
         "könnten ",
         "könnte ",
@@ -288,7 +663,7 @@ fn commitment(quote: &str) -> Commitment {
         .collect();
     let mut hedged_date = false;
     for (index, word) in words.iter().enumerate() {
-        if ["vielleicht", "maybe", "perhaps"].contains(word) {
+        if TASK_HEDGES.contains(word) {
             if starts_date(&words[index + 1..]) {
                 hedged_date = true;
             } else {
@@ -296,12 +671,33 @@ fn commitment(quote: &str) -> Commitment {
             }
         }
     }
+    // A deadline hedge remains unverified even when it occurs in the subject.
+    let literal = quote.to_lowercase();
+    let literal_words: Vec<_> = literal
+        .split(|c: char| !c.is_alphanumeric())
+        .filter(|word| !word.is_empty())
+        .collect();
+    hedged_date |= literal_words.iter().enumerate().any(|(index, word)| {
+        TASK_HEDGES.contains(word) && starts_date(&literal_words[index + 1..])
+    });
     if hedged_date {
         Commitment::UncertainDate
     } else {
         Commitment::Binding
     }
 }
+
+/// A predicate hedge weakens work itself; the same word before a date weakens only its due.
+const TASK_HEDGES: &[&str] = &[
+    "vielleicht",
+    "maybe",
+    "perhaps",
+    "wahrscheinlich",
+    "vermutlich",
+    "hoffentlich",
+    "probably",
+    "hopefully",
+];
 
 /// Reads a saved per-batch checkpoint strictly: saved items are never filtered or repaired,
 /// so a damaged checkpoint blocks instead of silently shrinking confirmed work.
@@ -389,6 +785,261 @@ fn check_fact(fact: &Fact, allowed: &HashMap<&str, &str>, kind: &Kind) -> Option
 #[cfg(test)]
 mod generation_tests {
     use super::*;
+    #[test]
+    /// Classic generation must share the safeguard and hedge rules without rewriting evidence.
+    fn safeguards_and_predicate_hedges_preserve_only_binding_tasks() {
+        let mut mismatches = Vec::new();
+        for (quote, allowed) in [
+            ("I will make sure nothing is missed.", true),
+            ("Ich werde darauf achten, nichts zu übersehen.", true),
+            ("Ich werde sicherstellen, dass nichts übersehen wird.", true),
+            ("I will collect nothing.", false),
+            ("Ich übernehme nichts.", false),
+            ("I will not make sure nothing is missed.", false),
+            ("I will probably write the report.", false),
+            ("Ich werde wahrscheinlich den Bericht schreiben.", false),
+            ("I will write the report, probably by Friday.", true),
+            (
+                "Ich werde den Bericht schreiben, wahrscheinlich bis Freitag.",
+                true,
+            ),
+        ] {
+            let result = check(quote, "Prepare the report", Kind::Tasks);
+            if result.items.len() != usize::from(allowed) {
+                mismatches.push(format!("{quote}: retained {}", result.items.len()));
+            } else if let Some(item) = result.items.first() {
+                assert_eq!(item.evidence[0].quote, quote);
+            }
+        }
+        assert!(mismatches.is_empty(), "{}", mismatches.join("\n"));
+        for quote in [
+            "I will write the report, probably by Friday.",
+            "Ich werde den Bericht schreiben, wahrscheinlich bis Freitag.",
+        ] {
+            let due = if quote.starts_with("I ") {
+                "Friday"
+            } else {
+                "Freitag"
+            };
+            assert!(
+                check_due(quote, "Prepare the report", Some(due), Kind::Tasks)
+                    .items
+                    .is_empty()
+            );
+        }
+    }
+
+    #[test]
+    fn negative_subjects_keep_real_tasks_without_admitting_refusals_or_hedged_dates() {
+        let mut mismatches = Vec::new();
+        for (quote, allowed) in [
+            ("I will check that the report is not public.", true),
+            (
+                "Ich übernehme die Prüfung, ob der Bericht nicht öffentlich ist.",
+                true,
+            ),
+            ("I will check if the report is not public.", true),
+            ("I’ll ask whether there is no commitment yet.", true),
+            ("Ich prüfe, ob der Bericht nicht öffentlich ist.", true),
+            (
+                "Ich werde prüfen, ob der Bericht nicht öffentlich ist.",
+                true,
+            ),
+            ("I will ensure that the report is not public.", true),
+            ("I will not check that the report is public.", false),
+            (
+                "Ich übernehme die Prüfung nicht, ob der Bericht öffentlich ist.",
+                false,
+            ),
+            (
+                "I will check that the report is not public, but I will not do the check.",
+                false,
+            ),
+            (
+                "I will check that the report is not public; no commitment.",
+                false,
+            ),
+            (
+                "I will check that the report is not public and I will not do the check.",
+                false,
+            ),
+            (
+                "I will check if the report is not public if approval arrives.",
+                false,
+            ),
+            ("I will write the report if approval arrives.", false),
+            ("Ich schreibe den Bericht, sofern Freigabe kommt.", false),
+            (
+                "I won’t forget to check that the report is not public.",
+                true,
+            ),
+            ("I won’t forget to check if the report is ready.", true),
+            ("I won’t forget to not check the report.", false),
+            (
+                "I won’t forget to check that the report is not public, but I won’t do the check.",
+                false,
+            ),
+            ("Robin will check if the report is ready.", true),
+            ("Robin will check that the report is not public.", true),
+            ("Robin will ask if the report is ready.", true),
+            ("Robin will not check if the report is ready.", false),
+            ("Robin will check the report if approval arrives.", false),
+            ("No one will check the report.", false),
+            ("None of us will send the report.", false),
+            ("Neither Robin nor Casey will send the report.", false),
+            (
+                "I will check that none of us has published the report.",
+                true,
+            ),
+            ("I will check whether neither copy is public.", true),
+            ("No employee will send the report.", false),
+            ("Today no participant will prepare the report.", false),
+            ("Not a problem, no employee will send the report.", false),
+            ("I will check that no one has published the report.", true),
+            (
+                "I will ask whether no employee has published the report.",
+                true,
+            ),
+            (
+                "No problem, I will check that no one has published the report.",
+                true,
+            ),
+            ("No later than Friday, I will send the report.", true),
+            ("I will send the report no later than Friday.", true),
+            ("Das Protokoll wurde erstellt.", false),
+            ("Der Bericht ist erstellt.", false),
+            ("Das Protokoll wurde bereits erstellt.", false),
+            ("Der Bericht war heute schon vollständig erstellt.", false),
+            ("Das Protokoll ist bereits erstellt, wie besprochen.", false),
+            ("Robin ist bereit und erstellt den Bericht.", true),
+            ("Robin war krank, erstellt jetzt den Bericht.", true),
+            (
+                "Ich übernehme die Prüfung, ob das Protokoll bereits erstellt ist.",
+                true,
+            ),
+            ("Der Bericht wurde erstellt .", false),
+            ("Das Protokoll ist erstellt, wie besprochen.", false),
+            ("Robin erstellt, wie vereinbart, den Bericht.", true),
+            ("Robin erstellt den Bericht.", true),
+            (
+                "Ich übernehme die Prüfung, ob das Protokoll erstellt ist.",
+                true,
+            ),
+            (
+                "Das Protokoll wurde erstellt, ich übernehme die Prüfung.",
+                true,
+            ),
+            ("Maybe I will check that the report is not public.", false),
+        ] {
+            let checked = check(quote, "Check the report", Kind::Tasks);
+            if checked.items.len() != usize::from(allowed) {
+                mismatches.push(format!("{quote}: kept={}", checked.items.len()));
+            }
+            if let Some(item) = checked.items.first() {
+                assert_eq!(item.evidence[0].quote, quote);
+                assert!(item.owner.is_none() && item.due.is_none());
+            }
+        }
+        let quote = "I will check that the report is not public, maybe by Friday.";
+        let without_date = check(quote, "Check the report", Kind::Tasks);
+        if without_date.items.len() != 1 {
+            mismatches.push("Hedged date discarded the unconditional checking task".into());
+        }
+        assert!(
+            check_due(quote, "Check the report", Some("Friday"), Kind::Tasks)
+                .items
+                .is_empty()
+        );
+        assert!(
+            mismatches.is_empty(),
+            "Classic commitment scope mismatches: {mismatches:?}"
+        );
+    }
+    #[test]
+    fn explicit_refusals_are_not_generated_tasks_and_old_checkpoints_are_retained() {
+        for quote in [
+            "Ich übernehme den Bericht nicht.",
+            "Wir übernehmen den Bericht keineswegs.",
+            "Ich schreibe den Bericht niemals.",
+            "Ich verspreche nicht, den Bericht zu schreiben.",
+            "I do not promise to email the report.",
+            "We never take the report.",
+            "Kein Problem, ich übernehme den Bericht nicht.",
+            "Keine Sorge, ich verspreche nicht, den Bericht zu schreiben.",
+            "Not a problem, I will not email the report.",
+            "Ich übernehme keine Sorgepflicht für den Bericht.",
+            "I won’t email the report.",
+            "Not a problem, I won’t email the report.",
+            "I don't promise to email the report.",
+            "I don’t promise to email the report.",
+            "I can't take the report.",
+            "I can’t take the report.",
+            "I cannot write the report.",
+            "Don't worry, I can't take the report.",
+            "We can't promise that we will send the report.",
+            "We can’t promise that we will send the report.",
+            "I can't wait, but I won't email the report.",
+            "I cannot wait, but I cannot write the report.",
+            "I don't mind, but I won't email the report.",
+            "It doesn't matter, I cannot write the report.",
+        ] {
+            let checked = check(quote, "Bericht übernehmen", Kind::Tasks);
+            assert!(checked.items.is_empty(), "{quote}");
+            assert!(!checked.rejected.is_empty(), "{quote}");
+            // Saved results use strict literal verification, not a retroactive
+            // rerun of changed generation heuristics or a silent history filter.
+            let source = Source {
+                id: "synthetic".into(),
+                source: "system".into(),
+                start_ms: 0,
+                end_ms: 1000,
+                text: quote.into(),
+            };
+            let saved = CheckedAnswer {
+                items: vec![Fact {
+                    text: "Bericht übernehmen".into(),
+                    owner: None,
+                    due: None,
+                    evidence: vec![crate::Evidence {
+                        source_id: "synthetic".into(),
+                        quote: quote.into(),
+                    }],
+                }],
+                rejected: Default::default(),
+            };
+            let bytes = serde_json::to_string(&saved).unwrap();
+            assert_eq!(
+                serde_json::to_string(&read_checkpoint(&bytes, &[source], &Kind::Tasks).unwrap())
+                    .unwrap(),
+                bytes
+            );
+        }
+        for quote in [
+            "Ich übernehme den Bericht.",
+            "Wir übernehmen den Bericht.",
+            "Ich werde den Bericht nicht vergessen.",
+            "I will not forget to email the report.",
+            "Kein Problem, ich übernehme den Bericht.",
+            "KEIN PROBLEM – ich übernehme den Bericht.",
+            "Keine Sorge, ich schreibe den Bericht.",
+            "Not a problem, I will email the report.",
+            "Kein Problem: Ich werde den Bericht nicht vergessen.",
+            "I won’t forget to email the report.",
+            "Don't worry, I will email the report.",
+            "Do not worry, I will email the report.",
+            "Don't forget, I will email the report.",
+            "I can't wait, I will email the report.",
+            "I cannot wait, I will email the report.",
+            "I don't mind, I will email the report.",
+            "It doesn't matter, I will email the report.",
+        ] {
+            assert_eq!(
+                check(quote, "Bericht übernehmen", Kind::Tasks).items.len(),
+                1,
+                "{quote}"
+            );
+        }
+    }
     fn check(quote: &str, text: &str, kind: Kind) -> CheckedAnswer {
         check_due(quote, text, None, kind)
     }

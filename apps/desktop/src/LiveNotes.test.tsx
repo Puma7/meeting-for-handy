@@ -99,6 +99,38 @@ const local: LiveConnection = {
   useSavedKey: false,
 };
 
+it.each(["de", "en"] as const)(
+  "shows one short memory warning and retains detailed guidance when options open (%s)",
+  async (locale) => {
+    setup(
+      {
+        getLiveNotes: vi.fn().mockResolvedValue(status()),
+        startLiveNotes: vi.fn(),
+      },
+      { locale },
+    );
+    const summary = await screen.findByText(
+      locale === "de" ? "Optionen und Hinweise" : "Options and guidance",
+    );
+    const details = summary.closest("details")!;
+    fireEvent.click(summary);
+    details.open = true;
+    const short =
+      locale === "de"
+        ? "Lokales Textmodell benötigt zusätzlichen Arbeitsspeicher. Bei knappem Speicher erst nach der Aufnahme starten."
+        : "Local models need extra memory. If memory is low, start after recording.";
+    expect(screen.getAllByText(short)).toHaveLength(1);
+    expect(screen.getByText(short).closest("details")).toBeNull();
+    expect(
+      within(details).getByText(
+        locale === "de"
+          ? /Das lokale Textmodell läuft neben der Aufnahme/
+          : /The local text model runs next to the recording/,
+      ),
+    ).toBeTruthy();
+  },
+);
+
 it.each([true, false])(
   "shows a localized matching context failure without reviving an unrelated old diagnostic (%s)",
   async (matching) => {
@@ -1399,3 +1431,32 @@ it("does not remember a cloud model as the local live summary model after switch
   );
   localStorage.clear();
 });
+
+it.each(["de", "en"] as const)(
+  "does not claim to wait for text during the first inference (%s)",
+  async (locale) => {
+    setup(
+      {
+        getLiveNotes: vi
+          .fn()
+          .mockResolvedValue(
+            status({ status: "updating", running: true, view: null }),
+          ),
+        startLiveNotes: vi.fn(),
+      },
+      { locale },
+    );
+    expect(
+      await screen.findByText(
+        locale === "de" ? "Noch keine Ergebnisse." : "No results yet.",
+      ),
+    ).toBeTruthy();
+    expect(
+      screen.queryByText(
+        locale === "de"
+          ? "Wartet auf bestätigten Text."
+          : "Waiting for confirmed text.",
+      ),
+    ).toBeNull();
+  },
+);

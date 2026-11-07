@@ -33,6 +33,7 @@ zeroize = "=1.8.2"
 fs2 = "=0.4.3"
 reqwest = { version = "=0.12.24", default-features = false, features = ["blocking", "json", "rustls-tls"] }
 sha2 = "=0.10.9"
+semver = "=1.0.27"
 url = "=2.5.7"
 chrono = { version = "=0.4.42", default-features = false, features = ["clock"] }
 

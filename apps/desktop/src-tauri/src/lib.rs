@@ -19,6 +19,7 @@ mod operations;
 mod path_selection;
 mod retention_commands;
 mod session_service;
+mod source_audio;
 mod speaker_check_archive;
 mod speaker_commands;
 mod speaker_jobs;
@@ -51,6 +52,7 @@ struct ModelView {
     name: String,
     is_downloaded: bool,
     supports_streaming: bool,
+    supports_batch: bool,
     compatibility_error: Option<String>,
 }
 #[derive(Clone, Serialize)]
@@ -403,9 +405,10 @@ impl Service {
                     name: m.name.clone(),
                     is_downloaded: m.is_downloaded && !m.is_downloading,
                     supports_streaming: m.supports_streaming,
-                    compatibility_error: if m.ready_for_streaming() {
+                    supports_batch: m.ready_for_batch(),
+                    compatibility_error: if m.ready_for_streaming() || m.ready_for_batch() {
                         bridge
-                            .resolve_streaming_model(m)
+                            .resolve_downloaded_model(m)
                             .err()
                             .map(|e| e.to_string())
                     } else if m.is_downloading {
@@ -596,9 +599,13 @@ impl Service {
         let model = catalog
             .model(&request.model_id)
             .map_err(|e| e.to_string())?;
-        let resolved = bridge
-            .resolve_streaming_model(model)
-            .map_err(|e| e.to_string())?;
+        let batch = owner.is_none() && model.ready_for_batch();
+        let resolved = if batch {
+            bridge.resolve_downloaded_model(model)
+        } else {
+            bridge.resolve_streaming_model(model)
+        }
+        .map_err(|e| e.to_string())?;
         let devices = meeting_core::list_devices()
             .map_err(|_| "Audiogeräte konnten nicht gelesen werden. Geräteverbindung prüfen.")?;
         let system = devices
@@ -617,9 +624,14 @@ impl Service {
             .transpose()?;
         let backend = backend_directory()?;
         let store=SessionStore::create(&self.root.join("sessions"),&request.title,&model.id,&system.name,microphone.map(|m|m.name.as_str())).map_err(|_|"Die Sitzung konnte nicht angelegt werden. Freien Speicherplatz und Ordnerrechte prüfen.")?;
-        let provenance = serde_json::json!({"applicationVersion":VERSION,"handyInstallation":catalog.installation,"catalogFingerprint":catalog.fingerprint_sha256,"catalogObservedAtUnixMs":catalog.fetched_at_unix_ms,"model":model,"resolvedModel":resolved,"nativeRuntime":handy_bridge::native::runtime_identity(),"capabilityPolicy":"metadata-before-capture; actual-streaming-capability-in-isolated-worker","trackInference":"one-isolated-model-per-track"});
+        let provenance = serde_json::json!({"applicationVersion":VERSION,"handyInstallation":catalog.installation,"catalogFingerprint":catalog.fingerprint_sha256,"catalogObservedAtUnixMs":catalog.fetched_at_unix_ms,"model":model,"resolvedModel":resolved,"nativeRuntime":handy_bridge::native::runtime_identity(),"capabilityPolicy":"metadata-before-capture; actual-capability-in-isolated-worker","trackInference":if batch {"sequential-closed-sections-during-and-after-capture"} else {"one-isolated-model-per-track"}});
         handy_bridge::write_model_snapshot(store.folder(), model, &resolved, &provenance)
             .map_err(|error| error.to_string())?;
+        let store = if batch {
+            store.with_quiet_sections()
+        } else {
+            store
+        };
         // Begin durable audio before any model load. Worker failures never own capture.
         let capture = self.agent.capture_if_permitted(owner.as_deref(), || {
             CaptureController::start(store.clone(), CaptureOptions {
@@ -632,21 +644,31 @@ impl Service {
             })
         })?;
         let stop = Arc::new(AtomicBool::new(false));
-        let mut workers = vec![asr::spawn_track(
-            store.clone(),
-            resolved.path.clone(),
-            backend.clone(),
-            "system".into(),
-            stop.clone(),
-        )];
-        if microphone.is_some() {
-            workers.push(asr::spawn_track(
+        let mut workers = Vec::new();
+        if batch {
+            workers.push(asr::spawn_batch(
                 store.clone(),
                 resolved.path,
                 backend,
-                "microphone".into(),
                 stop.clone(),
             ));
+        } else {
+            workers.push(asr::spawn_track(
+                store.clone(),
+                resolved.path.clone(),
+                backend.clone(),
+                "system".into(),
+                stop.clone(),
+            ));
+            if microphone.is_some() {
+                workers.push(asr::spawn_track(
+                    store.clone(),
+                    resolved.path,
+                    backend,
+                    "microphone".into(),
+                    stop.clone(),
+                ));
+            }
         }
         let data = store
             .preview_snapshot(16)
@@ -744,7 +766,7 @@ impl Service {
         let catching_up = active
             .workers
             .iter()
-            .any(|worker| !worker.handle.is_finished());
+            .any(|worker| worker.source == "batch" || !worker.handle.is_finished());
         if catching_up {
             if capture_result.is_ok() {
                 let _ = active.store.set_status("catching-up");
@@ -922,23 +944,32 @@ impl Service {
             .set_status("catching-up")
             .map_err(|_| "Sitzungsstatus konnte nicht gesichert werden.")?;
         let stop = Arc::new(AtomicBool::new(true));
-        let workers = ["system", "microphone"]
-            .into_iter()
-            .filter(|source| {
-                data.parts
-                    .iter()
-                    .any(|p| p.source == *source && p.status != "complete")
-            })
-            .map(|source| {
-                asr::spawn_track(
-                    store.clone(),
-                    pinned_model_path.clone(),
-                    backend.clone(),
-                    source.into(),
-                    stop.clone(),
-                )
-            })
-            .collect();
+        let workers = if model.ready_for_batch() {
+            vec![asr::spawn_batch(
+                store.clone(),
+                pinned_model_path,
+                backend,
+                stop.clone(),
+            )]
+        } else {
+            ["system", "microphone"]
+                .into_iter()
+                .filter(|source| {
+                    data.parts
+                        .iter()
+                        .any(|p| p.source == *source && p.status != "complete")
+                })
+                .map(|source| {
+                    asr::spawn_track(
+                        store.clone(),
+                        pinned_model_path.clone(),
+                        backend.clone(),
+                        source.into(),
+                        stop.clone(),
+                    )
+                })
+                .collect()
+        };
         self.lock()?.active = Some(Active {
             _operation: Some(lease),
             owner: None,
@@ -1092,7 +1123,7 @@ pub fn run() {
         if std::env::args().skip(1).eq(["--agent", "serve"]) { agent::start_stdio(Arc::clone(&service)).map_err(std::io::Error::other)?; }
         tauri::async_runtime::spawn_blocking(move|| {let _=service.refresh(None);});
         Ok(())
-    }).invoke_handler(tauri::generate_handler![deletion_commands::preview_meeting_erasure,deletion_commands::get_meeting_erasure_preview,deletion_commands::erase_meeting_now,deletion_commands::list_pending_erasures,path_selection::choose_handy_executable,path_selection::choose_ffmpeg_executable,path_selection::choose_legacy_manifest,app_commands::get_app_state,app_commands::get_audio_levels,app_commands::get_system_load,retention_commands::list_audio_copies,retention_commands::transcribe_audio_copy,retention_commands::compact_archive,retention_commands::list_archives,retention_commands::list_unfinished_deletions,retention_commands::resume_permanent_deletion,retention_commands::restore_archive,retention_commands::apply_retention,retention_commands::get_retention_policy,retention_commands::save_retention_policy,retention_commands::preview_retention,retention_commands::get_retention_plan,retention_commands::get_maintenance_progress,retention_commands::cancel_maintenance,library_commands::edit_meeting_metadata,library_commands::search_meetings,library_commands::rebuild_search_index,library_commands::get_library_progress,library_commands::cancel_library_job,speaker_commands::archive_speaker_model_checks,speaker_commands::check_speaker_model,speaker_commands::get_speaker_labels,speaker_commands::save_speaker_labels,speaker_commands::start_speaker_experiment,speaker_commands::get_speaker_progress,speaker_commands::get_speaker_sections,speaker_commands::cancel_speaker_experiment,update_commands::check_for_update,update_commands::download_update,update_commands::get_update_progress,update_commands::cancel_update,update_commands::install_update,update_commands::open_release_page,app_commands::refresh_handy,app_commands::list_devices,app_commands::start_meeting,app_commands::stop_meeting,app_commands::set_capture_paused,app_commands::set_microphone_muted,app_commands::reconnect_microphone,app_commands::agent_decide_recording,app_commands::agent_revoke,app_commands::list_meetings,app_commands::get_meeting,app_commands::resume_meeting,app_commands::import_legacy,app_commands::copy_text,app_commands::open_meeting_folder,app_commands::export_transcript,app_commands::generate_notes,app_commands::list_analyses,notes_commands::list_unfinished_analyses,notes_commands::list_text_models,notes_commands::get_notes_progress,notes_commands::cancel_notes,notes_commands::notes_markdown,live_commands::start_live_notes,live_commands::stop_live_notes,live_commands::refresh_live_notes,live_commands::set_live_notes_interval,live_commands::get_live_notes,live_commands::local_model_setup,live_commands::pull_ollama_model,live_commands::get_model_pull_progress,live_commands::cancel_model_pull,template_commands::list_templates,template_commands::save_templates,template_commands::import_templates,credential_commands::credential_status,credential_commands::save_credential,credential_commands::remove_credential])
+    }).invoke_handler(tauri::generate_handler![deletion_commands::preview_meeting_erasure,deletion_commands::get_meeting_erasure_preview,deletion_commands::erase_meeting_now,deletion_commands::list_pending_erasures,path_selection::choose_handy_executable,path_selection::choose_ffmpeg_executable,path_selection::choose_legacy_manifest,app_commands::get_app_state,app_commands::get_audio_levels,app_commands::get_system_load,retention_commands::list_audio_copies,retention_commands::transcribe_audio_copy,retention_commands::compact_archive,retention_commands::list_archives,retention_commands::list_unfinished_deletions,retention_commands::resume_permanent_deletion,retention_commands::restore_archive,retention_commands::apply_retention,retention_commands::get_retention_policy,retention_commands::save_retention_policy,retention_commands::preview_retention,retention_commands::get_retention_plan,retention_commands::get_maintenance_progress,retention_commands::cancel_maintenance,library_commands::edit_meeting_metadata,library_commands::search_meetings,library_commands::rebuild_search_index,library_commands::get_library_progress,library_commands::cancel_library_job,speaker_commands::archive_speaker_model_checks,speaker_commands::check_speaker_model,speaker_commands::get_speaker_labels,speaker_commands::save_speaker_labels,speaker_commands::start_speaker_experiment,speaker_commands::get_speaker_progress,speaker_commands::get_speaker_sections,speaker_commands::cancel_speaker_experiment,update_commands::check_for_update,update_commands::download_update,update_commands::get_update_progress,update_commands::cancel_update,update_commands::install_update,update_commands::open_release_page,app_commands::refresh_handy,app_commands::list_devices,app_commands::start_meeting,app_commands::stop_meeting,app_commands::set_capture_paused,app_commands::set_microphone_muted,app_commands::reconnect_microphone,app_commands::agent_decide_recording,app_commands::agent_revoke,app_commands::list_meetings,app_commands::get_meeting,app_commands::resume_meeting,app_commands::import_legacy,app_commands::copy_text,app_commands::open_meeting_folder,app_commands::export_transcript,app_commands::generate_notes,app_commands::list_analyses,notes_commands::list_unfinished_analyses,notes_commands::list_text_models,notes_commands::get_notes_progress,notes_commands::cancel_notes,notes_commands::notes_markdown,live_commands::list_workspace_history,live_commands::read_workspace_history,live_commands::start_live_notes,live_commands::stop_live_notes,live_commands::refresh_live_notes,live_commands::set_live_notes_interval,live_commands::get_live_notes,live_commands::set_workspace_context,source_audio::get_source_audio,live_commands::local_model_setup,live_commands::pull_ollama_model,live_commands::get_model_pull_progress,live_commands::cancel_model_pull,template_commands::list_templates,template_commands::save_templates,template_commands::import_templates,credential_commands::credential_status,credential_commands::save_credential,credential_commands::remove_credential])
     .on_window_event(|window,event|{if let tauri::WindowEvent::CloseRequested{api,..}=event{let service=window.state::<Arc<Service>>();let blocked=service.lock().is_ok_and(|inner|inner.transitioning||inner.active.as_ref().is_some_and(|a|a.capture.is_some()));if blocked{api.prevent_close();if let Ok(mut inner)=service.lock(){inner.error=Some(if inner.transitioning { "Ein Vorgang läuft noch. Bitte warten, bis Audioabschluss und Verarbeitung beendet sind.".into() } else { "Bitte zuerst „Meeting beenden“ wählen. Audio wird gesichert und offene Abschnitte werden verarbeitet.".into() });}let _=window.emit("recording-close-blocked",());}}})
     .run(tauri::generate_context!()).expect("HandyMeeting konnte nicht gestartet werden.");
 }

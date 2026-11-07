@@ -66,6 +66,165 @@ const load = {
 
 beforeEach(() => localStorage.clear());
 
+it.each([
+  ["de", "silent"],
+  ["de", "muted"],
+  ["en", "silent"],
+  ["en", "muted"],
+] as const)(
+  "keeps capture notices beside the %s %s microphone tooltip in the collapsed sidebar",
+  (locale, mode) => {
+    const props = {
+      locale,
+      paused: false,
+      durationMs: 1000,
+      parts: [],
+      warningCount: 2,
+      microphoneSilent: mode === "silent",
+      microphoneMuted: mode === "muted",
+      backlogMs: 31_000,
+      onOpen: () => {},
+    };
+    const view = render(
+      <div className="sidebar is-collapsed">
+        <RecordingStatus {...props} />
+      </div>,
+    );
+    const title = () =>
+      view.container
+        .querySelector(".sidebar-recording-head")!
+        .getAttribute("title")!;
+    const microphone =
+      locale === "de"
+        ? mode === "silent"
+          ? "Mikrofon nimmt nicht auf"
+          : "Mikrofon stummgeschaltet"
+        : mode === "silent"
+          ? "Microphone is not recording"
+          : "Microphone muted";
+    expect(title()).toContain(microphone);
+    expect(title()).toContain(
+      locale === "de" ? "2 Hinweise zur Aufnahme" : "2 recording notices",
+    );
+    expect(title()).toContain(
+      locale === "de" ? "Erkennung im Rückstand" : "Transcription behind",
+    );
+    expect(screen.getByRole("status").textContent).toBe("");
+    view.rerender(
+      <div className="sidebar is-collapsed">
+        <RecordingStatus {...props} warningCount={0} />
+      </div>,
+    );
+    expect(title()).toContain(microphone);
+    expect(title()).not.toContain(
+      locale === "de" ? "zur Aufnahme" : "recording notice",
+    );
+  },
+);
+
+it.each(["de", "en"] as const)(
+  "reports only active backlog warning reasons in %s",
+  (locale) => {
+    const { container } = render(
+      <RecordingStatus
+        locale={locale}
+        paused={false}
+        durationMs={1000}
+        parts={[]}
+        warningCount={0}
+        microphoneSilent={false}
+        microphoneMuted={false}
+        backlogMs={31_000}
+        onOpen={() => {}}
+      />,
+    );
+    expect(
+      container.querySelector(".sidebar-recording-head")!.getAttribute("title"),
+    ).toBe(
+      locale === "de"
+        ? "Aufnahme prüfen: Erkennung im Rückstand"
+        : "Check recording: Transcription behind",
+    );
+  },
+);
+
+it.each(["de", "en"] as const)(
+  "announces new collapsed-sidebar warning reasons without repeating unchanged polls in %s",
+  (locale) => {
+    const props = {
+      locale,
+      paused: false,
+      durationMs: 1000,
+      parts: [],
+      warningCount: 0,
+      microphoneSilent: false,
+      microphoneMuted: false,
+      backlogMs: 0,
+      onOpen: () => {},
+    };
+    const view = render(
+      <div className="sidebar is-collapsed">
+        <RecordingStatus {...props} />
+      </div>,
+    );
+    const region = screen.getByRole("status");
+    expect(region.getAttribute("aria-live")).toBe("polite");
+    expect(region.textContent).toBe("");
+    const update = (patch: Partial<typeof props>) =>
+      view.rerender(
+        <div className="sidebar is-collapsed">
+          <RecordingStatus {...props} {...patch} />
+        </div>,
+      );
+    update({ microphoneSilent: true });
+    expect(region.textContent).toContain(
+      locale === "de"
+        ? "Mikrofon nimmt nicht auf"
+        : "Microphone is not recording",
+    );
+    update({ warningCount: 1, backlogMs: 31_000 });
+    expect(region.textContent).toContain(
+      locale === "de" ? "Erkennung im Rückstand" : "Transcription behind",
+    );
+    expect(region.textContent).toContain(
+      locale === "de" ? "1 Hinweis" : "1 recording notice",
+    );
+    const textNode = region.firstChild;
+    update({ warningCount: 1, backlogMs: 32_000, durationMs: 2000 });
+    expect(screen.getByRole("status")).toBe(region);
+    expect(region.firstChild).toBe(textNode);
+    update({});
+    expect(region.textContent).toBe("");
+    update({ backlogMs: 31_000 });
+    expect(region.textContent).toContain(
+      locale === "de" ? "Erkennung im Rückstand" : "Transcription behind",
+    );
+  },
+);
+
+it("keeps initial recording warnings and sub-threshold backlog quiet", () => {
+  const props = {
+    locale: "en" as const,
+    paused: false,
+    durationMs: 1000,
+    parts: [],
+    warningCount: 1,
+    microphoneSilent: true,
+    microphoneMuted: false,
+    backlogMs: 0,
+    onOpen: () => {},
+  };
+  const view = render(<RecordingStatus {...props} />);
+  const region = screen.getByRole("status");
+  expect(region.textContent).toBe("");
+  view.rerender(<RecordingStatus {...props} backlogMs={29_999} />);
+  expect(region.textContent).toBe("");
+  view.rerender(<RecordingStatus {...props} backlogMs={30_000} />);
+  expect(region.textContent).toContain(
+    "Microphone is not recording · 1 recording notice · Transcription behind",
+  );
+});
+
 it("reopens capture warnings only when a new warning arrives", async () => {
   const warnings = [live.warnings[0]];
   const view = render(
@@ -342,3 +501,29 @@ describe("recording status in the sidebar (synthetic IPC)", () => {
     expect(vi.mocked(api.getSystemLoad!).mock.calls.length).toBe(reads);
   });
 });
+
+it.each([
+  { warningCount: 1, microphoneSilent: false, backlogMs: 0 },
+  { warningCount: 0, microphoneSilent: true, backlogMs: 0 },
+  { warningCount: 0, microphoneSilent: false, backlogMs: 31000 },
+])(
+  "keeps a distinct warning in the collapsed recording control (%j)",
+  (warning) => {
+    const { container } = render(
+      <div className="sidebar is-collapsed">
+        <RecordingStatus
+          locale="en"
+          paused={false}
+          durationMs={1000}
+          parts={[]}
+          microphoneMuted={false}
+          onOpen={() => {}}
+          {...warning}
+        />
+      </div>,
+    );
+    const control = container.querySelector(".sidebar-recording-head")!;
+    expect(control.querySelector(".recording-warning")).toBeTruthy();
+    expect(control.getAttribute("title")).toMatch(/Check recording/);
+  },
+);

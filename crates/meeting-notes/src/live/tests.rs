@@ -160,6 +160,47 @@ fn identical_task_wording_keeps_distinct_assignees_and_deadlines() {
 }
 
 #[test]
+fn a_shared_run_keeps_newer_classic_results_when_workspace_is_present() {
+    let dir = tempfile::tempdir().unwrap();
+    let quote = "Anna übernimmt den Bericht bis Freitag.";
+    let server = Server::start(vec![
+        window_answer(
+            vec![],
+            vec![],
+            vec![fact("Bericht schreiben", Some("Anna"), "C0", quote)],
+            vec![],
+        ),
+        overview_answer(vec![]),
+    ]);
+    let mut runner = LiveRunner::start(
+        dir.path(),
+        "meeting-1",
+        server.connection("synthetic"),
+        "de",
+    )
+    .unwrap();
+    let workspace = runner.folder.join(crate::workspace::WORKSPACE_FOLDER);
+    drop(crate::workspace::WorkspaceRunner::open(&workspace).unwrap());
+    let pending = runner.pending(&[part("a", "system", 0, quote)]);
+    runner
+        .update(&pending, Trigger::Manual, &AnalysisControl::default())
+        .unwrap();
+    server.finish();
+    let expected = runner.view();
+    assert_eq!(expected.tasks.len(), 1);
+    drop(runner);
+    let actual = read_latest(dir.path(), "meeting-1").unwrap().unwrap();
+    assert_eq!(actual.updated_at, expected.updated_at);
+    assert_eq!(actual.tasks[0].text, expected.tasks[0].text);
+    assert!(actual.workspace.is_none());
+    assert!(read_latest_workspace(dir.path(), "meeting-1")
+        .unwrap()
+        .unwrap()
+        .workspace
+        .is_some());
+}
+
+#[test]
 fn displaying_live_runs_rejects_another_meetings_manifest_without_changing_it() {
     let dir = tempfile::tempdir().unwrap();
     let server = Server::start(vec![]);
@@ -904,4 +945,103 @@ fn a_failed_window_commit_is_distinguished_from_a_model_validation_error() {
     );
     assert!(occupied.is_dir());
     server.finish();
+}
+
+#[test]
+fn workspace_view_survives_a_newer_classic_run_and_reports_damaged_workspace() {
+    let dir = tempfile::tempdir().unwrap();
+    let server = Server::start(vec![]);
+    let workspace = LiveRunner::start(
+        dir.path(),
+        "meeting-a",
+        server.connection("workspace-model"),
+        "de",
+    )
+    .unwrap()
+    .with_workspace(crate::workspace::WorkspaceContext::default())
+    .unwrap();
+    let workspace_id = workspace.run().id.clone();
+    let workspace_folder = workspace.workspace_folder().unwrap();
+    drop(workspace);
+    let classic = LiveRunner::start(
+        dir.path(),
+        "meeting-a",
+        server.connection("classic-model"),
+        "de",
+    )
+    .unwrap();
+    server.finish();
+    assert_eq!(
+        read_latest(dir.path(), "meeting-a").unwrap().unwrap().model,
+        "classic-model"
+    );
+    let saved = read_latest_workspace(dir.path(), "meeting-a")
+        .unwrap()
+        .unwrap();
+    assert_eq!(saved.run_id.as_deref(), Some(workspace_id.as_str()));
+    assert!(saved.workspace.is_some());
+
+    let damaged = workspace_folder.join("revision-00000001.json");
+    std::fs::write(&damaged, b"broken").unwrap();
+    let saved = read_latest_workspace(dir.path(), "meeting-a")
+        .unwrap()
+        .unwrap();
+    assert!(saved.workspace.is_none());
+    assert_eq!(saved.damaged_runs, 1);
+    assert_eq!(std::fs::read(damaged).unwrap(), b"broken");
+    assert_eq!(
+        read_latest(dir.path(), "meeting-a").unwrap().unwrap().model,
+        classic.run().model
+    );
+}
+
+#[test]
+fn withdrawn_workspace_items_do_not_look_current_in_classic_overview() {
+    use crate::workspace::{Entity, WorkspaceState};
+    let mut view = LiveView::damaged_only(0);
+    let mut state = WorkspaceState::default();
+    for (kind, status) in [
+        ("task", "withdrawn"),
+        ("decision", "withdrawn"),
+        ("fact", "recorded"),
+    ] {
+        let id = format!("e_{kind}");
+        state.overview_refs.push(id.clone());
+        state.entities.push(Entity {
+            id,
+            revision: 2,
+            kind: kind.into(),
+            text: format!("Original {kind} statement"),
+            status: status.into(),
+            attention: "normal".into(),
+            owner: None,
+            due: None,
+            evidence: vec![],
+            human_locked: false,
+        });
+    }
+    view.attach_workspace(state);
+    assert!(view.tasks.is_empty());
+    assert!(view.decisions.is_empty());
+    assert_eq!(view.overview.len(), 1);
+    assert_eq!(view.overview[0].text, "Original fact statement");
+    assert_eq!(view.workspace.unwrap().entities.len(), 3); // Immutable history remains available.
+}
+
+#[test]
+fn workspace_projection_replaces_classic_overview_coverage_and_timestamp() {
+    let mut view = LiveView::damaged_only(0);
+    view.overview_pending = true;
+    view.overview_window = 7;
+    view.overview_updated_at = Some("2026-01-01T00:00:00Z".into());
+    let state = crate::workspace::WorkspaceState {
+        revision: 3,
+        updated_at: Some("2026-01-02T00:00:00Z".into()),
+        ..Default::default()
+    };
+    view.attach_workspace(state);
+    assert!(!view.overview_pending);
+    assert_eq!(view.overview_window, 3);
+    assert_eq!(view.overview_updated_at, view.updated_at);
+    assert!(view.overview.is_empty());
 }

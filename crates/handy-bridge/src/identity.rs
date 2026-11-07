@@ -80,7 +80,7 @@ pub fn capture_model_identity(
     resolved: &ResolvedModel,
     runtime: RuntimeIdentity,
 ) -> Result<ModelIdentity> {
-    if model.id != resolved.model_id || !model.ready_for_streaming() {
+    if model.id != resolved.model_id || !(model.ready_for_streaming() || model.ready_for_batch()) {
         return Err(BridgeError::ModelUnavailable);
     }
     capture_optional_model_identity(model, resolved, runtime)
@@ -109,10 +109,11 @@ pub fn capture_optional_model_identity(
 /// selected model's identity, filename, source and availability gate resume.
 pub fn verify_catalog_model(identity: &ModelIdentity, current: &HandyModel) -> Result<()> {
     let original = &identity.source_model_metadata;
-    if !current.ready_for_streaming() {
+    if !(current.ready_for_streaming() || current.ready_for_batch()) {
         return Err(BridgeError::ModelUnavailable);
     }
     if original.id != current.id
+        || original.supports_streaming != current.supports_streaming
         || original.filename != current.filename
         || original.source != current.source
     {

@@ -109,13 +109,13 @@ export const de = {
   disconnected: "Desktop-Verbindung nicht verfügbar",
   retry: "Erneut versuchen",
   title: "Meetingtitel",
-  model: "Streaming-Modell aus Handy",
+  model: "Erkennungsmodell aus Handy",
   system: "Computerton",
   microphone: "Mikrofon zusätzlich aufnehmen",
   noDevices: "Keine passenden Geräte gefunden",
-  noModels: "Kein kompatibles installiertes Streaming-Modell gefunden",
+  noModels: "Kein kompatibles installiertes Erkennungsmodell gefunden",
   modelUnavailable:
-    "Das zuvor gewählte Modell ist nicht mehr installiert oder kompatibel. Bitte wähle ausdrücklich ein anderes Streaming-Modell.",
+    "Das zuvor gewählte Modell ist nicht mehr installiert oder kompatibel. Bitte wähle ausdrücklich ein anderes Erkennungsmodell.",
   choose: "Bitte auswählen",
   start: "Aufnahme starten",
   stop: "Meeting beenden",
@@ -148,7 +148,7 @@ export const de = {
   version: "Version",
   notFound: "Noch nicht erkannt",
   compatibility:
-    "Neue Handy-Modelle erscheinen nach Aktualisierung der Liste. Streaming-Unterstützung und kompatible Erkennungslaufzeit werden zusätzlich geprüft.",
+    "Neue Handy-Modelle erscheinen nach Aktualisierung der Liste. Die App prüft die Kompatibilität und kennzeichnet Modelle für abschnittsweise Transkription.",
   language: "Sprache",
   theme: "Darstellung",
   light: "Hell",
@@ -194,7 +194,7 @@ export const de = {
   agentMicrophoneConsent:
     "Mein Mikrofon ausdrücklich für diese Anfrage freigeben",
   agentChooseDevices:
-    "Bitte zuerst unter Meeting ein verfügbares Streaming-Modell und die Computerausgabe auswählen.",
+    "Bitte zuerst unter Meeting ein verfügbares Erkennungsmodell mit Streaming-Unterstützung und die Computerausgabe auswählen.",
   agentChooseMicrophone:
     "Bitte zuerst unter Meeting ein verfügbares Mikrofon auswählen.",
   agentBusy:
@@ -299,7 +299,7 @@ export const de = {
   stopTooltip:
     "Beendet beide Aufnahmen und schließt die Audiodateien ab. Erkennungsrückstand kann weiterverarbeitet werden.",
   modelTooltip:
-    "Zeigt ausschließlich installierte, streamingfähige Modelle aus Handy. Neue Modellformate benötigen zusätzlich eine kompatible Erkennungslaufzeit.",
+    "Zeigt kompatible installierte Modelle aus Handy. Neue Modellformate benötigen zusätzlich eine kompatible Erkennungslaufzeit.",
   emptyTitle: "Mein Meeting",
   connectHelp:
     "Diese Ansicht benötigt den Rust-Desktopkern. Bitte Meeting for Handy als Desktop-App starten.",
@@ -430,13 +430,13 @@ export const en: Record<MessageKey, string> = {
   disconnected: "Desktop connection unavailable",
   retry: "Try again",
   title: "Meeting title",
-  model: "Streaming model from Handy",
+  model: "Recognition model from Handy",
   system: "System audio",
   microphone: "Also record microphone",
   noDevices: "No matching audio devices found",
-  noModels: "No compatible installed streaming model found",
+  noModels: "No compatible installed recognition model found",
   modelUnavailable:
-    "The previously selected model is no longer installed or compatible. Please explicitly choose another streaming model.",
+    "The previously selected model is no longer installed or compatible. Please explicitly choose another recognition model.",
   choose: "Please select",
   start: "Start recording",
   stop: "End meeting",
@@ -468,7 +468,7 @@ export const en: Record<MessageKey, string> = {
   version: "Version",
   notFound: "Not detected yet",
   compatibility:
-    "New Handy models appear after refreshing the list. Streaming support and a compatible recognition runtime are checked separately.",
+    "New Handy models appear after refreshing the list. The app checks compatibility and labels models that transcribe in sections.",
   language: "Language",
   theme: "Appearance",
   light: "Light",
@@ -511,7 +511,7 @@ export const en: Record<MessageKey, string> = {
   agentSystemOnly: "System audio only requested",
   agentMicrophoneConsent: "Explicitly allow my microphone for this request",
   agentChooseDevices:
-    "First choose an available streaming model and system output under Meeting.",
+    "First choose an available recognition model with streaming support and system output under Meeting.",
   agentChooseMicrophone: "First select an available microphone under Meeting.",
   agentBusy:
     "A recording or its completion is already running. The new request can be approved afterwards.",
@@ -613,7 +613,7 @@ export const en: Record<MessageKey, string> = {
   stopTooltip:
     "Stops both recordings and closes their audio files. Recognition backlog can be processed afterward.",
   modelTooltip:
-    "Shows installed streaming models from Handy. New model formats also require a compatible recognition runtime.",
+    "Shows compatible installed models from Handy. New model formats also require a compatible recognition runtime.",
   emptyTitle: "My meeting",
   connectHelp:
     "This view requires the Rust desktop core. Start Meeting for Handy as a desktop application.",

@@ -2,11 +2,13 @@ import {
   AudioLines,
   FolderClock,
   Moon,
+  PanelLeftClose,
+  PanelLeftOpen,
   Settings,
   Sparkles,
   Sun,
 } from "lucide-react";
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import type { AppState, Locale, Theme } from "../types";
 import type { MessageKey } from "../i18n";
 export type Page = "meeting" | "history" | "detail" | "notes" | "settings";
@@ -39,12 +41,25 @@ export default function Sidebar({
   recordingStatus,
   updateAction,
 }: Props) {
+  const [collapsed, setCollapsed] = useState(
+    () => window.matchMedia?.("(max-width: 740px)").matches ?? false,
+  );
+  const toggleLabel =
+    locale === "de"
+      ? collapsed
+        ? "Seitenleiste ausklappen"
+        : "Seitenleiste einklappen"
+      : collapsed
+        ? "Expand sidebar"
+        : "Collapse sidebar";
   const dark =
     theme === "dark" ||
     (theme === "system" &&
       (window.matchMedia?.("(prefers-color-scheme: dark)").matches ?? false));
   return (
-    <aside className="sidebar">
+    <aside
+      className={collapsed ? "sidebar is-collapsed" : "sidebar is-expanded"}
+    >
       <div className="brand">
         <img src="/handymeeting.svg" width="34" height="34" alt="" />
         <div>
@@ -52,6 +67,16 @@ export default function Sidebar({
           {app?.version && <small>{app.version}</small>}
         </div>
       </div>
+      <button
+        type="button"
+        className="icon-button sidebar-toggle"
+        aria-label={toggleLabel}
+        aria-expanded={!collapsed}
+        title={toggleLabel}
+        onClick={() => setCollapsed((value) => !value)}
+      >
+        {collapsed ? <PanelLeftOpen size={17} /> : <PanelLeftClose size={17} />}
+      </button>
       <nav aria-label={locale === "de" ? "Hauptnavigation" : "Main navigation"}>
         {(
           [
@@ -74,10 +99,11 @@ export default function Sidebar({
                 : undefined
             }
             title={t[id]}
+            aria-label={t[id]}
             onClick={() => void navigate(id)}
           >
             <Icon size={19} />
-            {t[id]}
+            <span className="nav-label">{t[id]}</span>
           </button>
         ))}
       </nav>

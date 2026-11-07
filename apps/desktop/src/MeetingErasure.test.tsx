@@ -198,7 +198,7 @@ it.each(["close button", "Escape"])(
   },
 );
 
-it.each(["failed", "cancelled"] as const)(
+it.each(["failed", "cancelled", "workspace cache failure"] as const)(
   "keeps all retained meetings in desktop history after a %s post-erasure rebuild",
   async (outcome) => {
     let erased = false;
@@ -266,7 +266,7 @@ it.each(["failed", "cancelled"] as const)(
       getLibraryProgress: vi.fn(async () => ({
         jobId: "cancelled-index-job",
         kind: "search-index",
-        status: outcome,
+        status: outcome === "workspace cache failure" ? "cancelled" : outcome,
         confirmedTasks: 1,
         totalTasks: 2,
         elapsedMs: 1,
@@ -276,6 +276,15 @@ it.each(["failed", "cancelled"] as const)(
       })),
       cancelMaintenance: vi.fn().mockResolvedValue(true),
     } as unknown as DesktopApi;
+    const cache = `handymeeting.workspace.v1.${meeting.id}`;
+    const otherCache = `handymeeting.workspace.v1.${retained[0].id}`;
+    const heightKey = cache + ".notes-height.v1";
+    localStorage.setItem(cache, "synthetic private workspace");
+    localStorage.setItem(
+      heightKey,
+      JSON.stringify({ version: 1, height: 200 }),
+    );
+    localStorage.setItem(otherCache, "synthetic retained workspace");
     render(<App api={api} />);
     await userEvent.click(
       await screen.findByRole("button", { name: /Historie/ }),
@@ -291,17 +300,42 @@ it.each(["failed", "cancelled"] as const)(
       }),
       "LÖSCHEN",
     );
-    await userEvent.click(
-      screen.getByRole("button", { name: "Jetzt endgültig löschen" }),
-    );
-    await screen.findByText(
-      "Meetinginhalte vollständig aus der HandyMeeting-Ablage entfernt.",
-    );
+    const remove = localStorage.removeItem.bind(localStorage);
+    const failCache = outcome === "workspace cache failure";
+    const removeSpy = failCache
+      ? vi.spyOn(localStorage, "removeItem").mockImplementation((key) => {
+          if (key === cache)
+            throw new Error("Synthetic browser storage failure");
+          remove(key);
+        })
+      : null;
+    try {
+      await userEvent.click(
+        screen.getByRole("button", { name: "Jetzt endgültig löschen" }),
+      );
+      await screen.findByText(
+        failCache
+          ? /Der lokale Notizstand konnte nicht entfernt werden/
+          : "Meetinginhalte vollständig aus der HandyMeeting-Ablage entfernt.",
+      );
+    } finally {
+      removeSpy?.mockRestore();
+    }
     await waitFor(() =>
       expect(document.activeElement).toBe(
         screen.getByRole("heading", { name: "Historie" }),
       ),
     );
+    expect(localStorage.getItem(cache)).toBe(
+      failCache ? "synthetic private workspace" : null,
+    );
+    expect(localStorage.getItem(heightKey)).toBeNull();
+    localStorage.removeItem(cache);
+    localStorage.removeItem(heightKey);
+    expect(localStorage.getItem(otherCache)).toBe(
+      "synthetic retained workspace",
+    );
+    localStorage.removeItem(otherCache);
     expect(api.rebuildSearchIndex).toHaveBeenCalledOnce();
     const query = screen.getByRole("searchbox");
     await userEvent.type(query, "needle");
