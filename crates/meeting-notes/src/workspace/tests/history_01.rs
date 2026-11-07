@@ -104,9 +104,18 @@ fn earlier_unlocked_generations_remain_accessible_without_merging_into_the_lates
         "workspace-v11",
         "Entwurf aus der vorigen Fassung",
     );
+    let v13_id = "55555555555555555555555555555555";
+    let v13 = saved_generation(
+        dir.path(),
+        v13_id,
+        "meeting",
+        V13_PROMPT_VERSION,
+        "workspace-v13",
+        "Raum Blau als Ausweichraum",
+    );
     let before = history_bytes(dir.path());
     let listing = crate::live::list_workspace_history(dir.path(), "meeting").unwrap();
-    assert_eq!(listing.entries.len(), 4);
+    assert_eq!(listing.entries.len(), 5);
     assert_eq!(listing.unreadable_entries, 0);
     let saved =
         crate::live::read_workspace_history(dir.path(), "meeting", old_id, PREVIOUS_PROMPT_VERSION)
@@ -138,6 +147,14 @@ fn earlier_unlocked_generations_remain_accessible_without_merging_into_the_lates
         "Entwurf aus der vorigen Fassung",
     );
     assert_eq!(history_bytes(dir.path()), before);
+    let saved =
+        crate::live::read_workspace_history(dir.path(), "meeting", v13_id, V13_PROMPT_VERSION)
+            .unwrap();
+    assert_eq!(
+        saved.workspace.entities[0].text,
+        "Raum Blau als Ausweichraum"
+    );
+    assert!(WorkspaceRunner::open(&v13).is_err());
     assert!(WorkspaceRunner::open(&v11).is_err());
     assert!(WorkspaceRunner::open(&old).is_err());
     assert_eq!(

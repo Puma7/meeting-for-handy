@@ -744,7 +744,17 @@ fn facts_frontier_survives_an_empty_tasks_phase_with_more_than_six_selected_fact
                 }
             }
             let changes = if req["purpose"] == "facts" && queued_versions.len() == 1 {
-                json!([{"proposalId":"p_seed","kind":"fact","targetId":"e_fact_7","targetRevision":1,"text":"Aktueller Entwurf","status":"recorded","attention":"normal","owner":null,"due":null,"evidence":[{"sourceId":"s_one","quote":"Ich gebe den Entwurf morgen frei."}],"relatedEntityIds":[]}])
+                let source = req["transcriptSources"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .find(|s| s["text"] == "Der Entwurf ist zur Prüfung bereit.")
+                    .unwrap();
+                assert!(req["window"]["requiredSourceIds"]
+                    .as_array()
+                    .unwrap()
+                    .contains(&source["id"]));
+                json!([{"proposalId":"p_seed","kind":"fact","targetId":"e_fact_7","targetRevision":1,"text":"Aktueller Entwurf","status":"recorded","attention":"normal","owner":null,"due":null,"evidence":[{"sourceId":source["id"],"quote":source["text"]}],"relatedEntityIds":[]}])
             } else {
                 json!([])
             };

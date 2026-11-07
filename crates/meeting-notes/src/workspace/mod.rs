@@ -21,12 +21,13 @@ use std::{
 };
 
 pub const CONTRACT_VERSION: &str = "meeting-update-1";
-pub const PROMPT_VERSION: &str = "handymeeting-workspace-13";
+pub const PROMPT_VERSION: &str = "handymeeting-workspace-14";
+const V13_PROMPT_VERSION: &str = "handymeeting-workspace-13";
 const V12_PROMPT_VERSION: &str = "handymeeting-workspace-12";
 const V11_PROMPT_VERSION: &str = "handymeeting-workspace-11";
 pub const PREVIOUS_PROMPT_VERSION: &str = "handymeeting-workspace-10";
 pub const LEGACY_PROMPT_VERSION: &str = "handymeeting-workspace-9";
-pub const WORKSPACE_FOLDER: &str = "workspace-v13";
+pub const WORKSPACE_FOLDER: &str = "workspace-v14";
 pub const PREVIOUS_WORKSPACE_FOLDER: &str = "workspace-v10";
 pub const LEGACY_WORKSPACE_FOLDER: &str = "workspace-v9";
 /// Read shared-input chronology without treating model output or confirmations as new releases.
@@ -36,8 +37,9 @@ pub(crate) fn shared_context_timestamp(
 ) -> Result<Option<chrono::DateTime<chrono::FixedOffset>>> {
     context_store::shared_timestamp(folder, context)
 }
-pub(crate) const GENERATIONS: [(&str, &str); 5] = [
+pub(crate) const GENERATIONS: [(&str, &str); 6] = [
     (PROMPT_VERSION, WORKSPACE_FOLDER),
+    (V13_PROMPT_VERSION, "workspace-v13"),
     (V12_PROMPT_VERSION, "workspace-v12"),
     (V11_PROMPT_VERSION, "workspace-v11"),
     (PREVIOUS_PROMPT_VERSION, PREVIOUS_WORKSPACE_FOLDER),
@@ -759,6 +761,18 @@ impl WorkspaceRunner {
                             let evidence = fresh_assertion_schema(&req, |quote| {
                                 validate::recorded_decision_quote_allowed(quote)
                                     && matching::shares_topic(&entity.text, quote)
+                            });
+                            if evidence.is_empty() {
+                                continue;
+                            }
+                            branch["properties"]["evidence"]["items"] =
+                                serde_json::json!({"anyOf": evidence});
+                        } else {
+                            if validate::decision_backed_fact(entity) {
+                                continue;
+                            }
+                            let evidence = fresh_quote_schema(&req, |quote| {
+                                matching::shares_topic(&entity.text, quote)
                             });
                             if evidence.is_empty() {
                                 continue;

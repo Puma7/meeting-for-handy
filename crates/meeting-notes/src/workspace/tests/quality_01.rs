@@ -31,6 +31,51 @@ fn answer(changes: serde_json::Value) -> String {
     .to_string()
 }
 
+#[test]
+fn a_room_decision_saved_as_a_fact_survives_the_next_update() {
+    for (room_title, room_quote, checklist_title, checklist_quote) in [
+        (
+            "Workshop location decided as Room Blue",
+            "We decided to hold the workshop in Room Blue. The old room was only an option.",
+            "Access checklist sent",
+            "Avery says: I have sent the access checklist for the workshop in Room Blue.",
+        ),
+        (
+            "Raum Blau als Ausweichraum",
+            "Wir entscheiden uns für Raum Blau als Ausweichraum. Die Hauptprobe bleibt am 12. November.",
+            "Zugangsliste verschickt",
+            "Die Zugangsliste für Raum Blau wurde verschickt.",
+        ),
+    ] {
+        let mut state = WorkspaceState::default();
+        let room = source("s_room", 0, room_quote);
+        let seed = request(&state, "facts", &room);
+        validate::apply(&mut state, &seed, &answer(json!([{
+            "proposalId":"p_room","kind":"fact","targetId":null,"targetRevision":null,
+            "text":room_title,"status":"recorded","attention":"normal","owner":null,"due":null,
+            "evidence":[{"sourceId":room.id,"quote":room.text}],"relatedEntityIds":[]
+        }]))).unwrap();
+        state.originals.push(room);
+        let old = state.entities[0].clone();
+        let checklist = source("s_checklist", 3000, checklist_quote);
+        let next = request(&state, "facts", &checklist);
+        let mut change = json!({
+            "proposalId":"p_checklist","kind":"fact","targetId":old.id,"targetRevision":old.revision,
+            "text":checklist_title,"status":"recorded","attention":"normal","owner":null,"due":null,
+            "evidence":[{"sourceId":checklist.id,"quote":checklist.text}],"relatedEntityIds":[]
+        });
+        assert!(validate::apply(&mut state, &next, &answer(json!([change.clone()]))).is_err());
+        assert_eq!(state.entities, vec![old.clone()]);
+
+        change["targetId"] = serde_json::Value::Null;
+        change["targetRevision"] = serde_json::Value::Null;
+        validate::apply(&mut state, &next, &answer(json!([change]))).unwrap();
+        assert_eq!(state.entities.len(), 2);
+        assert_eq!(state.entities[0], old);
+        assert_eq!(state.entities[1].text, checklist_title);
+    }
+}
+
 fn seeded_task() -> WorkspaceState {
     let mut state = WorkspaceState::default();
     let promise = source(

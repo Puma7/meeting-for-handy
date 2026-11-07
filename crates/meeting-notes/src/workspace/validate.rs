@@ -242,6 +242,18 @@ pub(crate) fn apply(
         }
         let fresh = |e: &crate::Evidence| request.required_source_ids().contains(&e.source_id);
         if let Some(old) = old {
+            if c.kind == "fact" {
+                ensure!(
+                    !decision_backed_fact(old),
+                    "Ein als Fakt gespeicherter Beschluss bleibt als Originaleintrag erhalten."
+                );
+                ensure!(
+                    c.evidence
+                        .iter()
+                        .any(|e| { fresh(e) && shares_topic(&old.text, &e.quote) }),
+                    "Eine vorhandene Beobachtung benötigt einen aktuellen Beleg zum selben Thema."
+                );
+            }
             if c.kind == "task" && c.text.as_ref().is_some_and(|title| title != &old.text) {
                 ensure!(
                     c.status == "open"
@@ -578,6 +590,16 @@ pub(crate) fn apply(
     next.events.extend(events.clone());
     *state = next;
     Ok(events)
+}
+
+/// A mislabeled decision remains an original observation. Later observations
+/// and explicit decisions use their own identities instead of replacing it.
+pub(super) fn decision_backed_fact(entity: &Entity) -> bool {
+    entity.evidence.iter().any(|e| {
+        super::evidence_sentences(&e.quote).any(|sentence| {
+            shares_topic(&entity.text, sentence) && recorded_decision_quote_allowed(sentence)
+        })
+    })
 }
 
 /// A sentence may only witness its own assertion, even when the model cited
