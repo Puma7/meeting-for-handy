@@ -2,7 +2,8 @@ pub(super) use super::assertions::{
     completion_quote_allowed, recorded_decision_quote_allowed, withdrawal_quote_allowed,
 };
 use super::matching::{
-    explicit_owned_completion, same_question, shares_topic, task_subject_matches,
+    explicit_owned_completion, same_question, shares_topic, task_completion_matches,
+    task_subject_matches,
 };
 use super::model::*;
 use anyhow::{ensure, Context, Result};
@@ -415,10 +416,7 @@ fn apply_response(
                 c.evidence.iter().any(|e| completion_quote_allowed(&e.quote)
                     && (request.purpose != "tasks"
                         || (fresh(e)
-                            && old.is_some_and(|task| {
-                                task_subject_matches(task, &e.quote)
-                                    || explicit_owned_completion(task, &e.quote)
-                            })))),
+                            && old.is_some_and(|task| task_completion_matches(task, &e.quote))))),
                 "Eine Zusage ist keine Erledigung."
             );
         }
@@ -824,15 +822,19 @@ fn assertion_witnesses(
                 competing_topic |= matches(sentence);
                 continue;
             }
-            if !(8..=600).contains(&sentence.chars().count()) {
-                continue;
-            }
-            let evidence = crate::Evidence {
-                source_id: source.id.clone(),
-                quote: sentence.to_owned(),
-            };
-            if !candidates.contains(&evidence) {
-                candidates.push(evidence);
+            for excerpt in super::assertion_excerpts(sentence, &allowed)
+                .into_iter()
+                .filter(|excerpt| {
+                    citation.quote.contains(excerpt) || excerpt.contains(&citation.quote)
+                })
+            {
+                let evidence = crate::Evidence {
+                    source_id: source.id.clone(),
+                    quote: excerpt.to_owned(),
+                };
+                if !candidates.contains(&evidence) {
+                    candidates.push(evidence);
+                }
             }
         }
     }

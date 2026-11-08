@@ -32,6 +32,95 @@ fn answer(changes: serde_json::Value) -> String {
 }
 
 #[test]
+fn codex_review_translated_task_closes_from_original_language_evidence() {
+    let mut state = WorkspaceState::default();
+    let promise = source("s_pickup", 0, "Ich hole das Mikrofon ab.");
+    let mut req = request(&state, "tasks", &promise);
+    req.language = "en".into();
+    validate::apply(
+        &mut state,
+        &req,
+        &answer(json!([{
+            "proposalId":"p_pickup","kind":"task","text":"Collect the microphone",
+            "status":"open","attention":"current",
+            "evidence":[{"sourceId":promise.id,"quote":promise.text}]
+        }])),
+    )
+    .unwrap();
+    state.originals.push(promise);
+    let task = state.entities[0].clone();
+    for (id, text, expected) in [
+        ("s_other", "Ich habe die Kamera abgeholt.", false),
+        ("s_checked", "Ich habe das Mikrofon geprüft.", false),
+        ("s_done", "Ich habe das Mikrofon abgeholt.", true),
+    ] {
+        let completion = source(id, 3000, text);
+        let mut req = request(&state, "tasks", &completion);
+        req.language = "en".into();
+        let result = validate::apply(
+            &mut state,
+            &req,
+            &answer(json!([{
+                "proposalId":"p_done","kind":"task","targetId":task.id,
+                "targetRevision":task.revision,"text":null,"status":"completed",
+                "attention":"normal","evidence":[{"sourceId":completion.id,"quote":completion.text}]
+            }])),
+        );
+        assert_eq!(result.is_ok(), expected, "{text}: {result:?}");
+    }
+    assert_eq!(state.entities[0].id, task.id);
+    assert_eq!(state.entities[0].status, "completed");
+}
+
+#[test]
+fn codex_review_long_transcript_keeps_bounded_original_assertions() {
+    for (phase, kind, assertion, title, status, allowed) in [
+        (
+            "tasks",
+            "task",
+            "I will collect the microphone",
+            "Collect the microphone",
+            "open",
+            validate::task_quote_allowed as fn(&str) -> bool,
+        ),
+        (
+            "facts",
+            "decision",
+            "We decided to hold the workshop in Room Blue",
+            "Hold the workshop in Room Blue",
+            "recorded",
+            validate::recorded_decision_quote_allowed,
+        ),
+    ] {
+        let mut state = WorkspaceState::default();
+        let text = format!(
+            "{assertion} {}",
+            "as discussed here in the workshop ".repeat(24)
+        );
+        let long = source("s_long", 0, &text);
+        let req = request(&state, phase, &long);
+        let schema = fresh_assertion_schema(&req, allowed);
+        let quote = schema
+            .first()
+            .and_then(|entry| entry["properties"]["quote"]["enum"][0].as_str())
+            .expect("a bounded literal assertion must be offered");
+        assert!(quote.starts_with(assertion) && quote.chars().count() <= 600);
+        assert!(text.contains(quote));
+        validate::apply(
+            &mut state,
+            &req,
+            &answer(json!([{
+                "proposalId":"p_long","kind":kind,"text":title,
+                "status":status,"attention":"normal",
+                "evidence":[{"sourceId":long.id,"quote":quote}]
+            }])),
+        )
+        .unwrap();
+        assert_eq!(state.entities[0].evidence[0].quote, quote);
+    }
+}
+
+#[test]
 fn a_literal_room_decision_is_not_saved_as_a_fact() {
     let mut state = WorkspaceState::default();
     let room = source("s_room", 0, "We decided to hold the workshop in Room Blue.");

@@ -678,9 +678,11 @@ impl WorkspaceRunner {
                         ] {
                             let evidence = fresh_quote_schema(&req, |quote| {
                                 allowed_quote(quote)
-                                    && (matching::task_subject_matches(e, quote)
-                                        || (status == "completed"
-                                            && matching::explicit_owned_completion(e, quote)))
+                                    && if status == "completed" {
+                                        matching::task_completion_matches(e, quote)
+                                    } else {
+                                        matching::task_subject_matches(e, quote)
+                                    }
                             });
                             if evidence.is_empty() {
                                 continue;
@@ -1098,10 +1100,44 @@ fn fresh_assertion_schema(
 ) -> Vec<serde_json::Value> {
     fresh_evidence_schema(request, |text| {
         evidence_sentences(text)
-            .filter(|quote| (8..=600).contains(&quote.chars().count()) && allowed(quote))
+            .flat_map(|sentence| assertion_excerpts(sentence, &allowed))
             .map(str::to_owned)
             .collect()
     })
+}
+
+/// Keep short sentences intact. From a longer sentence, offer overlapping
+/// literal excerpts ending at word boundaries. The full sentence must pass
+/// too, so an excerpt cannot hide a refusal or a condition from the guard.
+fn assertion_excerpts<'a>(sentence: &'a str, allowed: &impl Fn(&str) -> bool) -> Vec<&'a str> {
+    if !allowed(sentence) {
+        return Vec::new();
+    }
+    let offsets: Vec<_> = sentence
+        .char_indices()
+        .map(|(offset, _)| offset)
+        .chain(std::iter::once(sentence.len()))
+        .collect();
+    let length = offsets.len() - 1;
+    if length <= 600 {
+        return (length >= 8).then_some(sentence).into_iter().collect();
+    }
+    (0..length)
+        .step_by(300)
+        .filter_map(|start| {
+            let begin = offsets[start];
+            let end = offsets[(start + 500).min(length)];
+            let mut excerpt = &sentence[begin..end];
+            if !sentence[..begin].ends_with(char::is_whitespace) && begin > 0 {
+                excerpt = &excerpt[excerpt.find(char::is_whitespace)?..];
+            }
+            if end < sentence.len() && !sentence[end..].starts_with(char::is_whitespace) {
+                excerpt = excerpt.rsplit_once(char::is_whitespace)?.0;
+            }
+            let excerpt = excerpt.trim();
+            (excerpt.chars().count() >= 8 && allowed(excerpt)).then_some(excerpt)
+        })
+        .collect()
 }
 
 /// Limit a structured status change to witnesses from the current window.

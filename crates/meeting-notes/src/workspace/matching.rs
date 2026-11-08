@@ -102,6 +102,29 @@ pub(super) fn task_subject_matches(task: &Entity, quote: &str) -> bool {
     )
 }
 
+/// A translated title need not share words with the source. In that case
+/// require the original commitment's action and object in the completion.
+pub(super) fn task_completion_matches(task: &Entity, quote: &str) -> bool {
+    if task_subject_matches(task, quote) || explicit_owned_completion(task, quote) {
+        return true;
+    }
+    let report = if let Some(owner) = task.owner.as_deref() {
+        let Some(report) = owned_report(owner, quote) else {
+            return false;
+        };
+        report
+    } else {
+        quote
+    };
+    task.evidence.iter().any(|evidence| {
+        super::validate::task_quote_allowed(&evidence.quote)
+            && completion_action_matches(
+                super::assertions::assignment_text(&evidence.quote),
+                report,
+            )
+    })
+}
+
 /// A model may echo the verified deadline in the title. It is metadata,
 /// so a completion of the same action need not repeat it.
 fn task_action_text(task: &Entity) -> &str {
@@ -240,36 +263,46 @@ fn repeated_open_topic(old: &str, new: &str) -> bool {
 }
 
 pub(super) fn explicit_owned_completion(task: &Entity, quote: &str) -> bool {
-    let Some(owner) = task.owner.as_deref() else {
-        return false;
-    };
-    let Some((speaker, report)) = quote.split_once(':') else {
-        return false;
-    };
+    task.owner
+        .as_deref()
+        .and_then(|owner| owned_report(owner, quote))
+        .is_some_and(|report| completion_action_matches(task_action_text(task), report))
+}
+
+fn owned_report<'a>(owner: &str, quote: &'a str) -> Option<&'a str> {
+    let (speaker, report) = quote.split_once(':')?;
     let speaker = speaker.trim();
     let speaker = speaker
         .strip_suffix(" says")
         .or_else(|| speaker.strip_suffix(" sagt"))
         .unwrap_or(speaker);
-    if !speaker.eq_ignore_ascii_case(owner) {
-        return false;
-    }
+    speaker.eq_ignore_ascii_case(owner).then_some(report)
+}
 
-    let title = task_action_text(task).to_lowercase();
+fn completion_action_matches(action_text: &str, report: &str) -> bool {
+    let title = action_text.to_lowercase();
     let report = report.trim().to_lowercase();
     let same_object = |actions: &[&str]| {
         let spoken = terms(&report);
         let object = terms(&title)
             .into_iter()
-            .filter(|word| !actions.iter().any(|action| word.contains(action)))
+            .filter(|word| {
+                !["werde", "werden", "promise", "commit"].contains(&word.as_str())
+                    && !actions.iter().any(|action| word.contains(action))
+            })
             .collect::<Vec<_>>();
         !object.is_empty()
             && object
                 .iter()
                 .all(|word| spoken.iter().any(|other| related_word(word, other)))
     };
-    if title.contains("abhol") {
-        return same_object(&["abhol"])
+    if title.contains("abhol")
+        || (title
+            .split_whitespace()
+            .any(|word| ["hole", "holen"].contains(&word))
+            && title.trim_end_matches(['.', '!']).ends_with(" ab"))
+    {
+        return same_object(&["abhol", "hole"])
             && report.contains("abgeholt")
             && (report.contains("habe ich") || report.contains("ich habe"));
     }
