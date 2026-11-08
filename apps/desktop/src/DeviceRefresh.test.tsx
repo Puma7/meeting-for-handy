@@ -138,9 +138,6 @@ describe("audio devices follow connected and removed hardware (synthetic IPC)", 
     );
     render(<App api={api} />);
     await screen.findByRole("option", { name: headset.name });
-    await userEvent.click(
-      screen.getByLabelText("Mikrofon zusätzlich aufnehmen"),
-    );
     await userEvent.selectOptions(microphoneSelect(), headset.id);
     const unplug = async () => {
       devices = [output, builtIn, alternate];
@@ -178,9 +175,6 @@ describe("audio devices follow connected and removed hardware (synthetic IPC)", 
     );
     render(<App api={api} />);
     await screen.findByRole("option", { name: headset.name });
-    await userEvent.click(
-      screen.getByLabelText("Mikrofon zusätzlich aufnehmen"),
-    );
     devices = [output];
     fireEvent.focus(window);
     await screen.findByText(/kein anderes Gerät dieser Art/);
@@ -210,9 +204,6 @@ describe("audio devices follow connected and removed hardware (synthetic IPC)", 
     );
     render(<App api={api} />);
     await screen.findByRole("option", { name: headset.name });
-    await userEvent.click(
-      screen.getByLabelText("Mikrofon zusätzlich aufnehmen"),
-    );
     await userEvent.selectOptions(microphoneSelect(), headset.id);
     // The headset goes, the default stands in; then the stand-in goes as well.
     devices = [output, builtIn, alternate];
@@ -239,9 +230,6 @@ describe("audio devices follow connected and removed hardware (synthetic IPC)", 
     );
     render(<App api={api} />);
     await screen.findByRole("option", { name: headset.name });
-    await userEvent.click(
-      screen.getByLabelText("Mikrofon zusätzlich aufnehmen"),
-    );
     await userEvent.selectOptions(microphoneSelect(), headset.id);
     devices = [output, builtIn, alternate];
     fireEvent.focus(window);
@@ -278,9 +266,6 @@ describe("audio devices follow connected and removed hardware (synthetic IPC)", 
     );
     render(<App api={api} />);
     await screen.findByRole("option", { name: headset.name });
-    await userEvent.click(
-      screen.getByLabelText("Mikrofon zusätzlich aufnehmen"),
-    );
     await userEvent.selectOptions(microphoneSelect(), headset.id);
     devices = [output, builtIn];
     fireEvent.focus(window);
@@ -306,9 +291,6 @@ describe("audio devices follow connected and removed hardware (synthetic IPC)", 
     );
     render(<App api={api} />);
     await screen.findByRole("option", { name: headset.name });
-    await userEvent.click(
-      screen.getByLabelText("Mikrofon zusätzlich aufnehmen"),
-    );
     await userEvent.selectOptions(microphoneSelect(), headset.id);
     recording = true;
     await waitFor(() =>
@@ -348,9 +330,6 @@ describe("audio devices follow connected and removed hardware (synthetic IPC)", 
     );
     render(<App api={api} />);
     await screen.findByRole("option", { name: headset.name });
-    await userEvent.click(
-      screen.getByLabelText("Mikrofon zusätzlich aufnehmen"),
-    );
     await userEvent.selectOptions(microphoneSelect(), headset.id);
     await waitFor(() =>
       expect(
@@ -398,9 +377,6 @@ describe("audio devices follow connected and removed hardware (synthetic IPC)", 
     );
     render(<App api={api} />);
     await screen.findByRole("option", { name: headset.name });
-    await userEvent.click(
-      screen.getByLabelText("Mikrofon zusätzlich aufnehmen"),
-    );
     await userEvent.selectOptions(microphoneSelect(), headset.id);
     recording = true;
     // The capture indicator, not the meeting status label, proves the recording state.
@@ -429,9 +405,6 @@ describe("audio devices follow connected and removed hardware (synthetic IPC)", 
     );
     render(<App api={api} />);
     await screen.findByRole("option", { name: builtIn.name });
-    await userEvent.click(
-      screen.getByLabelText("Mikrofon zusätzlich aufnehmen"),
-    );
     recording = true;
     await waitFor(() =>
       expect(document.querySelector(".state.recording")).not.toBeNull(),
@@ -456,9 +429,6 @@ describe("audio devices follow connected and removed hardware (synthetic IPC)", 
     );
     render(<App api={api} />);
     await screen.findByRole("option", { name: headset.name });
-    await userEvent.click(
-      screen.getByLabelText("Mikrofon zusätzlich aufnehmen"),
-    );
     await userEvent.selectOptions(microphoneSelect(), headset.id);
     recording = true;
     await waitFor(() =>
@@ -494,9 +464,6 @@ describe("audio devices follow connected and removed hardware (synthetic IPC)", 
     );
     render(<App api={api} />);
     await screen.findByRole("option", { name: headset.name });
-    await userEvent.click(
-      screen.getByLabelText("Mikrofon zusätzlich aufnehmen"),
-    );
     await userEvent.selectOptions(microphoneSelect(), headset.id);
     recording = true;
     await waitFor(() =>
@@ -536,9 +503,6 @@ describe("audio devices follow connected and removed hardware (synthetic IPC)", 
     );
     render(<App api={api} />);
     await screen.findByRole("option", { name: headset.name });
-    await userEvent.click(
-      screen.getByLabelText("Mikrofon zusätzlich aufnehmen"),
-    );
     await userEvent.selectOptions(microphoneSelect(), headset.id);
     // A slow automatic query still sees the headset ...
     vi.mocked(api.listDevices).mockImplementationOnce(

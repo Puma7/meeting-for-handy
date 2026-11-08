@@ -113,6 +113,11 @@ export default function ArchivePanel({
               <button
                 className="secondary"
                 disabled={busy || running}
+                title={
+                  de
+                    ? "Den unterbrochenen Löschvorgang und seine Bestätigung anzeigen."
+                    : "Review the interrupted deletion and its confirmation."
+                }
                 onClick={() => {
                   setResuming(item);
                   setTyped("");
@@ -135,6 +140,11 @@ export default function ArchivePanel({
               className="danger"
               disabled={
                 busy || running || typed !== `DELETE ${resuming.meetingId}`
+              }
+              title={
+                de
+                  ? "Den bestätigten Löschvorgang für die unveränderten Dateien fortsetzen."
+                  : "Continue the confirmed deletion of unchanged files."
               }
               onClick={() => {
                 const target = resuming;
@@ -179,6 +189,11 @@ export default function ArchivePanel({
       <button
         className="text-button"
         disabled={busy || running}
+        title={
+          de
+            ? "Die Liste der vorhandenen Archive neu laden."
+            : "Reload the list of existing archives."
+        }
         onClick={() => void load()}
       >
         {de ? "Archive aktualisieren" : "Refresh archives"}
@@ -240,6 +255,11 @@ export default function ArchivePanel({
                     <button
                       className="secondary"
                       disabled={busy || running}
+                      title={
+                        de
+                          ? "Prüfen, ob die zusätzliche Rohkopie entfernt werden kann."
+                          : "Review whether the extra raw copy can be removed."
+                      }
                       onClick={() => {
                         setCompact(item);
                         setSelected(null);
@@ -256,6 +276,11 @@ export default function ArchivePanel({
                       busy ||
                       running ||
                       (receipt.kind === "whole-meeting" && item.sessionPresent)
+                    }
+                    title={
+                      de
+                        ? "Die Bestätigung zur Wiederherstellung dieser Archivkopie öffnen."
+                        : "Open confirmation to restore this archive copy."
                     }
                     onClick={() => {
                       setSelected(item);
@@ -316,6 +341,11 @@ export default function ArchivePanel({
           <button
             className="secondary"
             disabled={busy || running}
+            title={
+              de
+                ? "Das Archiv prüfen und wiederherstellen, ohne vorhandene Dateien zu ersetzen."
+                : "Verify and restore the archive without replacing existing files."
+            }
             onClick={() => void restore()}
           >
             {de ? "Geprüfte Kopie wiederherstellen" : "Restore verified copy"}
@@ -340,6 +370,11 @@ export default function ArchivePanel({
           <button
             className="secondary"
             disabled={busy || running}
+            title={
+              de
+                ? "Die Rohkopie erst nach erneuter Prüfung des vollständigen ZIPs entfernen."
+                : "Remove the raw duplicate after verifying the complete ZIP again."
+            }
             onClick={() => void compactCopy()}
           >
             {de

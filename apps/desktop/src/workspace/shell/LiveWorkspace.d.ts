@@ -3,6 +3,7 @@ import type { ReactElement, ReactNode } from "react";
 export function LiveWorkspace(props: {
   adapter: unknown;
   meeting: unknown;
+  batchTranscription?: boolean;
   onBack: () => void;
   selectedFile?: string | null;
   initialEndpoint?: string;
@@ -11,6 +12,8 @@ export function LiveWorkspace(props: {
   theme?: "light" | "dark" | "system";
   onThemeChange?: (theme: "light" | "dark") => void;
   onModelSettings?: () => void;
+  onCopyTranscript?: () => void;
+  transcriptCopied?: boolean;
   onStopRecording?: () => void;
   stopping?: boolean;
   onTogglePause?: () => void;

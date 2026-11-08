@@ -134,7 +134,7 @@ pub(crate) fn load(folder: &Path) -> Result<(File, WorkspaceState)> {
     lock.try_lock_exclusive()
         .context("Eine andere Auswertung verwendet diesen Meetingstand.")?;
     let state = read(folder)?;
-    ensure!(state.revision == 0 || state.prompt_version() == super::PROMPT_VERSION,
+    ensure!(state.prompt_version() == super::PROMPT_VERSION,
         "Ältere Meetingfassungen werden nur gelesen. Eine neue Auswertung mit den aktuellen Prompts starten.");
     Ok((lock, state))
 }
@@ -152,18 +152,23 @@ pub(crate) fn read(folder: &Path) -> Result<WorkspaceState> {
         })
         .collect::<Vec<_>>();
     paths.sort();
-    let mut state = WorkspaceState::default();
+    let folder_version = super::GENERATIONS
+        .iter()
+        .find(|(_, name)| folder.file_name().is_some_and(|file| file == *name))
+        .map(|(version, _)| *version);
+    let mut state = WorkspaceState {
+        stored_prompt_version: folder_version.map(str::to_owned),
+        ..WorkspaceState::default()
+    };
     for path in paths {
         let bytes = read_bounded(&path)?;
         let delta: Delta = serde_json::from_slice(&bytes)
             .context("Meetingstand ist beschädigt; Originale bleiben unverändert.")?;
         ensure!(
-            [
-                super::PROMPT_VERSION,
-                super::PREVIOUS_PROMPT_VERSION,
-                super::LEGACY_PROMPT_VERSION
-            ]
-            .contains(&delta.schema.as_str())
+            super::GENERATIONS
+                .iter()
+                .any(|(version, _)| *version == delta.schema)
+                && folder_version.is_none_or(|version| version == delta.schema)
                 && (state.revision == 0 || state.prompt_version() == delta.schema)
                 && delta.revision == state.revision + 1,
             "Meetingfassungen sind unvollständig oder inkompatibel."

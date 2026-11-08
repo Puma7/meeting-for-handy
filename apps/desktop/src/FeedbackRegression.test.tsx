@@ -63,6 +63,7 @@ it("locks a discovery panel that was opened before an analysis started", async (
           reachable: true,
           models: ["synthetic"],
           recommendedInstalled: false,
+          loadedModels: [{ model: "synthetic", contextLength: 8192 }],
         },
       ],
     })),
@@ -90,11 +91,21 @@ it("locks a discovery panel that was opened before an analysis started", async (
     refreshModels: vi.fn(),
     manualModel: false,
     setManualModel: vi.fn(),
+    workspaceLanguage: "auto" as const,
+    setWorkspaceLanguage: vi.fn(),
+    workspacePrompt: null,
+    setWorkspacePrompt: vi.fn(),
   };
   const view = render(<TextModelSettings {...props} />);
   fireEvent.click(
     screen.getByRole("button", { name: "Ollama / LM Studio erkennen" }),
   );
+  expect(
+    await screen.findByText("synthetic · geladen · 8.192 Tokens Kontext"),
+  ).toBeTruthy();
+  expect(
+    screen.getByText(/in LM Studio entladen und den Server laufen lassen/),
+  ).toBeTruthy();
   const use = await screen.findByRole("button", {
     name: "Verwenden: synthetic",
   });

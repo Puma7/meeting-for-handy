@@ -53,7 +53,7 @@ export default function MeetingDetail({
     .filter((part) => (part.text ?? "").trim());
   return (
     <section className="meeting-detail">
-      <button className="text-button" onClick={onBack}>
+      <button className="text-button" onClick={onBack} title={t.backHistory}>
         <ArrowLeft size={15} />
         {t.backHistory}
       </button>
@@ -75,6 +75,7 @@ export default function MeetingDetail({
               className="danger"
               disabled={busy}
               onClick={onErase}
+              title={t.eraseMeetingTooltip}
             >
               <Trash2 size={16} />
               {locale === "de" ? "Meeting löschen" : "Delete meeting"}
@@ -93,6 +94,7 @@ export default function MeetingDetail({
             className="primary"
             disabled={busy || meeting.status !== "complete" || !parts.length}
             onClick={onAnalyse}
+            title={t.analyzeMeetingTooltip}
           >
             <Sparkles size={16} />
             {t.analyzeMeeting}

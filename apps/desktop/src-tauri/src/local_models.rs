@@ -15,8 +15,8 @@ pub(crate) const OLLAMA_ENDPOINT: &str = "http://127.0.0.1:11434/v1/";
 pub(crate) const LM_STUDIO_ENDPOINT: &str = "http://127.0.0.1:1234/v1/";
 /// Ollama's native API root; downloads go to `api/pull` below it.
 const OLLAMA_ROOT: &str = "http://127.0.0.1:11434/";
-pub(crate) const SMALL_MODEL: &str = "gemma4:e2b";
-pub(crate) const STANDARD_MODEL: &str = "gemma4:e4b";
+const FALLBACK_MODEL: &str = "gemma4:e4b";
+const REFERENCE_MODEL: &str = "gemma4:12b";
 const GIB: u64 = 1024 * 1024 * 1024;
 
 #[derive(Clone, Debug, Serialize, PartialEq, Eq)]
@@ -33,18 +33,17 @@ pub(crate) struct Recommendation {
 /// app, the speech model and the operating system next to the text model.
 pub(crate) fn recommend(total_memory: Option<u64>) -> Recommendation {
     let (tier, model) = match total_memory {
-        None => ("unknown", Some(STANDARD_MODEL)),
-        Some(bytes) if bytes < 7 * GIB => ("none", None),
-        Some(bytes) if bytes < 15 * GIB => ("small", Some(SMALL_MODEL)),
-        Some(bytes) if bytes < 31 * GIB => ("standard", Some(STANDARD_MODEL)),
-        Some(_) => ("large", Some(STANDARD_MODEL)),
+        None => ("unknown", Some(FALLBACK_MODEL)),
+        Some(bytes) if bytes < 15 * GIB => ("none", None),
+        Some(bytes) if bytes < 31 * GIB => ("standard", Some(FALLBACK_MODEL)),
+        Some(_) => ("large", Some(REFERENCE_MODEL)),
     };
     Recommendation {
         tier,
         model,
         lm_studio_search: model.map(|m| {
-            if m == SMALL_MODEL {
-                "Gemma 4 E2B"
+            if m == REFERENCE_MODEL {
+                "Gemma 4 12B"
             } else {
                 "Gemma 4 E4B"
             }
@@ -61,6 +60,8 @@ pub(crate) struct Provider {
     reachable: bool,
     models: Vec<String>,
     recommended_installed: bool,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    loaded_models: Vec<meeting_notes::residency::LmStudioLoadedModel>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -306,6 +307,11 @@ pub(crate) fn setup() -> LocalModelSetup {
     .map(|(id, name, endpoint)| {
         let found = meeting_notes::local_model_ids(&endpoint);
         let models = found.as_ref().cloned().unwrap_or_default();
+        let loaded_models = if id == "lmstudio" && found.is_ok() {
+            meeting_notes::residency::lm_studio_loaded_models(&endpoint).unwrap_or_default()
+        } else {
+            Vec::new()
+        };
         Provider {
             id,
             name,
@@ -313,6 +319,7 @@ pub(crate) fn setup() -> LocalModelSetup {
             reachable: found.is_ok(),
             recommended_installed: installed(&models, recommendation.model),
             models,
+            loaded_models,
         }
     })
     .collect();
@@ -684,14 +691,15 @@ mod tests {
     fn memory_tiers_follow_the_documented_thresholds() {
         assert_eq!(recommend(Some(4 * GIB)).tier, "none");
         assert_eq!(recommend(Some(4 * GIB)).model, None);
-        assert_eq!(recommend(Some(8 * GIB)).model, Some(SMALL_MODEL));
-        assert_eq!(recommend(Some(16 * GIB)).model, Some(STANDARD_MODEL));
+        assert_eq!(recommend(Some(8 * GIB)).model, None);
+        assert_eq!(recommend(Some(16 * GIB)).model, Some(FALLBACK_MODEL));
         assert_eq!(recommend(Some(16 * GIB)).tier, "standard");
         assert_eq!(recommend(Some(64 * GIB)).tier, "large");
+        assert_eq!(recommend(Some(64 * GIB)).model, Some(REFERENCE_MODEL));
         assert_eq!(recommend(None).tier, "unknown");
         assert_eq!(
-            recommend(Some(8 * GIB)).lm_studio_search,
-            Some("Gemma 4 E2B")
+            recommend(Some(64 * GIB)).lm_studio_search,
+            Some("Gemma 4 12B")
         );
     }
 

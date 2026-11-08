@@ -169,6 +169,34 @@ export default function LocalModelSetup({
                         : "not found"}
                   </span>
                 </div>
+                {provider.id === "lmstudio" &&
+                  Boolean(provider.loadedModels?.length) && (
+                    <div className="local-provider-loaded">
+                      <ul
+                        aria-label={de ? "Geladene Modelle" : "Loaded models"}
+                      >
+                        {provider.loadedModels?.map(
+                          ({ model, contextLength }) => (
+                            <li key={model}>
+                              {model} · {de ? "geladen" : "loaded"}
+                              {contextLength !== null && (
+                                <>
+                                  {" "}
+                                  · {contextLength.toLocaleString(locale)}{" "}
+                                  {de ? "Tokens Kontext" : "context tokens"}
+                                </>
+                              )}
+                            </li>
+                          ),
+                        )}
+                      </ul>
+                      <p className="muted">
+                        {de
+                          ? "Für eine neue HandyMeeting-Auswertung: Falls das Modell gerade nicht gebraucht wird, in LM Studio entladen und den Server laufen lassen."
+                          : "For a new HandyMeeting analysis, unload the model in LM Studio when it is idle and leave the server running."}
+                      </p>
+                    </div>
+                  )}
                 {provider.reachable && provider.models.length > 0 && (
                   <div className="local-provider-models">
                     {(recommended && provider.recommendedInstalled
@@ -183,6 +211,11 @@ export default function LocalModelSetup({
                     ).map((model) => (
                       <button
                         key={model}
+                        title={
+                          de
+                            ? "Diesen Dienst und dieses Modell für die Textauswertung auswählen."
+                            : "Select this service and model for text analysis."
+                        }
                         className="secondary"
                         disabled={disabled}
                         onClick={() => {
@@ -211,6 +244,11 @@ export default function LocalModelSetup({
                             <button
                               className="secondary"
                               onClick={() => void api.cancelModelPull?.()}
+                              title={
+                                de
+                                  ? "Den laufenden Modell-Download abbrechen."
+                                  : "Cancel the current model download."
+                              }
                             >
                               <X size={14} />
                               {de ? "Abbrechen" : "Cancel"}
@@ -221,6 +259,11 @@ export default function LocalModelSetup({
                             className="primary"
                             disabled={disabled || !api.pullOllamaModel}
                             onClick={() => void startPull()}
+                            title={
+                              de
+                                ? "Dieses Modell über Ollama herunterladen."
+                                : "Download this model through Ollama."
+                            }
                           >
                             <Download size={14} />
                             {de

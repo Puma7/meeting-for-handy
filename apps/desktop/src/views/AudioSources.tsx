@@ -88,6 +88,9 @@ export default function AudioSources({
     ? (captureControl?.hasMicrophone ?? micEnabled)
     : micEnabled;
   const hasSystemDevice = devices.some((item) => item.source === "system");
+  const hasMicrophoneDevice = devices.some(
+    (item) => item.source === "microphone",
+  );
   return (
     <div className={`audio-sources${compact ? " compact" : ""}`}>
       <div className="audio-source-grid">
@@ -105,6 +108,7 @@ export default function AudioSources({
             <div className="inline-control audio-source-controls">
               <select
                 id={systemSelect}
+                title={t.systemDeviceTooltip}
                 value={systemId}
                 disabled={recording || busy || !hasSystemDevice}
                 onChange={(event) => setSystemId(event.target.value)}
@@ -146,8 +150,11 @@ export default function AudioSources({
               <input
                 type="checkbox"
                 aria-label={t.microphone}
+                title={
+                  hasMicrophoneDevice ? t.microphoneToggleTooltip : t.noDevices
+                }
                 checked={microphoneIncluded}
-                disabled={recording || busy}
+                disabled={recording || busy || !hasMicrophoneDevice}
                 onChange={(event) => setMicEnabled(event.target.checked)}
               />
             )}
@@ -158,11 +165,12 @@ export default function AudioSources({
             <div className="audio-source-controls">
               <select
                 aria-label={t.sourceMicrophone}
+                title={t.microphoneDeviceTooltip}
                 value={micId}
                 disabled={!micEnabled || recording || busy}
                 onChange={(event) => setMicId(event.target.value)}
               >
-                {!devices.some((item) => item.source === "microphone") && (
+                {!hasMicrophoneDevice && (
                   <option value="">{t.noDevices}</option>
                 )}
                 {devices

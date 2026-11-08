@@ -128,7 +128,13 @@ export default function SpeakerLabels({
           {de ? "Sprecher selbst bestätigen" : "Confirm speakers yourself"}
         </h3>
       ) : (
-        <summary>
+        <summary
+          title={
+            de
+              ? "Sprecher für einzelne Transkriptabschnitte manuell bestätigen."
+              : "Manually confirm speakers for individual transcript sections."
+          }
+        >
           {de
             ? "Sprecher nach dem Meeting zuordnen · optional"
             : "Assign speakers after the meeting · optional"}
@@ -145,6 +151,11 @@ export default function SpeakerLabels({
           className="secondary"
           disabled={busy || proposeDisabled || meeting.status !== "complete"}
           onClick={onPropose}
+          title={
+            de
+              ? "Die Vorlage für unbestätigte Namensvorschläge öffnen."
+              : "Open the template for unconfirmed name suggestions."
+          }
         >
           {de
             ? "Lokale KI-Namensvorschläge vorbereiten"
@@ -191,6 +202,11 @@ export default function SpeakerLabels({
             <input
               type="checkbox"
               checked={doc.enabled}
+              title={
+                de
+                  ? "Manuell bestätigte Namen im Transkript anzeigen."
+                  : "Show manually confirmed names in the transcript."
+              }
               disabled={busy || stale.length > 0}
               onChange={(e) => void save(e.target.checked, doc.assignments)}
             />
@@ -265,6 +281,11 @@ export default function SpeakerLabels({
               {de ? "Originalabschnitt" : "Original section"}
               <select
                 value={source}
+                title={
+                  de
+                    ? "Den Transkriptabschnitt für die Zuordnung auswählen."
+                    : "Choose the transcript section to label."
+                }
                 disabled={busy}
                 onChange={(e) => {
                   setSource(e.target.value);
@@ -292,6 +313,11 @@ export default function SpeakerLabels({
                     : "Speaker name confirmed by you"}
                   <input
                     value={name}
+                    title={
+                      de
+                        ? "Den Namen der Person eingeben, die hier spricht."
+                        : "Enter the name of the person speaking here."
+                    }
                     maxLength={80}
                     disabled={busy}
                     onChange={(e) => setName(e.target.value)}
@@ -303,6 +329,11 @@ export default function SpeakerLabels({
                     : "Literal quote from this section"}
                   <textarea
                     value={quote}
+                    title={
+                      de
+                        ? "Ein wörtliches Zitat aus dem angezeigten Abschnitt übernehmen."
+                        : "Use an exact quote from the displayed section."
+                    }
                     maxLength={2000}
                     disabled={busy}
                     onChange={(e) => setQuote(e.target.value)}
@@ -310,6 +341,11 @@ export default function SpeakerLabels({
                 </label>
                 <button
                   className="secondary"
+                  title={
+                    de
+                      ? "Die geprüfte Zuordnung für diesen Abschnitt speichern."
+                      : "Save the confirmed speaker for this section."
+                  }
                   disabled={
                     busy ||
                     stale.length > 0 ||

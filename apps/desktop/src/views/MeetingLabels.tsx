@@ -72,13 +72,26 @@ export default function MeetingLabels({
             {de ? "Meetingname" : "Meeting name"}
             <input
               autoFocus
+              title={
+                de
+                  ? "Den Anzeigenamen dieser Sitzung ändern."
+                  : "Change this session’s display name."
+              }
               value={title}
               maxLength={200}
               disabled={busy}
               onChange={(e) => setTitle(e.target.value)}
             />
           </label>
-          <button className="secondary" disabled={busy || !title.trim()}>
+          <button
+            className="secondary"
+            disabled={busy || !title.trim()}
+            title={
+              de
+                ? "Den neuen Anzeigenamen speichern."
+                : "Save the new display name."
+            }
+          >
             <Save size={15} />
             {de ? "Namen speichern" : "Save name"}
           </button>
@@ -86,6 +99,9 @@ export default function MeetingLabels({
             type="button"
             className="text-button"
             disabled={busy}
+            title={
+              de ? "Die Namensänderung verwerfen." : "Discard the name change."
+            }
             onClick={() => setEditing(false)}
           >
             <X size={15} />

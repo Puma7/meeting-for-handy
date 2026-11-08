@@ -88,18 +88,28 @@ impl TextClient {
         let messages = json!([{"role":"system","content":system},{"role":"user","content":user}]);
         let (url, body, native) = if let Some(lease) = &self.residency {
             lease.prepare_workspace(control)?;
-            let (provider, model, keep_alive, _) = lease.inference()?;
+            let crate::residency::InferenceRoute {
+                provider,
+                model,
+                keep_alive,
+                supports_reasoning_off,
+                ..
+            } = lease.inference()?;
             match provider {
                 crate::residency::LocalProvider::Ollama => (
                     self.base.join("../api/chat")?,
                     json!({"model":model,"stream":true,"messages":messages,"format":schema,"keep_alive":keep_alive,"options":{"temperature":0,"num_predict":4096,"num_ctx":crate::workspace::WORKSPACE_CONTEXT_LENGTH}}),
                     true,
                 ),
-                crate::residency::LocalProvider::LmStudio => (
-                    self.base.join("chat/completions")?,
-                    json!({"model":model,"stream":true,"messages":messages,"temperature":0,"max_tokens":4096,"response_format":{"type":"json_schema","json_schema":{"name":"meeting_update","strict":true,"schema":schema}}}),
-                    false,
-                ),
+                crate::residency::LocalProvider::LmStudio => {
+                    let mut body = json!({"model":model,"stream":true,"messages":messages,"temperature":0,"max_tokens":4096,"response_format":{"type":"json_schema","json_schema":{"name":"meeting_update","strict":true,"schema":schema}}});
+                    // Keep the bounded response budget available for the actual update.
+                    // Older servers and models without an advertised off mode keep their defaults.
+                    if supports_reasoning_off {
+                        body["reasoning_effort"] = "none".into();
+                    }
+                    (self.base.join("chat/completions")?, body, false)
+                }
             }
         } else {
             (

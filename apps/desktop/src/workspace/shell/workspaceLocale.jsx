@@ -40,6 +40,25 @@ const english = {
   Gesprächsverlauf: "Conversation history",
   Gesprächsimpulse: "Conversation prompts",
   "Zur Standardansicht": "Standard view",
+  "Frühere Auswertungen": "Earlier analyses",
+  "Öffnet frühere gespeicherte Auswertungen dieses Meetings zum Nachlesen.":
+    "Open earlier saved analyses for this meeting.",
+  "Transkript kopieren": "Copy transcript",
+  "Transkript kopiert": "Transcript copied",
+  "Kopiert das bisherige Transkript beider Spuren, unabhängig vom Filter.":
+    "Copy the transcript so far from both tracks, regardless of filters.",
+  Aufnahme: "Recording",
+  "Aufnahme beenden und sichern": "Stop and save the recording",
+  "Aufnahmehinweise in der Standardansicht öffnen":
+    "Open recording notices in the standard view",
+  "KI-Auswertung": "AI analysis",
+  "Aktualisiert die KI-Auswertung, sobald der laufende Durchgang fertig ist.":
+    "Refresh AI analysis when the current update is complete.",
+  "Startet die lokale KI-Auswertung des bisherigen Transkripts.":
+    "Start local AI analysis of the transcript so far.",
+  Vorläufig: "Provisional",
+  "Diese Wörter können sich während der Erkennung noch ändern.":
+    "These words can still change during transcription.",
   "Aufnahme prüfen": "Check recording",
   "Aufnahme pausiert": "Recording paused",
   "Aufnahme läuft": "Recording in progress",
@@ -67,6 +86,9 @@ const english = {
   "Die Dateien bleiben unverändert erhalten. Prüfe sie in der Standardansicht.":
     "Files are kept unchanged. Review them in the standard view.",
   Intervall: "Interval",
+  "Erster Lauf": "First pass",
+  "Wartezeit bis zur ersten automatischen Auswertung. Danach folgt bei neuem Transkript der nächste Lauf mit kurzer Pause.":
+    "Delay before the first automatic update. Subsequent updates follow new transcript text after a short pause.",
   Auswertungsintervall: "Analysis interval",
   "Legt fest, wie oft die KI den Überblick aktualisiert.":
     "Choose how often AI updates the overview.",
@@ -138,8 +160,8 @@ const english = {
   "Zuständig:": "Owner:",
   "nicht benannt": "unspecified",
   "· Termin:": "· Due:",
-  "Für diese Auswahl kein bestätigter Transkriptabschnitt.":
-    "No confirmed transcript section matches this selection.",
+  "Für diese Auswahl kein Transkriptabschnitt.":
+    "No transcript section matches this selection.",
   "Für diese Auswahl kein gespeicherter Eintrag.":
     "No saved item matches this selection.",
   "Hier erscheinen belegte Entwicklungen und Statusänderungen. Der Wortlaut steht im Transkript.":

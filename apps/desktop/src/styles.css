@@ -662,6 +662,22 @@ main {
   gap: 12px;
   padding-bottom: 14px;
 }
+.workspace-prompt-settings {
+  margin-block: 0.75rem;
+}
+
+.workspace-prompt-settings > label {
+  margin-block: 0.65rem;
+}
+
+.workspace-prompt-settings pre {
+  max-height: 20rem;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: 0.85rem;
+}
+
 .text-model-settings > h3,
 .notes-template-settings > h3 {
   font-size: 14px;
@@ -1085,18 +1101,51 @@ main {
 .settings-sections {
   max-width: 780px;
 }
-.settings-sections > section {
-  padding: 0 0 25px;
-  margin-bottom: 25px;
-  border-bottom: 1px solid var(--color-line);
+.settings-shortcuts,
+.settings-model-intro {
+  display: flex;
+  gap: 8px 12px;
+  flex-wrap: wrap;
+  align-items: center;
 }
-.settings-sections > section > p {
-  color: var(--color-ink-2);
-  font-size: 13px;
-  margin: 9px 0 15px;
+.settings-shortcuts {
+  margin-bottom: 18px;
+}
+.settings-sections > .settings-group {
+  padding: 16px;
+  margin-bottom: 14px;
+  min-width: 0;
+  border: 1px solid var(--color-line);
+  border-radius: 10px;
+  scroll-margin-top: 12px;
+}
+.settings-model-intro {
+  justify-content: space-between;
+  margin-bottom: 14px;
+}
+.settings-model-intro p {
+  flex: 1 1 16rem;
+}
+.settings-model-detect {
+  max-width: 100%;
+  white-space: normal;
+  text-align: start;
+}
+.settings-group > .settings-disclosure {
+  margin-top: 12px;
+}
+.settings-group .secondary {
+  max-width: 100%;
+  white-space: normal;
+  text-align: start;
+}
+.settings-group .secondary svg {
+  flex-shrink: 0;
 }
 .settings-actions {
   display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
   justify-content: space-between;
   align-items: center;
   margin-top: 14px;
@@ -2190,6 +2239,15 @@ mark {
   gap: 6px;
   padding-top: 8px;
   border-top: 1px solid var(--color-line);
+}
+.local-provider-loaded {
+  margin-block: 7px;
+  overflow-wrap: anywhere;
+  font-size: 12px;
+}
+.local-provider-loaded ul {
+  margin: 0 0 4px;
+  padding-inline-start: 18px;
 }
 .local-provider-models,
 .local-provider-action {

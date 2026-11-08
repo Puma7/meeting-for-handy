@@ -14,6 +14,27 @@ export const de = {
   savedFilesHelp:
     "Audio und Textjournale werden bereits automatisch lokal gesichert. Jeder Export ist eine zusätzliche Momentaufnahme.",
   captureSetup: "Aufnahme einrichten",
+  captureSetupTooltip:
+    "Name, Transkriptionsmodell und Audioquellen einstellen.",
+  meetingTitleTooltip: "Einen Namen für das nächste Meeting eingeben.",
+  systemDeviceTooltip:
+    "Wählen, von welchem Gerät der Computerton aufgenommen wird.",
+  microphoneToggleTooltip:
+    "Das Mikrofon als eigene Spur zusätzlich zum Computerton aufnehmen.",
+  microphoneDeviceTooltip: "Wählen, welches Mikrofon aufgenommen wird.",
+  analyzeMeetingTooltip: "Die Nachbearbeitung für dieses Transkript öffnen.",
+  resumeTooltip: "Ausstehende Arbeit mit den gespeicherten Daten fortsetzen.",
+  showTranscriptTooltip: "Das laufende Transkript anzeigen.",
+  showLiveSummaryTooltip: "Die aktuelle Live-Zusammenfassung anzeigen.",
+  loadTranscriptTooltip: "Auch die früheren Abschnitte dieser Aufnahme laden.",
+  eraseMeetingTooltip:
+    "Vorschau zum dauerhaften Löschen dieses Meetings öffnen.",
+  refreshHistoryTooltip: "Die Liste der gespeicherten Meetings neu laden.",
+  openMeetingTooltip: "Die gespeicherte Sitzung öffnen.",
+  exportFormatTooltip:
+    "Das Dateiformat für den nächsten Transkriptexport auswählen.",
+  transcriptSearchTooltip: "Wörter und Sätze im angezeigten Transkript suchen.",
+  languageTooltip: "Die Sprache der Oberfläche ändern.",
   analysisSetup: "Auswertung einrichten",
   connectionSettings: "Verbindung und Zugangsschlüssel",
   setupHelp: "Hilfe zur lokalen Auswertung",
@@ -338,6 +359,26 @@ export const en: Record<MessageKey, string> = {
   savedFilesHelp:
     "Audio and transcript journals are already saved locally. Each export is an additional snapshot.",
   captureSetup: "Recording setup",
+  captureSetupTooltip:
+    "Set the meeting name, transcription model and audio sources.",
+  meetingTitleTooltip: "Enter a name for the next meeting.",
+  systemDeviceTooltip: "Choose the device that supplies the computer audio.",
+  microphoneToggleTooltip:
+    "Record the microphone on a separate track alongside computer audio.",
+  microphoneDeviceTooltip: "Choose which microphone to record.",
+  analyzeMeetingTooltip: "Open post-processing for this transcript.",
+  resumeTooltip: "Continue pending work using the saved data.",
+  showTranscriptTooltip: "Show the live transcript.",
+  showLiveSummaryTooltip: "Show the current live summary.",
+  loadTranscriptTooltip: "Load earlier sections of this recording too.",
+  eraseMeetingTooltip:
+    "Preview what permanently deleting this meeting would remove.",
+  refreshHistoryTooltip: "Reload the list of saved meetings.",
+  openMeetingTooltip: "Open the saved session.",
+  exportFormatTooltip: "Choose the file format for the next transcript export.",
+  transcriptSearchTooltip:
+    "Find words and phrases in the displayed transcript.",
+  languageTooltip: "Change the interface language.",
   analysisSetup: "Analysis setup",
   connectionSettings: "Connection and access keys",
   setupHelp: "Help with local analysis",

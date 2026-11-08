@@ -170,7 +170,11 @@ export default function UpdatePanel({
         {job?.status !== "ready" && (
           <button
             className="secondary"
-            title={shortcutLabel}
+            title={
+              de
+                ? "Auf GitHub nach einer neueren Version suchen."
+                : "Check GitHub for a newer version."
+            }
             aria-label={shortcutLabel}
             disabled={request || running}
             onClick={() => void action(api.checkForUpdate!)}
@@ -210,7 +214,15 @@ export default function UpdatePanel({
                 ? "Update verfügbar."
                 : "Update available."}{" "}
             {onOpenSettings && (
-              <button className="text-button" onClick={onOpenSettings}>
+              <button
+                className="text-button"
+                title={
+                  de
+                    ? "Den Update-Bereich in den Einstellungen öffnen."
+                    : "Open the update section in Settings."
+                }
+                onClick={onOpenSettings}
+              >
                 {de ? "Update öffnen" : "Open update"}
               </button>
             )}
@@ -266,6 +278,11 @@ export default function UpdatePanel({
           <button
             className="secondary"
             disabled={request || running}
+            title={
+              de
+                ? "Auf GitHub nach einer neueren Version suchen."
+                : "Check GitHub for a newer version."
+            }
             onClick={() => void action(api.checkForUpdate!)}
           >
             <RefreshCw size={15} />
@@ -286,6 +303,11 @@ export default function UpdatePanel({
             <button
               className="secondary"
               disabled={request}
+              title={
+                de
+                  ? "Den Installer herunterladen und seine Prüfsumme kontrollieren."
+                  : "Download the installer and verify its checksum."
+              }
               onClick={() => void action(api.downloadUpdate!)}
             >
               <Download size={15} />
@@ -295,6 +317,11 @@ export default function UpdatePanel({
           {job?.status === "ready" && (
             <button
               className="primary"
+              title={
+                de
+                  ? "Den geprüften Installer nach einer Bestätigung starten."
+                  : "Start the verified installer after confirmation."
+              }
               disabled={request || installBlocked}
               onClick={() => {
                 if (
@@ -322,6 +349,11 @@ export default function UpdatePanel({
           <p>
             <button
               className={externalPackage ? "secondary" : "text-button"}
+              title={
+                de
+                  ? "Downloads und Versionshinweise auf GitHub öffnen."
+                  : "Open downloads and release notes on GitHub."
+              }
               onClick={() => void openReleasePage()}
             >
               <ExternalLink size={14} />
@@ -340,6 +372,11 @@ export default function UpdatePanel({
         // Cancellation only sets a flag, so it stays available while the download request runs.
         <button
           className="secondary"
+          title={
+            de
+              ? "Den laufenden Installer-Download abbrechen."
+              : "Cancel the installer download."
+          }
           onClick={() =>
             void Promise.resolve(api.cancelUpdate!()).catch((e) =>
               setError(errorMessage(e)),

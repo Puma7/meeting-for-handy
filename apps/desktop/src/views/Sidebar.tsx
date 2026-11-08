@@ -120,6 +120,7 @@ export default function Sidebar({
             {dark ? <Sun size={17} /> : <Moon size={17} />}
           </button>
           <select
+            title={t.languageTooltip}
             aria-label={t.language}
             value={locale}
             onChange={(event) => setLocale(event.target.value as Locale)}

@@ -509,11 +509,12 @@ it.each(
     vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
     const mounted = render(<App api={api} />);
     try {
-      // Choose a microphone before the synthetic recording starts, as in the real flow.
-      const microphone = await screen.findByRole("checkbox", {
-        name: t.microphone,
-      });
-      fireEvent.click(microphone);
+      // The default microphone is selected before the synthetic recording starts.
+      await waitFor(() =>
+        expect(
+          screen.getByRole("checkbox", { name: t.microphone }),
+        ).toHaveProperty("checked", true),
+      );
       current = {
         ...state(active),
         recording: true,
@@ -694,13 +695,13 @@ it("keeps the speaker check archive remedy and its completion outside closed set
 });
 
 describe("migration frontend boundaries (synthetic IPC)", () => {
-  it("requires actual desktop readiness and passes separate microphone selection", async () => {
+  it("selects the default microphone and passes both audio tracks", async () => {
     const api = fakeApi();
     render(<App api={api} />);
     await ready();
-    await userEvent.click(
+    expect(
       screen.getByLabelText("Mikrofon zusätzlich aufnehmen"),
-    );
+    ).toHaveProperty("checked", true);
     await userEvent.click(
       screen.getByRole("button", { name: "Aufnahme starten" }),
     );
@@ -719,6 +720,72 @@ describe("migration frontend boundaries (synthetic IPC)", () => {
       expect.stringContaining("Synthetic capture unavailable"),
     );
   });
+  it("remembers when the microphone is turned off", async () => {
+    const api = fakeApi();
+    const { unmount } = render(<App api={api} />);
+    await ready();
+    const microphone = screen.getByLabelText("Mikrofon zusätzlich aufnehmen");
+    expect(microphone).toHaveProperty("checked", true);
+    await userEvent.click(microphone);
+    unmount();
+
+    render(<App api={api} />);
+    await ready();
+    expect(
+      screen.getByLabelText("Mikrofon zusätzlich aufnehmen"),
+    ).toHaveProperty("checked", false);
+    await userEvent.click(
+      screen.getByRole("button", { name: "Aufnahme starten" }),
+    );
+    expect(api.startMeeting).toHaveBeenCalledWith(
+      expect.objectContaining({
+        systemDeviceId: "out",
+        microphoneDeviceId: null,
+      }),
+    );
+  });
+  it.each([{}, { microphone: true }])(
+    "starts with computer audio alone when no microphone is available (%j)",
+    async (preferences) => {
+      const preferencesKey = "handymeeting.rust.beta.preferences.v1";
+      localStorage.setItem(preferencesKey, JSON.stringify(preferences));
+      const api = fakeApi();
+      vi.mocked(api.listDevices).mockResolvedValue([
+        { id: "out", name: "Output", source: "system", isDefault: true },
+      ]);
+      render(<App api={api} />);
+      await ready();
+      const microphone = screen.getByLabelText("Mikrofon zusätzlich aufnehmen");
+      expect(microphone).toHaveProperty("checked", false);
+      expect(microphone).toHaveProperty("disabled", true);
+      await userEvent.click(
+        screen.getByRole("button", { name: "Aufnahme starten" }),
+      );
+      expect(api.startMeeting).toHaveBeenCalledWith(
+        expect.objectContaining({
+          systemDeviceId: "out",
+          microphoneDeviceId: null,
+        }),
+      );
+      expect(JSON.parse(localStorage.getItem(preferencesKey)!)).toEqual(
+        expect.objectContaining(preferences),
+      );
+      vi.mocked(api.listDevices).mockResolvedValue([
+        { id: "out", name: "Output", source: "system", isDefault: true },
+        {
+          id: "mic",
+          name: "Microphone",
+          source: "microphone",
+          isDefault: true,
+        },
+      ]);
+      fireEvent.focus(window);
+      await waitFor(() => {
+        expect(microphone).toHaveProperty("checked", true);
+        expect(microphone).toHaveProperty("disabled", false);
+      });
+    },
+  );
   it("uses refreshed Handy models and excludes unsupported/uninstalled entries", async () => {
     const api = fakeApi();
     const refreshed = {
@@ -2080,10 +2147,23 @@ describe("workspace navigation (synthetic IPC)", () => {
 it("opens the full-window workspace on demand and switches views without stopping capture", async () => {
   // Keep Vite module transformation outside the rendering assertion.
   await import("./workspace/WorkspaceBridge");
-  const active = { ...meeting, status: "recording" };
+  const active = {
+    ...meeting,
+    status: "recording",
+    modelId: "handy-computer/parakeet-ultra-gguf/parakeet-ultra-Q8_0.gguf",
+    pendingAudioMs: 15000,
+  };
   const api = fakeApi(active);
+  const ready = state(active);
+  ready.handy!.models.push({
+    id: active.modelId,
+    name: "Parakeet Ultra",
+    isDownloaded: true,
+    supportsStreaming: false,
+    supportsBatch: true,
+  });
   api.getAppState = vi.fn().mockResolvedValue({
-    ...state(active),
+    ...ready,
     recording: true,
     error: "Mikrofon getrennt. Aufnahme beenden und Gerät neu verbinden.",
   });
@@ -2131,12 +2211,40 @@ it("opens the full-window workspace on demand and switches views without stoppin
       expect(api.getLiveNotes).toHaveBeenCalledWith(active.id, true),
     );
     const shadow = within(getShadow() as unknown as HTMLElement);
+    expect(
+      shadow.getByText("Abschnittstranskription · offenes Audio 00:15"),
+    ).toBeTruthy();
     expect(shadow.getByRole("alert").textContent).toContain(
       "Mikrofon getrennt",
     );
+    const recordingActions = shadow.getByRole("group", { name: "Aufnahme" });
     expect(
-      shadow.getByRole("button", { name: "Aufnahme beenden" }),
-    ).toBeTruthy();
+      within(recordingActions)
+        .getByRole("button", {
+          name: "Aufnahme beenden",
+        })
+        .getAttribute("title"),
+    ).toBe("Aufnahme beenden und sichern");
+    api.getMeeting = vi.fn().mockResolvedValue({
+      ...active,
+      parts: [
+        ...active.parts,
+        {
+          ...active.parts[0],
+          startSample: 480000,
+          text: "Vollständig nachgeladen.",
+        },
+      ],
+    });
+    fireEvent.click(
+      shadow.getByRole("button", { name: "Transkript kopieren" }),
+    );
+    await waitFor(() =>
+      expect(api.copyText).toHaveBeenCalledWith(
+        expect.stringContaining("Vollständig nachgeladen."),
+      ),
+    );
+    expect(api.getMeeting).toHaveBeenLastCalledWith(active.id);
     fireEvent.click(
       shadow.getByRole("button", { name: "Zur Standardansicht" }),
     );
@@ -2280,13 +2388,20 @@ it.each(["de", "en"] as const)(
       await act(async () => {
         await vi.advanceTimersByTimeAsync(1500);
       });
-      vi.mocked(api.listDevices).mockResolvedValue([]);
+      vi.mocked(api.listDevices).mockResolvedValue([
+        {
+          id: "out",
+          name: "Synthetic output",
+          source: "system",
+          isDefault: true,
+        },
+      ]);
       fireEvent.focus(window);
       const shadow = within(host()!.querySelector(".prototype") as HTMLElement);
       const notice = await shadow.findByText(
         locale === "de"
-          ? /aus der Geräteliste verschwunden/
-          : /left the device list/,
+          ? /Synthetic microphone.*aus der Geräteliste verschwunden/
+          : /Synthetic microphone.*left the device list/,
       );
       expect(notice.closest('[role="alert"]')).toBeTruthy();
       expect(notice.textContent).toContain(
@@ -2304,8 +2419,8 @@ it.each(["de", "en"] as const)(
         expect(
           shadow.queryByText(
             locale === "de"
-              ? /aus der Geräteliste verschwunden/
-              : /left the device list/,
+              ? /Synthetic microphone.*aus der Geräteliste verschwunden/
+              : /Synthetic microphone.*left the device list/,
           ),
         ).toBeNull(),
       );
@@ -2320,3 +2435,40 @@ it.each(["de", "en"] as const)(
     }
   },
 );
+
+it("keeps the advanced output language and customized prompt across restarts", async () => {
+  const openPromptSettings = async () => {
+    await userEvent.click(
+      await screen.findByRole("button", { name: "Einstellungen" }),
+    );
+    await userEvent.click(
+      await screen.findByText("Erweiterte Auswertung: Sprache und Prompt"),
+    );
+    return {
+      language: screen.getByLabelText<HTMLSelectElement>("Ausgabesprache"),
+      prompt: screen.getByLabelText<HTMLTextAreaElement>(
+        "Anweisungen für Stil und Schwerpunkte",
+      ),
+    };
+  };
+  const first = render(<App api={fakeApi(meeting)} />);
+  const initial = await openPromptSettings();
+  expect(initial.language.value).toBe("auto");
+  expect(initial.prompt.value).toContain("Use concise, specific titles.");
+  await userEvent.click(screen.getByText("Standardprompt anzeigen (Englisch)"));
+  expect(screen.getByText(/RECONCILE phase/)).toBeTruthy();
+  await userEvent.selectOptions(initial.language, "ru");
+  fireEvent.change(initial.prompt, {
+    target: { value: "Focus on release blockers." },
+  });
+  first.unmount();
+  render(<App api={fakeApi(meeting)} />);
+  const restored = await openPromptSettings();
+  expect(restored.language.value).toBe("ru");
+  expect(restored.prompt.value).toBe("Focus on release blockers.");
+  await userEvent.click(
+    screen.getByRole("button", { name: "Standard wiederherstellen" }),
+  );
+  expect(restored.prompt.value).toContain("Use concise, specific titles.");
+  expect(restored.language.value).toBe("ru");
+});

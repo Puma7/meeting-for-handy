@@ -1,9 +1,13 @@
 pub(super) use super::assertions::{
     completion_quote_allowed, recorded_decision_quote_allowed, withdrawal_quote_allowed,
 };
+use super::matching::{
+    explicit_owned_completion, same_question, shares_topic, task_completion_matches,
+    task_subject_matches,
+};
 use super::model::*;
 use anyhow::{ensure, Context, Result};
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 
 /// Validate a complete model bundle against its request and sources before mutating any state.
 pub(crate) fn apply(
@@ -13,13 +17,21 @@ pub(crate) fn apply(
 ) -> Result<Vec<Event>> {
     let response: Response = serde_json::from_str(json)
         .context("Ungültige oder doppelte Felder in der Meetingantwort.")?;
+    apply_response(state, request, response)
+}
+
+fn apply_response(
+    state: &mut WorkspaceState,
+    request: &Request,
+    response: Response,
+) -> Result<Vec<Event>> {
     ensure!(
         response.contract_version == super::CONTRACT_VERSION
             && response.request_id == request.request_id,
         "Die Meetingantwort gehört nicht zu diesem Auftrag."
     );
     if response.more_changes_possible || response.changes.len() > 20 {
-        return Err(crate::transport::BudgetError::Output.into());
+        return Err(crate::transport::BudgetError::WorkspaceChanges.into());
     }
     ensure!(
         response.unresolved_context_ids.is_empty(),
@@ -45,7 +57,20 @@ pub(crate) fn apply(
     } else {
         Vec::new()
     };
-    for mut c in response.changes {
+    let explicit_question_in_window = request.purpose == "reconcile"
+        && request
+            .transcript_sources
+            .iter()
+            .filter(|source| request.required_source_ids().contains(&source.id))
+            .flat_map(|source| super::quote_options(&source.text))
+            .any(|quote| explicit_question(&quote));
+    let mut changes = response.changes;
+    if request.purpose == "tasks" {
+        add_literal_completions(state, request, &mut changes);
+    }
+    let mut split_budget = 20 - changes.len();
+    let mut changes = VecDeque::from(changes);
+    while let Some(mut c) = changes.pop_front() {
         if let Some(text) = c.text.as_mut() {
             *text = text.split_whitespace().collect::<Vec<_>>().join(" ");
             ensure!(
@@ -88,6 +113,44 @@ pub(crate) fn apply(
                 && ["normal", "current", "clarification"].contains(&c.attention.as_str()),
             "Ungültiger Meetingstatus."
         );
+        // Check every submitted citation before selecting narrower literal witnesses.
+        ensure!(
+            c.evidence.iter().all(|evidence| {
+                (8..=600).contains(&evidence.quote.chars().count())
+                    && request.transcript_sources.iter().any(|source| {
+                        source.id == evidence.source_id && source.text.contains(&evidence.quote)
+                    })
+            }),
+            "Eine Änderung enthält ein nicht wörtliches Originalzitat."
+        );
+        if let Some((decision, observation)) = fact_decision_parts(request, &c)
+            .filter(|(_, observation)| observation.is_none() || split_budget > 0)
+        {
+            let split = observation.is_some();
+            if let Some(observation) = observation {
+                split_budget -= 1;
+                changes.push_front(Change {
+                    proposal_id: format!("p_native_{}", uuid::Uuid::new_v4().simple()),
+                    kind: "fact".into(),
+                    target_id: None,
+                    target_revision: None,
+                    text: Some(observation.quote.clone()),
+                    status: c.status.clone(),
+                    attention: c.attention.clone(),
+                    owner: None,
+                    due: None,
+                    evidence: vec![observation],
+                    related_entity_ids: vec![],
+                });
+            }
+            if (split || request.language == "auto")
+                && decision.quote.chars().count() <= request.max_title_chars()
+            {
+                c.text = Some(decision.quote.clone());
+            }
+            c.kind = "decision".into();
+            c.evidence = vec![decision];
+        }
         let old = c
             .target_id
             .as_ref()
@@ -101,7 +164,7 @@ pub(crate) fn apply(
             .transpose()?;
         if let Some(old) = old {
             ensure!(
-                next.entities.iter().any(|current| current == old)
+                state.entities.iter().any(|current| current == old)
                     && !next.context_excluded_ids.contains(&old.id),
                 "Die Modellantwort verwendet einen inzwischen geänderten Eintrag."
             );
@@ -125,10 +188,61 @@ pub(crate) fn apply(
                 old.kind == c.kind,
                 "Die Modellantwort verwechselt die Art des Zieleintrags."
             );
-            ensure!(
-                targets.insert(old.id.clone()),
-                "Die Modellantwort ändert denselben Eintrag mehrfach."
-            );
+            // An unrelated but literal quote cannot rewrite an existing open question.
+            // A discarded no-op carries neither a new status nor additional citations.
+            if request.purpose == "reconcile"
+                && request.language == "auto"
+                && c.kind == "impulse"
+                && c.status == "unclear"
+                && c.text.is_none()
+                && !c.evidence.is_empty()
+                && c.related_entity_ids.is_empty()
+                && !c.evidence.iter().any(|e| {
+                    request.required_source_ids().contains(&e.source_id)
+                        && question_topic_matches(&old.text, &e.quote)
+                })
+            {
+                aliases.insert(c.proposal_id, old.id.clone());
+                continue;
+            }
+            if !targets.insert(old.id.clone()) {
+                let applied = next
+                    .entities
+                    .iter()
+                    .find(|entity| entity.id == old.id)
+                    .context("Der bereits abgeglichene Eintrag fehlt.")?;
+                // A second copy of an applied status cannot change its
+                // text, metadata, attention, or evidence.
+                ensure!(
+                    c.status == applied.status
+                        && c.attention == applied.attention
+                        && c.text.as_ref().is_none_or(|text| text == &applied.text)
+                        && c.owner
+                            .as_ref()
+                            .is_none_or(|owner| Some(owner) == applied.owner.as_ref())
+                        && c.due
+                            .as_ref()
+                            .is_none_or(|due| Some(due) == applied.due.as_ref())
+                        && c.related_entity_ids.is_empty()
+                        && !c.evidence.is_empty()
+                        && c.evidence
+                            .iter()
+                            .all(|item| applied.evidence.contains(item)),
+                    "Die Modellantwort enthält widersprüchliche Änderungen für denselben Eintrag."
+                );
+                aliases.insert(c.proposal_id, old.id.clone());
+                continue;
+            }
+            // An exact echo is unchanged metadata. Its old witness is still
+            // required, but the new status quote does not have to repeat it.
+            if c.kind == "task" && c.text.is_none() {
+                if c.owner == old.owner {
+                    c.owner = None;
+                }
+                if c.due == old.due {
+                    c.due = None;
+                }
+            }
         } else {
             ensure!(
                 c.target_revision.is_none()
@@ -139,8 +253,66 @@ pub(crate) fn apply(
             );
         }
         if c.kind == "task" && old.is_none() {
+            ensure!(
+                !c.evidence.iter().any(|e| task_missing_pledge(&e.quote)),
+                "Eine fehlende Zusage ist keine Aufgabe."
+            );
+            if request.purpose == "tasks" {
+                let title = c.text.as_deref().unwrap_or_default();
+                c.evidence = assertion_witnesses(request, &c.evidence, title, true)?;
+                if c.due.is_none() {
+                    let mut weekdays = c
+                        .evidence
+                        .iter()
+                        .filter_map(|e| crate::validation::explicit_task_weekday(&e.quote));
+                    if let Some(first) = weekdays.next() {
+                        if weekdays.all(|other| other.eq_ignore_ascii_case(first)) {
+                            c.due = Some(first.to_owned());
+                        }
+                    }
+                }
+            }
+            ensure!(
+                c.text.as_ref().is_some_and(|title| !title.contains(['?', '？'])),
+                "Eine neue Aufgabe benötigt einen Handlungstitel. Offene Fragen gehören zu den Impulsen."
+            );
             ensure!(c.evidence.iter().any(|e|request.required_source_ids().contains(&e.source_id)),"Eine neue Aufgabe benötigt einen Beleg aus dem aktuellen Quellenfenster; ältere Aufgaben nicht duplizieren.");
             ensure!(c.evidence.iter().any(|e|task_quote_allowed(&e.quote)) && !c.evidence.iter().any(|e|task_missing_pledge(&e.quote)),"Eine neue Aufgabe benötigt eine ausdrückliche Übernahme oder Zuweisung. Eine fehlende Zusage ist keine Aufgabe.");
+        }
+        let fresh = |e: &crate::Evidence| request.required_source_ids().contains(&e.source_id);
+        if let Some(old) = old {
+            if c.kind == "fact" {
+                ensure!(
+                    !decision_backed_fact(old),
+                    "Ein als Fakt gespeicherter Beschluss bleibt als Originaleintrag erhalten."
+                );
+                ensure!(
+                    c.evidence
+                        .iter()
+                        .any(|e| { fresh(e) && shares_topic(&old.text, &e.quote) }),
+                    "Eine vorhandene Beobachtung benötigt einen aktuellen Beleg zum selben Thema."
+                );
+            }
+            if c.kind == "task" && c.text.as_ref().is_some_and(|title| title != &old.text) {
+                ensure!(
+                    c.status == "open"
+                        && c.text.as_ref().is_some_and(|title| task_subject_matches(old, title))
+                        && c.evidence.iter().any(|e| {
+                            fresh(e) && task_quote_allowed(&e.quote)
+                                && c.text.as_ref().is_some_and(|title| shares_topic(title, &e.quote))
+                        })
+                        && !c.evidence.iter().any(|e| task_missing_pledge(&e.quote)),
+                    "Eine vorhandene Aufgabe darf nur mit einer aktuellen Zusage zum selben Thema umformuliert werden."
+                );
+            }
+            if c.kind == "impulse" && c.status == "discussed" && old.status != "discussed" {
+                ensure!(
+                    c.evidence
+                        .iter()
+                        .any(|e| { fresh(e) && impulse_answer_allowed(&old.text, &e.quote) }),
+                    "Der Impuls bleibt offen. Eine aktuelle Antwort zum selben Thema fehlt."
+                );
+            }
         }
         if c.kind == "agenda" {
             ensure!(c.text.is_none(), "Agendatext gehört dem Menschen.");
@@ -151,6 +323,18 @@ pub(crate) fn apply(
             .clone()
             .or_else(|| old.map(|e| e.text.clone()))
             .unwrap_or_default();
+        if request.purpose == "facts" && c.kind == "decision" && c.status == "recorded" {
+            c.evidence = assertion_witnesses(request, &c.evidence, &text, false)?;
+        }
+        if request.purpose == "reconcile"
+            && c.kind == "impulse"
+            && c.evidence
+                .iter()
+                .any(|e| question_topic_matches(&text, &e.quote))
+        {
+            c.evidence
+                .retain(|e| question_topic_matches(&text, &e.quote));
+        }
         let kind = if c.kind == "task" {
             crate::Kind::Tasks
         } else {
@@ -229,9 +413,10 @@ pub(crate) fn apply(
         // guards complement the semantic model judgement; uncertainty never closes an item.
         if c.status == "completed" {
             ensure!(
-                c.evidence
-                    .iter()
-                    .any(|e| completion_quote_allowed(&e.quote)),
+                c.evidence.iter().any(|e| completion_quote_allowed(&e.quote)
+                    && (request.purpose != "tasks"
+                        || (fresh(e)
+                            && old.is_some_and(|task| task_completion_matches(task, &e.quote))))),
                 "Eine Zusage ist keine Erledigung."
             );
         }
@@ -239,7 +424,7 @@ pub(crate) fn apply(
             ensure!(
                 c.evidence
                     .iter()
-                    .any(|e| withdrawal_quote_allowed(&e.quote)),
+                    .any(|e| fresh(e) && withdrawal_quote_allowed(&e.quote)),
                 "Eine Rücknahme benötigt einen ausdrücklichen Beleg."
             );
         }
@@ -279,16 +464,78 @@ pub(crate) fn apply(
                                             && source.text.contains(&evidence.quote)
                                     })
                             });
+                        let same_impulse = c.kind == "impulse"
+                            && e.kind == "impulse"
+                            && same_question(e, &text, &c.evidence);
+                        // A second proposal for the same literal pledge must
+                        // not create an extra task merely by omitting metadata.
+                        let same_task_witness = c.kind == "task"
+                            && e.kind == "task"
+                            && e.text == text
+                            && !c.evidence.is_empty()
+                            && e.evidence == c.evidence;
+                        let same_decision_witness = c.kind == "decision"
+                            && (terminal_identity
+                                || (e.status == "recorded"
+                                    && !c.evidence.is_empty()
+                                    && c.evidence.iter().all(|item| e.evidence.contains(item))));
+                        // A fresh quote may repeat the same observation without
+                        // changing the displayed entry or replacing its original.
+                        let repeated_fact = c.kind == "fact"
+                            && e.status == c.status
+                            && e.text
+                                .trim_end_matches(['.', '!'])
+                                .eq_ignore_ascii_case(text.trim_end_matches(['.', '!']));
                         (!next.context_excluded_ids.contains(&e.id) || excluded_terminal_witness)
                             && e.kind == c.kind
-                            && e.text == text
-                            && (e.owner == c.owner || (terminal_identity && c.owner.is_none()))
-                            && (e.due == c.due || (terminal_identity && c.due.is_none()))
-                            && (e.evidence == c.evidence || terminal_identity)
+                            && (e.text == text
+                                || same_impulse
+                                || repeated_fact
+                                || same_decision_witness)
+                            && (e.owner == c.owner
+                                || ((terminal_identity || same_task_witness) && c.owner.is_none()))
+                            && (e.due == c.due
+                                || ((terminal_identity || same_task_witness) && c.due.is_none()))
+                            && (e.evidence == c.evidence
+                                || terminal_identity
+                                || same_decision_witness
+                                || same_impulse
+                                || repeated_fact)
                     })
                     .map(|e| e.id.clone())
             })
             .unwrap_or_else(|| format!("e_{}", uuid::Uuid::new_v4().simple()));
+        if c.kind == "impulse" && old.is_none() && !next.entities.iter().any(|e| e.id == target) {
+            // Repeating a literal question gives us an exact witness, even if several
+            // unrelated topics in the window also have qualifying open language.
+            if text.ends_with(['?', '？']) {
+                let mut direct_sources = request
+                    .transcript_sources
+                    .iter()
+                    .filter(|source| {
+                        request.required_source_ids().contains(&source.id)
+                            && source.text.contains(&text)
+                    })
+                    .peekable();
+                if direct_sources.peek().is_some() {
+                    ensure!(
+                        direct_sources.any(|source| c.evidence.iter().any(|e| {
+                            e.source_id == source.id
+                                && (e.quote.contains(&text) || shares_topic(&text, &e.quote))
+                        })),
+                        "Eine wörtlich wiederholte Frage braucht einen passenden Beleg aus ihrem Originalabschnitt."
+                    );
+                }
+            }
+            ensure!(
+                c.evidence.iter().any(|e| fresh(e) && if explicit_question_in_window {
+                    explicit_question(&e.quote)
+                } else {
+                    new_impulse_evidence_allowed(&e.quote)
+                }),
+                "Ein neuer Impuls benötigt einen aktuellen Beleg für die offene Frage. Eine reine Zusage oder Entscheidung reicht dafür nicht."
+            );
+        }
         aliases.insert(c.proposal_id.clone(), target.clone());
         if let Some(existing) = next.entities.iter_mut().find(|e| e.id == target) {
             if old.is_none() {
@@ -399,8 +646,284 @@ pub(crate) fn apply(
         entity.kind == "impulse" && !next.context_excluded_ids.contains(&entity.id)),
         "Ein als offen belegter Agendapunkt benötigt den geforderten Frageimpuls; die Antwort wird vollständig verworfen.");
     next.events.extend(events.clone());
+    if request.purpose == "tasks" && next.entities.len() > state.entities.len() {
+        events.extend(complete_new_tasks(
+            &mut next,
+            request,
+            state.entities.len(),
+        )?);
+    }
     *state = next;
     Ok(events)
+}
+
+/// Keep an explicit decision separate from an observation cited in the same fact.
+/// Only repair new facts backed by a single unambiguous, current decision sentence.
+fn fact_decision_parts(
+    request: &Request,
+    change: &Change,
+) -> Option<(crate::Evidence, Option<crate::Evidence>)> {
+    if request.purpose != "facts"
+        || change.kind != "fact"
+        || change.status != "recorded"
+        || change.target_id.is_some()
+        || change.target_revision.is_some()
+    {
+        return None;
+    }
+    let title = change.text.as_deref()?;
+    let mut decision = None;
+    let mut observation = None;
+    for citation in &change.evidence {
+        let source = request
+            .transcript_sources
+            .iter()
+            .find(|s| s.id == citation.source_id)?;
+        for sentence in super::evidence_sentences(&source.text)
+            .filter(|sentence| {
+                citation.quote.contains(sentence) || sentence.contains(&citation.quote)
+            })
+            .filter(|sentence| shares_topic(title, sentence))
+        {
+            let literal = crate::Evidence {
+                source_id: source.id.clone(),
+                quote: sentence.into(),
+            };
+            if recorded_decision_quote_allowed(sentence) {
+                if !request.required_source_ids().contains(&source.id)
+                    || !(8..=600).contains(&sentence.chars().count())
+                    || decision
+                        .as_ref()
+                        .is_some_and(|previous| previous != &literal)
+                {
+                    return None;
+                }
+                decision = Some(literal);
+            } else {
+                if observation
+                    .as_ref()
+                    .is_some_and(|previous| previous != &literal)
+                {
+                    return None;
+                }
+                observation = Some(literal);
+            }
+        }
+    }
+    let decision = decision?;
+    if let Some(other) = &observation {
+        // Keep a translated result in its selected language. For a mixed quote
+        // the common explicit openings also identify German or English.
+        let opening = decision.quote.split_whitespace().next().unwrap_or_default();
+        let literal_language = request.language == "auto"
+            || (decision.source_id == other.source_id
+                && (request.language == "de" && opening.eq_ignore_ascii_case("wir")
+                    || request.language == "en" && opening.eq_ignore_ascii_case("we")));
+        if !literal_language
+            || [&decision, other].into_iter().any(|item| {
+                !(8..=request.max_title_chars().min(600)).contains(&item.quote.chars().count())
+            })
+        {
+            return None;
+        }
+    }
+    Some((decision, observation))
+}
+
+/// A local second pass can close a newly created task from a later original
+/// in the same update. It goes through the same status validation as model output.
+fn complete_new_tasks(
+    state: &mut WorkspaceState,
+    request: &Request,
+    first_new: usize,
+) -> Result<Vec<Event>> {
+    let fresh: Vec<_> = request
+        .transcript_sources
+        .iter()
+        .filter(|source| request.required_source_ids().contains(&source.id))
+        .cloned()
+        .collect();
+    let mut followup = Request::new(
+        request.request_id.clone(),
+        &state.context,
+        state,
+        state.entities[first_new..].to_vec(),
+        &fresh,
+        request.transcript_sources.clone(),
+    );
+    followup.purpose = "tasks".into();
+    let mut changes = Vec::new();
+    add_literal_completions(state, &followup, &mut changes);
+    if changes.is_empty() {
+        return Ok(Vec::new());
+    }
+    let overview = state.overview_refs.clone();
+    let events = apply_response(
+        state,
+        &followup,
+        Response {
+            contract_version: super::CONTRACT_VERSION.into(),
+            request_id: followup.request_id.clone(),
+            changes,
+            overview_refs: Vec::new(),
+            unresolved_context_ids: Vec::new(),
+            more_changes_possible: false,
+        },
+    )?;
+    state.overview_refs = overview;
+    Ok(events)
+}
+
+/// A mislabeled decision remains an original observation. Later observations
+/// and explicit decisions use their own identities instead of replacing it.
+pub(super) fn decision_backed_fact(entity: &Entity) -> bool {
+    entity.evidence.iter().any(|e| {
+        super::evidence_sentences(&e.quote).any(|sentence| {
+            shares_topic(&entity.text, sentence) && recorded_decision_quote_allowed(sentence)
+        })
+    })
+}
+
+/// A sentence may only witness its own assertion, even when the model cited
+/// the surrounding transcript. Restore a clipped date from that literal sentence.
+fn assertion_witnesses(
+    request: &Request,
+    submitted: &[crate::Evidence],
+    title: &str,
+    task: bool,
+) -> Result<Vec<crate::Evidence>> {
+    let allowed = if task {
+        task_quote_allowed
+    } else {
+        recorded_decision_quote_allowed
+    };
+    let task_matches = |quote: &str| super::matching::task_title_matches(title, quote);
+    let matches = |quote: &str| {
+        if task {
+            task_matches(quote)
+        } else {
+            shares_topic(title, quote)
+        }
+    };
+    let mut candidates = Vec::new();
+    let mut competing_topic = false;
+    for citation in submitted {
+        let Some(source) = request
+            .transcript_sources
+            .iter()
+            .find(|source| source.id == citation.source_id)
+        else {
+            continue;
+        };
+        for sentence in super::evidence_sentences(&source.text).filter(|sentence| {
+            citation.quote.contains(sentence) || sentence.contains(&citation.quote)
+        }) {
+            if !allowed(sentence) {
+                competing_topic |= matches(sentence);
+                continue;
+            }
+            for excerpt in super::assertion_excerpts(sentence, &allowed)
+                .into_iter()
+                .filter(|excerpt| {
+                    citation.quote.contains(excerpt) || excerpt.contains(&citation.quote)
+                })
+            {
+                let evidence = crate::Evidence {
+                    source_id: source.id.clone(),
+                    quote: excerpt.to_owned(),
+                };
+                if !candidates.contains(&evidence) {
+                    candidates.push(evidence);
+                }
+            }
+        }
+    }
+    if candidates.iter().any(|e| matches(&e.quote)) {
+        candidates.retain(|e| matches(&e.quote));
+    } else if competing_topic || request.language == "auto" {
+        candidates.clear();
+    }
+    ensure!(
+        candidates.len() <= 6 && candidates.iter().any(|e| request.required_source_ids().contains(&e.source_id)),
+        "Die Aussage benötigt einen aktuellen Originalsatz zur selben Zusage oder zum selben Beschluss."
+    );
+    Ok(candidates)
+}
+
+pub(super) fn question_topic_matches(title: &str, quote: &str) -> bool {
+    shares_topic(title, quote) || {
+        // Chinese text often has no spaces. Require a contiguous four-character
+        // Han phrase rather than matching isolated, frequently repeated characters.
+        let chars: Vec<_> = title.chars().collect();
+        chars.windows(4).any(|part| {
+            part.iter().all(|c| ('\u{3400}'..='\u{9fff}').contains(c))
+                && quote.contains(&part.iter().collect::<String>())
+        })
+    }
+}
+
+/// Recover a missed completion only from a fresh, literal report by the
+/// named owner, with a matching action and exactly one possible target.
+fn add_literal_completions(state: &WorkspaceState, request: &Request, changes: &mut Vec<Change>) {
+    for source in request
+        .transcript_sources
+        .iter()
+        .filter(|source| request.required_source_ids().contains(&source.id))
+    {
+        for quote in source
+            .text
+            .split_inclusive(['.', '!', '?', '\n'])
+            .map(str::trim)
+        {
+            if changes.len() == 20 {
+                return;
+            }
+            if !(8..=600).contains(&quote.chars().count()) || !completion_quote_allowed(quote) {
+                continue;
+            }
+            let mut matches = state.entities.iter().filter(|entity| {
+                entity.kind == "task"
+                    && !state.context_excluded_ids.contains(&entity.id)
+                    && explicit_owned_completion(entity, quote)
+            });
+            let Some(task) = matches.next() else {
+                continue;
+            };
+            if matches.next().is_some()
+                || task.status != "open"
+                || task.human_locked
+                || !request.state.contains(task)
+                || changes
+                    .iter()
+                    .any(|c| c.target_id.as_ref() == Some(&task.id))
+                || task.evidence.iter().any(|evidence| {
+                    evidence.source_id == source.id
+                        || request.transcript_sources.iter().any(|original| {
+                            original.id == evidence.source_id
+                                && original.start_ms >= source.start_ms
+                        })
+                })
+            {
+                continue;
+            }
+            changes.push(Change {
+                proposal_id: format!("p_native_{}", uuid::Uuid::new_v4().simple()),
+                kind: "task".into(),
+                target_id: Some(task.id.clone()),
+                target_revision: Some(task.revision),
+                text: None,
+                status: "completed".into(),
+                attention: task.attention.clone(),
+                owner: None,
+                due: None,
+                evidence: vec![crate::Evidence {
+                    source_id: source.id.clone(),
+                    quote: quote.to_owned(),
+                }],
+                related_entity_ids: vec![],
+            });
+        }
+    }
 }
 
 /// Match an original promise/decision without enlarging the bounded current evidence set.
@@ -595,6 +1118,9 @@ pub(super) fn explicit_open_topic(quote: &str) -> bool {
             "sind unklar",
             "noch zu klären",
             "noch geklärt werden",
+            "noch nicht freigegeben",
+            "still has no approval",
+            "is still unapproved",
             "i don't know",
             "we don't know",
             "i do not know",
@@ -603,9 +1129,49 @@ pub(super) fn explicit_open_topic(quote: &str) -> bool {
             "is unclear",
             "are unclear",
             "still to clarify",
+            "мы ещё не знаем",
+            "мы еще не знаем",
+            "я не знаю",
+            "пока не ясно",
+            "还没有确定",
+            "尚未确定",
+            "还不清楚",
+            "仍不清楚",
         ]
         .iter()
         .any(|marker| text.contains(marker))
+}
+
+/// Prefer a question or a literal signal that information is still missing.
+pub(super) fn explicit_question(quote: &str) -> bool {
+    quote.contains(['?', '？']) || explicit_open_topic(quote)
+}
+
+/// A closed decision or explicit pledge alone is insufficient for a new question.
+pub(super) fn new_impulse_evidence_allowed(quote: &str) -> bool {
+    explicit_question(quote)
+        || (!task_quote_allowed(quote) && !recorded_decision_quote_allowed(quote))
+}
+
+pub(super) fn impulse_answer_allowed(title: &str, quote: &str) -> bool {
+    let lower = quote.to_lowercase();
+    !quote.contains(['?', '？'])
+        && !explicit_open_topic(quote)
+        && ![
+            "weiter offen",
+            "bleibt offen",
+            "noch offen",
+            "still open",
+            "still unassigned",
+            "not assigned",
+            "no approval",
+            "noch nicht",
+            "has not",
+            "have not",
+        ]
+        .iter()
+        .any(|marker| lower.contains(marker))
+        && shares_topic(title, quote)
 }
 
 /// An acknowledged fresh open topic requires an initial question, independently of ASR punctuation.
@@ -640,6 +1206,47 @@ pub(super) fn initial_question_evidence(
             {
                 witnesses.push(evidence.clone());
             }
+        }
+    }
+    if witnesses.is_empty() {
+        return witnesses;
+    }
+    // If the transcript itself asks a question and explicitly leaves that
+    // same topic open, prefer that question to neighboring tentative ideas.
+    // An acknowledged indirect question still works when no such pair exists.
+    let mut direct = Vec::new();
+    for source in request
+        .transcript_sources
+        .iter()
+        .filter(|source| request.required_source_ids().contains(&source.id))
+    {
+        for question in super::evidence_sentences(&source.text).filter(|quote| {
+            quote.ends_with(['?', '？']) && (8..=600).contains(&quote.chars().count())
+        }) {
+            if super::evidence_sentences(&source.text).any(|line| {
+                !line.ends_with(['?', '？'])
+                    && explicit_open_topic(line)
+                    && question_topic_matches(question, line)
+            }) {
+                direct.push(crate::Evidence {
+                    source_id: source.id.clone(),
+                    quote: question.to_owned(),
+                });
+            }
+        }
+    }
+    if direct.is_empty() {
+        return witnesses;
+    }
+    // A shorter fact quote about that same question remains a valid witness.
+    witnesses.retain(|e| {
+        direct
+            .iter()
+            .any(|q| q.source_id == e.source_id && question_topic_matches(&q.quote, &e.quote))
+    });
+    for question in direct {
+        if !witnesses.contains(&question) {
+            witnesses.push(question);
         }
     }
     witnesses

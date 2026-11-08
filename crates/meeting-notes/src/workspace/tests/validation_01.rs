@@ -242,7 +242,9 @@ fn perfect_decisions_validate_literal_sources_and_durable_reopen() {
             let reopened = read_state(directory.path()).unwrap();
             assert_eq!(reopened.entities.len(), 1);
             assert_eq!(reopened.entities[0].status, "recorded");
-            assert_eq!(reopened.entities[0].evidence[0].quote, quote);
+            let cited = &reopened.entities[0].evidence[0].quote;
+            assert!(evidence_sentences(quote).any(|sentence| sentence == cited));
+            assert!(validate::recorded_decision_quote_allowed(cited));
             assert_eq!(reopened.originals[0].text, quote);
             assert_eq!(
                 serde_json::to_vec(&reopened).unwrap(),
@@ -601,7 +603,9 @@ fn contracted_perfect_completion_retains_literal_quotes_after_reopen() {
             std::slice::from_ref(&source),
             sources,
         );
-        completion.purpose = "tasks".into();
+        // Isolate terminal grammar, including standalone counts. The
+        // production task phase has a separate association check.
+        completion.purpose = "live_update".into();
         answer["requestId"] = json!("r_completion");
         answer["changes"][0]["targetId"] = json!(seed.entities[0].id);
         answer["changes"][0]["targetRevision"] = json!(seed.entities[0].revision);
@@ -740,7 +744,17 @@ fn facts_frontier_survives_an_empty_tasks_phase_with_more_than_six_selected_fact
                 }
             }
             let changes = if req["purpose"] == "facts" && queued_versions.len() == 1 {
-                json!([{"proposalId":"p_seed","kind":"fact","targetId":"e_fact_7","targetRevision":1,"text":"Aktueller Entwurf","status":"recorded","attention":"normal","owner":null,"due":null,"evidence":[{"sourceId":"s_one","quote":"Ich gebe den Entwurf morgen frei."}],"relatedEntityIds":[]}])
+                let source = req["transcriptSources"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .find(|s| s["text"] == "Der Entwurf ist zur Prüfung bereit.")
+                    .unwrap();
+                assert!(req["window"]["requiredSourceIds"]
+                    .as_array()
+                    .unwrap()
+                    .contains(&source["id"]));
+                json!([{"proposalId":"p_seed","kind":"fact","targetId":"e_fact_7","targetRevision":1,"text":"Aktueller Entwurf","status":"recorded","attention":"normal","owner":null,"due":null,"evidence":[{"sourceId":source["id"],"quote":source["text"]}],"relatedEntityIds":[]}])
             } else {
                 json!([])
             };

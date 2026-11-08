@@ -112,7 +112,9 @@ fn provider_context_rejection_shrinks_the_existing_frontier_before_sources() {
                         "new {kind} must match validator statuses"
                     );
                 }
-                assert_eq!(variants.len(), 2); // Only new facts/decisions; the seed tasks are not valid targets.
+                // No fresh decision assertion. The seed tasks are overview context only.
+                assert_eq!(variants.len(), 1);
+                assert_eq!(variants[0]["properties"]["kind"]["enum"], json!(["fact"]));
                 assert!(variants
                     .iter()
                     .all(|branch| branch["properties"]["targetId"]["type"] == "null"));
@@ -342,10 +344,10 @@ fn acknowledged_open_questions_get_a_bounded_request_and_ignored_constraints_do_
 fn numeric_task_status_retains_original_text_evidence_without_accepting_new_numbers_or_promised_completion(
 ) {
     let (mut state, mut request, mut answer) = setup();
-    request.transcript_sources[0].text = "I will send 3 reports.".into();
+    request.transcript_sources[0].text = "I will send 3 reports by Friday.".into();
     answer["changes"][0]["text"] = json!("Send 3 reports");
-    answer["changes"][0]["due"] = json!(null);
-    answer["changes"][0]["evidence"][0]["quote"] = json!("I will send 3 reports.");
+    answer["changes"][0]["due"] = json!("Friday");
+    answer["changes"][0]["evidence"][0]["quote"] = json!("I will send 3 reports by Friday.");
     validate::apply(&mut state, &request, &answer.to_string()).unwrap();
     state.originals = request.transcript_sources.clone();
     let original = state.entities[0].evidence[0].clone();
@@ -378,6 +380,7 @@ fn numeric_task_status_retains_original_text_evidence_without_accepting_new_numb
     validate::apply(&mut state, &completion, &answer.to_string()).unwrap();
     assert_eq!(state.entities[0].status, "completed");
     assert_eq!(state.entities[0].text, "Send 3 reports");
+    assert_eq!(state.entities[0].due.as_deref(), Some("Friday"));
     assert!(state.entities[0].evidence.contains(&original));
     assert!(state.entities[0]
         .evidence
@@ -394,6 +397,10 @@ fn numeric_task_status_retains_original_text_evidence_without_accepting_new_numb
     assert_eq!(read_state(dir.path()).unwrap().entities, state.entities);
     let bytes = serde_json::to_vec(&before).unwrap();
     let mut rejected = before.clone();
+    let mut changed_due = answer.clone();
+    changed_due["changes"][0]["due"] = json!("Wednesday");
+    assert!(validate::apply(&mut rejected, &completion, &changed_due.to_string()).is_err());
+    assert_eq!(serde_json::to_vec(&rejected).unwrap(), bytes);
     let mut changed = answer.clone();
     changed["changes"][0]["text"] = json!("Send 30 reports");
     assert!(validate::apply(&mut rejected, &completion, &changed.to_string()).is_err());
@@ -1003,6 +1010,8 @@ fn resuming_an_existing_model_imports_newer_human_confirmation_without_losing_it
     let context = runner.context.lock().unwrap().clone();
     let (mut state, mut req, mut answer) = setup();
     req.purpose = "reconcile".into();
+    req.transcript_sources[0].text = "Who approves the draft?".into();
+    answer["changes"][0]["evidence"][0]["quote"] = json!("Who approves the draft?");
     answer["changes"][0]["kind"] = json!("impulse");
     answer["changes"][0]["text"] = json!("Who approves the draft?");
     answer["changes"][0]["due"] = json!(null);

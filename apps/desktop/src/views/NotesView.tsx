@@ -144,6 +144,11 @@ export default function NotesView({
           {t.chooseMeeting}
           <select
             value={meetingId}
+            title={
+              locale === "de"
+                ? "Die gespeicherte Sitzung für die Nachbearbeitung auswählen."
+                : "Choose the saved session to analyze."
+            }
             disabled={!connected}
             onChange={(event) => selectMeeting(event.target.value)}
           >
@@ -195,7 +200,15 @@ export default function NotesView({
                 ? "Starte deinen lokalen Modelldienst und aktualisiere die Liste."
                 : "Start your local model server and refresh the list."}
             </p>
-            <button className="secondary" onClick={() => setSetupOpen(true)}>
+            <button
+              className="secondary"
+              title={
+                locale === "de"
+                  ? "Die Einstellungen zum Textmodell öffnen."
+                  : "Open the text model settings."
+              }
+              onClick={() => setSetupOpen(true)}
+            >
               {locale === "de" ? "Einrichtung öffnen" : "Open setup"}
             </button>
           </div>
@@ -205,7 +218,13 @@ export default function NotesView({
           open={setupOpen}
           onToggle={(event) => setSetupOpen(event.currentTarget.open)}
         >
-          <summary>
+          <summary
+            title={
+              locale === "de"
+                ? "Textmodell und Auswertungsvorlage auswählen."
+                : "Choose the text model and analysis template."
+            }
+          >
             <strong>{t.analysisSetup}</strong>
             <span>
               {[
@@ -235,6 +254,11 @@ export default function NotesView({
                   {t.template}
                   <select
                     value={template.id}
+                    title={
+                      locale === "de"
+                        ? "Die Arbeitsschritte für die Auswertung auswählen."
+                        : "Choose the steps to run in this analysis."
+                    }
                     disabled={templateLocked}
                     onChange={(event) => {
                       const next = templates.find(
@@ -352,6 +376,11 @@ export default function NotesView({
                 libraryPending
               }
               onClick={beginNotes}
+              title={
+                locale === "de"
+                  ? "Das Transkript mit dem ausgewählten Modell und der Vorlage auswerten."
+                  : "Analyze the transcript with the selected model and template."
+              }
             >
               {notesBusy ? (
                 <RefreshCw size={17} className="spinning" />
@@ -369,6 +398,11 @@ export default function NotesView({
             {t.earlier}
             <select
               value={resultId}
+              title={
+                locale === "de"
+                  ? "Eine gespeicherte Auswertungsfassung öffnen."
+                  : "Open a saved analysis revision."
+              }
               onChange={(event) => {
                 setResultId(event.target.value);
                 const next = analyses.find(

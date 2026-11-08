@@ -33,15 +33,9 @@
         "required": [
           "proposalId",
           "kind",
-          "targetId",
-          "targetRevision",
-          "text",
           "status",
           "attention",
-          "owner",
-          "due",
-          "evidence",
-          "relatedEntityIds"
+          "evidence"
         ],
         "properties": {
           "proposalId": {

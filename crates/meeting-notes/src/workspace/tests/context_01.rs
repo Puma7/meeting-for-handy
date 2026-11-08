@@ -812,6 +812,7 @@ fn newly_shared_agenda_replays_original_text_without_duplication_or_a_new_transc
     let dir = tempfile::tempdir().unwrap();
     let mut runner = WorkspaceRunner::open(dir.path()).unwrap();
     runner.set_context(Default::default()).unwrap();
+    runner.set_presentation("Focus on open questions.".into());
     let client = TextClient::new(&crate::Connection {
         endpoint,
         model: "synthetic".into(),
@@ -849,7 +850,8 @@ fn newly_shared_agenda_replays_original_text_without_duplication_or_a_new_transc
     assert_eq!(runner.state.originals.len(), 1);
     assert_eq!(runner.state.entities[0].status, "open");
     let requests = server.join().unwrap();
-    assert!(requests.iter().all(|input| input["language"] == "en"));
+    assert!(requests.iter().all(|input| input["language"] == "en"
+        && input["presentationInstructions"] == "Focus on open questions."));
     assert_eq!(
         requests[0]["transcriptSources"],
         requests[2]["transcriptSources"]

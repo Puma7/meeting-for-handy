@@ -320,8 +320,8 @@ export default function SpeakerExperiments({
       )}
       <p className="muted">
         {de
-          ? "Ein Modell muss zuerst seine Sprecherunterstützung nachweisen. Die einmalige CPU-Prüfung erfolgt vor der Aufnahme; es wird kein Audio geöffnet oder Modell heruntergeladen."
-          : "A model must first pass its speaker capability check. This one-time CPU check runs before recording; no audio is opened and no model is downloaded."}
+          ? "Für automatische Stimmengruppen brauchst du ein installiertes Handy-Modell für Sprechertrennung, zum Beispiel Sortformer 4spk v2.1. Die CPU-Prüfung zeigt, ob dein Modell dafür geeignet ist. Sie öffnet kein Audio und lädt nichts herunter."
+          : "Automatic voice grouping needs an installed Handy diarization model, such as Sortformer 4spk v2.1. The CPU check tells you whether your model supports this feature. It opens no audio and downloads nothing."}
       </p>
       <label>
         {de
@@ -329,6 +329,11 @@ export default function SpeakerExperiments({
           : "Installed model for speaker capability check"}
         <select
           value={model}
+          title={
+            de
+              ? "Ein bereits installiertes Handy-Audiomodell auswählen."
+              : "Select a Handy audio model that is already installed."
+          }
           disabled={busy || running || checkingBlocked}
           onChange={(e) => setModel(e.target.value)}
         >
@@ -362,6 +367,11 @@ export default function SpeakerExperiments({
           !api.checkSpeakerModel
         }
         onClick={() => void checkModel()}
+        title={
+          de
+            ? "Prüfen, ob das gewählte Modell Stimmen unterscheiden kann."
+            : "Check whether the selected model can separate voices."
+        }
       >
         {busy ? <RefreshCw size={14} className="spinning" /> : null}
         {de ? "Sprecherunterstützung prüfen" : "Check speaker support"}
