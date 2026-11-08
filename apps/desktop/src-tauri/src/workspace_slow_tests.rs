@@ -38,7 +38,7 @@ fn body(stream: &mut std::net::TcpStream) -> serde_json::Value {
     }
     serde_json::from_slice(&bytes[header..header + size]).unwrap()
 }
-fn reply(stream: &mut std::net::TcpStream, request: serde_json::Value, slow: bool) {
+fn reply(stream: &mut std::net::TcpStream, request: serde_json::Value, slow: bool, reject: bool) {
     let input: serde_json::Value =
         serde_json::from_str(request["messages"][1]["content"].as_str().unwrap()).unwrap();
     let source = input["transcriptSources"]
@@ -53,32 +53,26 @@ fn reply(stream: &mut std::net::TcpStream, request: serde_json::Value, slow: boo
         })
         .unwrap();
     let reconcile = input["purpose"] == "reconcile";
-    let tasks = input["purpose"] == "tasks";
-    let quote = if tasks {
-        "Robin sagt: Ich schreibe den Bericht bis Freitag."
-    } else {
-        source["text"].as_str().unwrap()
-    };
-    let prior_task = input["state"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .find(|e| e["kind"] == "task");
     let existing = input["state"]
         .as_array()
         .unwrap()
         .iter()
         .any(|e| e["kind"] == "impulse");
-    let changes = if reconcile && existing {
-        serde_json::json!([])
-    } else {
+    let changes = if reconcile && !existing {
         serde_json::json!([{
-            "proposalId":"p_synthetic","kind":if reconcile{"impulse"}else if tasks{"task"}else{"fact"},"targetId":if tasks{prior_task.map(|e|e["id"].clone()).unwrap_or(serde_json::Value::Null)}else{serde_json::Value::Null},"targetRevision":if tasks{prior_task.map(|e|e["revision"].clone()).unwrap_or(serde_json::Value::Null)}else{serde_json::Value::Null},
-            "text":if tasks && prior_task.is_some(){serde_json::Value::Null}else{serde_json::Value::String(if reconcile{"Welche Freigabe fehlt noch?"}else if tasks{"Bericht schreiben"}else{source["text"].as_str().unwrap()}.into())},"status":if reconcile || tasks{"open"}else{"recorded"},"attention":"current","owner":null,"due":null,
-            "evidence":[{"sourceId":source["id"],"quote":quote}],"relatedEntityIds":[]
+            "proposalId":"p_synthetic","kind":"impulse","text":"Welche Freigabe fehlt noch?",
+            "status":"open","attention":"clarification",
+            "evidence":[{"sourceId":source["id"],"quote":"Welche Freigabe fehlt noch?"}]
         }])
+    } else {
+        serde_json::json!([])
     };
-    let answer=serde_json::json!({"contractVersion":meeting_notes::workspace::CONTRACT_VERSION,"requestId":input["requestId"],"changes":changes,"overviewRefs":if reconcile{serde_json::json!([])}else{serde_json::json!(["p_synthetic"])},"unresolvedContextIds":[],"moreChangesPossible":false}).to_string();
+    let request_id = if reject {
+        serde_json::json!("r_wrong")
+    } else {
+        input["requestId"].clone()
+    };
+    let answer=serde_json::json!({"contractVersion":meeting_notes::workspace::CONTRACT_VERSION,"requestId":request_id,"changes":changes,"overviewRefs":[],"unresolvedContextIds":[],"moreChangesPossible":false}).to_string();
     let data = format!(
         "data: {}\n\ndata: {}\n\ndata: [DONE]\n\n",
         serde_json::json!({"choices":[{"delta":{"content":answer},"finish_reason":null}]}),
@@ -114,6 +108,8 @@ fn slow_refresh_catches_up_without_overlap_and_audio_keeps_growing() {
     let peak = Arc::new(AtomicUsize::new(0));
     let completed = Arc::new(AtomicUsize::new(0));
     let times = Arc::new(Mutex::new(Vec::new()));
+    let windows = Arc::new(Mutex::new(Vec::new()));
+    let finished_at = Arc::new(Mutex::new(Vec::new()));
     let (r, a, p, c, t) = (
         requests.clone(),
         active.clone(),
@@ -121,6 +117,8 @@ fn slow_refresh_catches_up_without_overlap_and_audio_keeps_growing() {
         completed.clone(),
         times.clone(),
     );
+    let captured = windows.clone();
+    let response_ends = finished_at.clone();
     let server = thread::spawn(move || {
         let mut handlers = vec![];
         let deadline = Instant::now() + Duration::from_secs(320);
@@ -130,11 +128,25 @@ fn slow_refresh_catches_up_without_overlap_and_audio_keeps_growing() {
                     let index = r.fetch_add(1, Ordering::AcqRel);
                     t.lock().unwrap().push(Instant::now());
                     let (a, p, c) = (a.clone(), p.clone(), c.clone());
+                    let captured = captured.clone();
+                    let response_ends = response_ends.clone();
                     handlers.push(thread::spawn(move || {
                         let count = a.fetch_add(1, Ordering::AcqRel) + 1;
                         p.fetch_max(count, Ordering::AcqRel);
                         let request = body(&mut stream);
-                        reply(&mut stream, request, index == 0);
+                        let input: serde_json::Value = serde_json::from_str(
+                            request["messages"][1]["content"].as_str().unwrap(),
+                        )
+                        .unwrap();
+                        let ids = &input["window"]["requiredSourceIds"];
+                        println!(
+                            "request {index}: {} ({} sources)",
+                            input["purpose"],
+                            ids.as_array().unwrap().len()
+                        );
+                        captured.lock().unwrap().push(ids.clone());
+                        reply(&mut stream, request, index == 0, index < 2);
+                        response_ends.lock().unwrap().push(Instant::now());
                         a.fetch_sub(1, Ordering::AcqRel);
                         c.fetch_add(1, Ordering::AcqRel);
                     }));
@@ -193,7 +205,7 @@ fn slow_refresh_catches_up_without_overlap_and_audio_keeps_growing() {
                     .iter()
                     .filter(|p| p.audio_closed && p.status != "complete")
                 {
-                    let text="Robin sagt: Ich schreibe den Bericht bis Freitag. Zum Budget fehlt weiterhin eine verbindliche Zusage. Die Freigabe muss noch geklärt werden. Wir besprechen heute die nächsten Schritte für den gemeinsamen Pilotversuch.";
+                    let text="Welche Freigabe fehlt noch? Die Unterlagen für den gemeinsamen Pilotversuch liegen bereit. Der Termin steht im Kalender der Arbeitsgruppe. Auf der Tagesordnung stehen außerdem die nächsten Schritte für den gemeinsamen Pilotversuch.";
                     writing
                         .append_transcript(meeting_core::TranscriptCheckpoint {
                             sequence: 0,
@@ -305,10 +317,17 @@ fn slow_refresh_catches_up_without_overlap_and_audio_keeps_growing() {
         "Overlapping local model requests"
     );
     let at = times.lock().unwrap();
-    let delay = at[3].duration_since(at[0]);
+    let completed_at = finished_at.lock().unwrap();
+    let captured = windows.lock().unwrap();
+    assert!(captured[..4].iter().all(|ids| ids == &captured[0]));
+    assert!(captured[4..].iter().all(|ids| ids == &captured[4]));
+    let original = captured[0].as_array().unwrap();
+    let next = captured[4].as_array().unwrap();
+    assert!(!next.is_empty() && next.iter().all(|id| !original.contains(id)));
+    let delay = at[4].duration_since(completed_at[3]);
     assert!(
-        delay >= Duration::from_secs(210) && delay < Duration::from_secs(220),
-        "The next refresh waited a new interval after slow completion: {delay:?}"
+        (Duration::from_secs(5)..=Duration::from_secs(7)).contains(&delay),
+        "Expected a short cooldown after the successful refresh: {delay:?}"
     );
     let view = shared.lock().unwrap().view.clone().unwrap();
     let workspace = view.workspace.unwrap();
@@ -360,7 +379,7 @@ fn slow_refresh_catches_up_without_overlap_and_audio_keeps_growing() {
         counts.iter().sum::<u64>() > before_stop,
         "Stopping notes affected the independent PCM writers"
     );
-    let result = serde_json::json!({"synthetic":true,"actualNativeWorker":true,"model":"controlled SSE fixture","realRequestDelaySeconds":210,"refreshStartDistanceSeconds":delay.as_secs_f64(),"peakConcurrentModelRequests":1,"samplesPerTrack":counts,"retainedImpulses":1,"audioContinuedAfterNotesStop":true,"physicalDeviceOrAsr":false,"evidenceRoot":root});
+    let result = serde_json::json!({"synthetic":true,"actualNativeWorker":true,"model":"controlled SSE fixture","realRequestDelaySeconds":210,"cooldownSeconds":delay.as_secs_f64(),"fixedRetrySources":original.len(),"nextWindowSources":next.len(),"peakConcurrentModelRequests":1,"samplesPerTrack":counts,"retainedImpulses":1,"audioContinuedAfterNotesStop":true,"physicalDeviceOrAsr":false,"evidenceRoot":root});
     std::fs::write(
         root.join("slow-workspace-result.json"),
         serde_json::to_vec_pretty(&result).unwrap(),

@@ -86,6 +86,9 @@ const english = {
   "Die Dateien bleiben unverändert erhalten. Prüfe sie in der Standardansicht.":
     "Files are kept unchanged. Review them in the standard view.",
   Intervall: "Interval",
+  "Erster Lauf": "First pass",
+  "Wartezeit bis zur ersten automatischen Auswertung. Danach folgt bei neuem Transkript der nächste Lauf mit kurzer Pause.":
+    "Delay before the first automatic update. Subsequent updates follow new transcript text after a short pause.",
   Auswertungsintervall: "Analysis interval",
   "Legt fest, wie oft die KI den Überblick aktualisiert.":
     "Choose how often AI updates the overview.",

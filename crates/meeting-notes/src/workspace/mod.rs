@@ -21,13 +21,15 @@ use std::{
 };
 
 pub const CONTRACT_VERSION: &str = "meeting-update-1";
-pub const PROMPT_VERSION: &str = "handymeeting-workspace-14";
+pub const PROMPT_VERSION: &str = "handymeeting-workspace-16";
+const V15_PROMPT_VERSION: &str = "handymeeting-workspace-15";
+const V14_PROMPT_VERSION: &str = "handymeeting-workspace-14";
 const V13_PROMPT_VERSION: &str = "handymeeting-workspace-13";
 const V12_PROMPT_VERSION: &str = "handymeeting-workspace-12";
 const V11_PROMPT_VERSION: &str = "handymeeting-workspace-11";
 pub const PREVIOUS_PROMPT_VERSION: &str = "handymeeting-workspace-10";
 pub const LEGACY_PROMPT_VERSION: &str = "handymeeting-workspace-9";
-pub const WORKSPACE_FOLDER: &str = "workspace-v14";
+pub const WORKSPACE_FOLDER: &str = "workspace-v16";
 pub const PREVIOUS_WORKSPACE_FOLDER: &str = "workspace-v10";
 pub const LEGACY_WORKSPACE_FOLDER: &str = "workspace-v9";
 /// Read shared-input chronology without treating model output or confirmations as new releases.
@@ -37,8 +39,10 @@ pub(crate) fn shared_context_timestamp(
 ) -> Result<Option<chrono::DateTime<chrono::FixedOffset>>> {
     context_store::shared_timestamp(folder, context)
 }
-pub(crate) const GENERATIONS: [(&str, &str); 6] = [
+pub(crate) const GENERATIONS: [(&str, &str); 8] = [
     (PROMPT_VERSION, WORKSPACE_FOLDER),
+    (V15_PROMPT_VERSION, "workspace-v15"),
+    (V14_PROMPT_VERSION, "workspace-v14"),
     (V13_PROMPT_VERSION, "workspace-v13"),
     (V12_PROMPT_VERSION, "workspace-v12"),
     (V11_PROMPT_VERSION, "workspace-v11"),
@@ -638,8 +642,10 @@ impl WorkspaceRunner {
                 }
                 schema["properties"]["changes"]["items"]["properties"]["evidence"]["items"] =
                     serde_json::json!({"anyOf":evidence_options});
-                schema["properties"]["changes"]["items"]["properties"]["relatedEntityIds"]
-                    ["maxItems"] = 0.into();
+                schema["properties"]["changes"]["items"]["properties"]
+                    .as_object_mut()
+                    .expect("change properties")
+                    .remove("relatedEntityIds");
                 let extra = if phase == "tasks" {
                     let base = schema["properties"]["changes"]["items"].clone();
                     let mut branches = Vec::new();
@@ -671,7 +677,10 @@ impl WorkspaceRunner {
                             ("withdrawn", validate::withdrawal_quote_allowed),
                         ] {
                             let evidence = fresh_quote_schema(&req, |quote| {
-                                allowed_quote(quote) && matching::task_subject_matches(e, quote)
+                                allowed_quote(quote)
+                                    && (matching::task_subject_matches(e, quote)
+                                        || (status == "completed"
+                                            && matching::explicit_owned_completion(e, quote)))
                             });
                             if evidence.is_empty() {
                                 continue;
@@ -871,11 +880,26 @@ impl WorkspaceRunner {
                 };
                 let question_only =
                     phase == "reconcile" && schema["properties"]["changes"]["minItems"] == 1;
+                if let Some(branches) =
+                    schema["properties"]["changes"]["items"]["anyOf"].as_array_mut()
+                {
+                    for branch in branches {
+                        let creating = branch["properties"]["targetId"]["type"] == "null";
+                        let fields = branch["required"]
+                            .as_array_mut()
+                            .expect("required change fields");
+                        if creating {
+                            fields.push("text".into());
+                        } else {
+                            fields.extend(["targetId".into(), "targetRevision".into()]);
+                        }
+                    }
+                }
                 for attempt in 0..2 {
                     let repair = if attempt == 0 {
                         ""
                     } else {
-                        "\nPrevious answer rejected. Retry the entire phase. Use its allowed kinds only, unique proposalIds, exact state IDs and revisions, literal source quotes and relatedEntityIds=[]. New tasks require a fresh explicit commitment."
+                        "\nPrevious answer rejected. Return only eligible changes. Copy IDs, revisions, and literal quotes exactly. Keep spoken numbers in words unless the quote uses digits. New tasks need explicit commitments."
                     };
                     let answer = match client.workspace_json(
                         &format!("{PROMPT}\n{extra}{repair}"),

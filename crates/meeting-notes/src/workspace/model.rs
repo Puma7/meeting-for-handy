@@ -397,6 +397,7 @@ pub(crate) struct Change {
     pub owner: Option<String>,
     pub due: Option<String>,
     pub evidence: Vec<Evidence>,
+    #[serde(default)]
     pub related_entity_ids: Vec<String>,
 }
 #[derive(Deserialize)]

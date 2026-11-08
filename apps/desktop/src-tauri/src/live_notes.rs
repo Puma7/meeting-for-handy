@@ -17,6 +17,8 @@ use zeroize::Zeroizing;
 
 /// How often the worker looks for newly confirmed text.
 const POLL: Duration = Duration::from_millis(2000);
+/// Give recognition a chance to use the device between workspace updates.
+const WORKSPACE_COOLDOWN: Duration = Duration::from_secs(6);
 /// A failed request is retried after this pause, doubling up to `MAX_BACKOFF`.
 const FIRST_BACKOFF: Duration = Duration::from_secs(20);
 const MAX_BACKOFF: Duration = Duration::from_secs(300);
@@ -119,7 +121,11 @@ impl Job {
         let running = ["starting", "waiting", "updating"].contains(&shared.status.as_str());
         let next_update_in_ms = (running && shared.status == "waiting").then(|| {
             let elapsed = shared.last_update.elapsed().as_millis() as u64;
-            let due = interval_ms.saturating_sub(elapsed);
+            let due = if self.workspace_folder.is_some() && shared.last_trigger.is_some() {
+                0
+            } else {
+                interval_ms.saturating_sub(elapsed)
+            };
             shared.retry_at.map_or(due, |at| {
                 due.max(at.saturating_duration_since(Instant::now()).as_millis() as u64)
             })
@@ -802,12 +808,19 @@ impl Worker {
     /// Waits cooperatively for cancellation, optionally allowing a queued manual update
     /// to interrupt. ASR-priority waits retain manual work without spinning on that flag.
     fn wait_with_manual(&self, interrupt_for_manual: bool) {
-        let until = Instant::now() + POLL;
+        self.wait_until(Instant::now() + POLL, interrupt_for_manual);
+    }
+
+    fn wait_until(&self, until: Instant, interrupt_for_manual: bool) {
         while Instant::now() < until && !self.control.is_cancelled() {
             if interrupt_for_manual && self.manual.load(Ordering::Acquire) {
                 return;
             }
-            thread::sleep(Duration::from_millis(100));
+            thread::sleep(
+                until
+                    .saturating_duration_since(Instant::now())
+                    .min(Duration::from_millis(100)),
+            );
         }
     }
 
@@ -845,6 +858,9 @@ impl Worker {
         let mut overview_attempt: Option<Instant> = None;
         // A failed update or the rest of a captured backlog, taken by the next round.
         let mut carry: Option<Trigger> = None;
+        let workspace = runner.workspace_context().is_some();
+        let mut frozen_retry = None;
+        let mut workspace_started = false;
         let mut finished_state: Option<SessionData> = None;
         let mut deferred_since: Option<Instant> = None;
         self.set(|s| s.status = "waiting".into());
@@ -866,6 +882,16 @@ impl Worker {
             }
             let (texts, _) = live_texts(&snapshot.data);
             let pending = runner.pending(&texts);
+            // A correction or withdrawal invalidates the old snapshot. Start a fresh
+            // window in that case rather than sending obsolete text back to the model.
+            if frozen_retry
+                .as_ref()
+                .is_some_and(|window: &Vec<live::LiveSource>| {
+                    !window.iter().all(|source| pending.contains(source))
+                })
+            {
+                frozen_retry = None;
+            }
             let pending_chars = live::pending_chars(&pending);
             let (since, retry_at) = self
                 .shared
@@ -901,6 +927,9 @@ impl Worker {
                 manual,
                 finished,
             );
+            if trigger.is_none() && workspace_started && pending_chars > 0 {
+                trigger = Some(Trigger::Interval);
+            }
             trigger = with_retry(trigger, &mut carry, backing_off, pending_chars);
             // A missing overview is retried at a bounded pace, also after the meeting ended.
             if trigger.is_none() && runner.workspace_replay_due() && !backing_off {
@@ -946,14 +975,22 @@ impl Worker {
                         s.update_started = Some(update_started);
                     });
                     overview_attempt = Some(Instant::now());
-                    let result = runner.update(&pending, trigger, &self.control);
+                    let input = if workspace {
+                        frozen_retry
+                            .take()
+                            .unwrap_or_else(|| live::next_window(&pending))
+                    } else {
+                        pending
+                    };
+                    let result = runner.update(&input, trigger, &self.control);
+                    let completed = Instant::now();
+                    let cooldown = workspace.then_some(completed + WORKSPACE_COOLDOWN);
                     if self.control.is_cancelled() {
                         break;
                     }
                     match result {
                         Ok(outcome) => {
-                            // The rest of the already captured text follows at once, after any
-                            // window and not only after a manual one.
+                            // Re-evaluate the backlog after the current window commits.
                             carry = outcome.window.and_then(|_| {
                                 after_window(trigger, live::pending_chars(&runner.pending(&texts)))
                             });
@@ -964,6 +1001,7 @@ impl Worker {
                                 overview_failures = 0;
                             }
                             let summarized = outcome.window.is_some();
+                            workspace_started |= workspace && summarized;
                             let view = runner.view();
                             self.set(|s| {
                                 s.status = "waiting".into();
@@ -973,20 +1011,26 @@ impl Worker {
                                     .or(outcome.diagnostic_warning.clone());
                                 // An overview-only retry does not postpone the next text update.
                                 if summarized {
-                                    s.last_update = update_started;
+                                    s.last_update =
+                                        if workspace { completed } else { update_started };
                                     s.last_trigger = Some(trigger);
                                 }
-                                s.retry_at = None;
+                                s.retry_at = cooldown;
                                 s.view = Some(view);
                             });
-                            // A remaining backlog is handled by the next decision without waiting;
-                            // an overview-only retry always waits.
+                            if let Some(until) = cooldown {
+                                self.wait_until(until, false);
+                                continue;
+                            }
                             if summarized {
                                 continue;
                             }
                         }
                         Err(error) => {
                             carry = Some(trigger);
+                            if workspace {
+                                frozen_retry = Some(input);
+                            }
                             failures = failures.saturating_add(1);
                             let pause = FIRST_BACKOFF
                                 .saturating_mul(1 << failures.min(5).saturating_sub(1))
@@ -994,13 +1038,16 @@ impl Worker {
                             self.set(|s| {
                                 s.status = "waiting".into();
                                 s.error = Some(error.to_string());
-                                s.retry_at = Some(Instant::now() + pause);
+                                s.retry_at = Some(completed + pause);
                             });
                             if finished && failures >= 3 {
                                 // The meeting is over; stop retrying but keep everything saved.
                                 self.publish(&runner);
                                 self.set(|s| s.status = "failed".into());
                                 return;
+                            }
+                            if let Some(until) = cooldown {
+                                self.wait_until(until, false);
                             }
                         }
                     }

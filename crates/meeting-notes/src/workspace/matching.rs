@@ -95,7 +95,29 @@ pub(super) fn shares_topic(title: &str, quote: &str) -> bool {
 }
 
 pub(super) fn task_subject_matches(task: &Entity, quote: &str) -> bool {
-    task_object_matches(&task.text, task.owner.as_deref().unwrap_or_default(), quote)
+    task_object_matches(
+        task_action_text(task),
+        task.owner.as_deref().unwrap_or_default(),
+        quote,
+    )
+}
+
+/// A model may echo the verified deadline in the title. It is metadata,
+/// so a completion of the same action need not repeat it.
+fn task_action_text(task: &Entity) -> &str {
+    let Some(due) = &task.due else {
+        return &task.text;
+    };
+    for marker in [" bis ", " by "] {
+        if let Some((action, suffix)) = task.text.rsplit_once(marker) {
+            if !action.is_empty()
+                && suffix.trim_end_matches(['.', '!']).to_lowercase() == due.to_lowercase()
+            {
+                return action;
+            }
+        }
+    }
+    &task.text
 }
 
 pub(super) fn task_title_matches(title: &str, quote: &str) -> bool {
@@ -233,7 +255,7 @@ pub(super) fn explicit_owned_completion(task: &Entity, quote: &str) -> bool {
         return false;
     }
 
-    let title = task.text.to_lowercase();
+    let title = task_action_text(task).to_lowercase();
     let report = report.trim().to_lowercase();
     let same_object = |actions: &[&str]| {
         let spoken = terms(&report);

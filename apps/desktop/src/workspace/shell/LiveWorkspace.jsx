@@ -895,13 +895,18 @@ function WorkspaceContents({
               </IconButton>
             )}
             <label>
-              {t("Intervall")}{" "}
+              {t("Erster Lauf")}{" "}
               <select
                 aria-label={t("Auswertungsintervall")}
                 title={t(
-                  "Legt fest, wie oft die KI den Überblick aktualisiert.",
+                  "Wartezeit bis zur ersten automatischen Auswertung. Danach folgt bei neuem Transkript der nächste Lauf mit kurzer Pause.",
                 )}
-                disabled={!storageReady || classicRunning || busy}
+                disabled={
+                  !storageReady ||
+                  classicRunning ||
+                  busy ||
+                  (status?.running && !!status.lastTrigger)
+                }
                 value={shownMinutes}
                 onChange={(e) => {
                   const value = Number(e.target.value);

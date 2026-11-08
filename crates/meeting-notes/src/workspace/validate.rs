@@ -6,7 +6,7 @@ use super::matching::{
 };
 use super::model::*;
 use anyhow::{ensure, Context, Result};
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 
 /// Validate a complete model bundle against its request and sources before mutating any state.
 pub(crate) fn apply(
@@ -16,6 +16,14 @@ pub(crate) fn apply(
 ) -> Result<Vec<Event>> {
     let response: Response = serde_json::from_str(json)
         .context("Ungültige oder doppelte Felder in der Meetingantwort.")?;
+    apply_response(state, request, response)
+}
+
+fn apply_response(
+    state: &mut WorkspaceState,
+    request: &Request,
+    response: Response,
+) -> Result<Vec<Event>> {
     ensure!(
         response.contract_version == super::CONTRACT_VERSION
             && response.request_id == request.request_id,
@@ -59,7 +67,9 @@ pub(crate) fn apply(
     if request.purpose == "tasks" {
         add_literal_completions(state, request, &mut changes);
     }
-    for mut c in changes {
+    let mut split_budget = 20 - changes.len();
+    let mut changes = VecDeque::from(changes);
+    while let Some(mut c) = changes.pop_front() {
         if let Some(text) = c.text.as_mut() {
             *text = text.split_whitespace().collect::<Vec<_>>().join(" ");
             ensure!(
@@ -112,6 +122,34 @@ pub(crate) fn apply(
             }),
             "Eine Änderung enthält ein nicht wörtliches Originalzitat."
         );
+        if let Some((decision, observation)) = fact_decision_parts(request, &c)
+            .filter(|(_, observation)| observation.is_none() || split_budget > 0)
+        {
+            let split = observation.is_some();
+            if let Some(observation) = observation {
+                split_budget -= 1;
+                changes.push_front(Change {
+                    proposal_id: format!("p_native_{}", uuid::Uuid::new_v4().simple()),
+                    kind: "fact".into(),
+                    target_id: None,
+                    target_revision: None,
+                    text: Some(observation.quote.clone()),
+                    status: c.status.clone(),
+                    attention: c.attention.clone(),
+                    owner: None,
+                    due: None,
+                    evidence: vec![observation],
+                    related_entity_ids: vec![],
+                });
+            }
+            if (split || request.language == "auto")
+                && decision.quote.chars().count() <= request.max_title_chars()
+            {
+                c.text = Some(decision.quote.clone());
+            }
+            c.kind = "decision".into();
+            c.evidence = vec![decision];
+        }
         let old = c
             .target_id
             .as_ref()
@@ -377,7 +415,10 @@ pub(crate) fn apply(
                 c.evidence.iter().any(|e| completion_quote_allowed(&e.quote)
                     && (request.purpose != "tasks"
                         || (fresh(e)
-                            && old.is_some_and(|task| task_subject_matches(task, &e.quote))))),
+                            && old.is_some_and(|task| {
+                                task_subject_matches(task, &e.quote)
+                                    || explicit_owned_completion(task, &e.quote)
+                            })))),
                 "Eine Zusage ist keine Erledigung."
             );
         }
@@ -435,14 +476,33 @@ pub(crate) fn apply(
                             && e.text == text
                             && !c.evidence.is_empty()
                             && e.evidence == c.evidence;
+                        let same_decision_witness = c.kind == "decision"
+                            && (terminal_identity
+                                || (e.status == "recorded"
+                                    && !c.evidence.is_empty()
+                                    && c.evidence.iter().all(|item| e.evidence.contains(item))));
+                        // A fresh quote may repeat the same observation without
+                        // changing the displayed entry or replacing its original.
+                        let repeated_fact = c.kind == "fact"
+                            && e.status == c.status
+                            && e.text
+                                .trim_end_matches(['.', '!'])
+                                .eq_ignore_ascii_case(text.trim_end_matches(['.', '!']));
                         (!next.context_excluded_ids.contains(&e.id) || excluded_terminal_witness)
                             && e.kind == c.kind
-                            && (e.text == text || same_impulse)
+                            && (e.text == text
+                                || same_impulse
+                                || repeated_fact
+                                || same_decision_witness)
                             && (e.owner == c.owner
                                 || ((terminal_identity || same_task_witness) && c.owner.is_none()))
                             && (e.due == c.due
                                 || ((terminal_identity || same_task_witness) && c.due.is_none()))
-                            && (e.evidence == c.evidence || terminal_identity || same_impulse)
+                            && (e.evidence == c.evidence
+                                || terminal_identity
+                                || same_decision_witness
+                                || same_impulse
+                                || repeated_fact)
                     })
                     .map(|e| e.id.clone())
             })
@@ -588,7 +648,131 @@ pub(crate) fn apply(
         entity.kind == "impulse" && !next.context_excluded_ids.contains(&entity.id)),
         "Ein als offen belegter Agendapunkt benötigt den geforderten Frageimpuls; die Antwort wird vollständig verworfen.");
     next.events.extend(events.clone());
+    if request.purpose == "tasks" && next.entities.len() > state.entities.len() {
+        events.extend(complete_new_tasks(
+            &mut next,
+            request,
+            state.entities.len(),
+        )?);
+    }
     *state = next;
+    Ok(events)
+}
+
+/// Keep an explicit decision separate from an observation cited in the same fact.
+/// Only repair new facts backed by a single unambiguous, current decision sentence.
+fn fact_decision_parts(
+    request: &Request,
+    change: &Change,
+) -> Option<(crate::Evidence, Option<crate::Evidence>)> {
+    if request.purpose != "facts"
+        || change.kind != "fact"
+        || change.status != "recorded"
+        || change.target_id.is_some()
+        || change.target_revision.is_some()
+    {
+        return None;
+    }
+    let title = change.text.as_deref()?;
+    let mut decision = None;
+    let mut observation = None;
+    for citation in &change.evidence {
+        let source = request
+            .transcript_sources
+            .iter()
+            .find(|s| s.id == citation.source_id)?;
+        for sentence in super::evidence_sentences(&source.text)
+            .filter(|sentence| {
+                citation.quote.contains(sentence) || sentence.contains(&citation.quote)
+            })
+            .filter(|sentence| shares_topic(title, sentence))
+        {
+            let literal = crate::Evidence {
+                source_id: source.id.clone(),
+                quote: sentence.into(),
+            };
+            if recorded_decision_quote_allowed(sentence) {
+                if !request.required_source_ids().contains(&source.id)
+                    || !(8..=600).contains(&sentence.chars().count())
+                    || decision
+                        .as_ref()
+                        .is_some_and(|previous| previous != &literal)
+                {
+                    return None;
+                }
+                decision = Some(literal);
+            } else {
+                if observation
+                    .as_ref()
+                    .is_some_and(|previous| previous != &literal)
+                {
+                    return None;
+                }
+                observation = Some(literal);
+            }
+        }
+    }
+    let decision = decision?;
+    if let Some(other) = &observation {
+        // Keep a translated result in its selected language. For a mixed quote
+        // the common explicit openings also identify German or English.
+        let opening = decision.quote.split_whitespace().next().unwrap_or_default();
+        let literal_language = request.language == "auto"
+            || (decision.source_id == other.source_id
+                && (request.language == "de" && opening.eq_ignore_ascii_case("wir")
+                    || request.language == "en" && opening.eq_ignore_ascii_case("we")));
+        if !literal_language
+            || [&decision, other].into_iter().any(|item| {
+                !(8..=request.max_title_chars().min(600)).contains(&item.quote.chars().count())
+            })
+        {
+            return None;
+        }
+    }
+    Some((decision, observation))
+}
+
+/// A local second pass can close a newly created task from a later original
+/// in the same update. It goes through the same status validation as model output.
+fn complete_new_tasks(
+    state: &mut WorkspaceState,
+    request: &Request,
+    first_new: usize,
+) -> Result<Vec<Event>> {
+    let fresh: Vec<_> = request
+        .transcript_sources
+        .iter()
+        .filter(|source| request.required_source_ids().contains(&source.id))
+        .cloned()
+        .collect();
+    let mut followup = Request::new(
+        request.request_id.clone(),
+        &state.context,
+        state,
+        state.entities[first_new..].to_vec(),
+        &fresh,
+        request.transcript_sources.clone(),
+    );
+    followup.purpose = "tasks".into();
+    let mut changes = Vec::new();
+    add_literal_completions(state, &followup, &mut changes);
+    if changes.is_empty() {
+        return Ok(Vec::new());
+    }
+    let overview = state.overview_refs.clone();
+    let events = apply_response(
+        state,
+        &followup,
+        Response {
+            contract_version: super::CONTRACT_VERSION.into(),
+            request_id: followup.request_id.clone(),
+            changes,
+            overview_refs: Vec::new(),
+            unresolved_context_ids: Vec::new(),
+            more_changes_possible: false,
+        },
+    )?;
+    state.overview_refs = overview;
     Ok(events)
 }
 
@@ -713,7 +897,8 @@ fn add_literal_completions(state: &WorkspaceState, request: &Request, changes: &
                 || task.evidence.iter().any(|evidence| {
                     evidence.source_id == source.id
                         || request.transcript_sources.iter().any(|original| {
-                            original.id == evidence.source_id && original.start_ms > source.start_ms
+                            original.id == evidence.source_id
+                                && original.start_ms >= source.start_ms
                         })
                 })
             {

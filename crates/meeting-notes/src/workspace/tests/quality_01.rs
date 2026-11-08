@@ -32,6 +32,197 @@ fn answer(changes: serde_json::Value) -> String {
 }
 
 #[test]
+fn a_literal_room_decision_is_not_saved_as_a_fact() {
+    let mut state = WorkspaceState::default();
+    let room = source("s_room", 0, "We decided to hold the workshop in Room Blue.");
+    let req = request(&state, "facts", &room);
+    validate::apply(&mut state, &req, &answer(json!([{
+        "proposalId":"p_room","kind":"fact","text":"The workshop will be held in Room Blue.",
+        "status":"recorded","attention":"current","evidence":[{"sourceId":room.id,"quote":room.text}]
+    }]))).unwrap();
+    assert_eq!(state.entities.len(), 1);
+    assert_eq!(state.entities[0].kind, "decision");
+    assert_eq!(state.entities[0].evidence[0].quote, room.text);
+    let original = state.entities[0].clone();
+    let req = request(&state, "facts", &room);
+    let events = validate::apply(&mut state, &req, &answer(json!([{
+        "proposalId":"p_repeated","kind":"decision","text":"Room Blue chosen for the workshop",
+        "status":"recorded","attention":"current","evidence":[{"sourceId":room.id,"quote":room.text}]
+    }]))).unwrap();
+    assert!(events.is_empty());
+    assert_eq!(state.entities, vec![original]);
+}
+
+#[test]
+fn a_proposal_and_a_nearby_room_decision_are_not_confused() {
+    let mut state = WorkspaceState::default();
+    let idea = "Maybe we could serve lunch outside.";
+    let room = source(
+        "s_room",
+        0,
+        &format!("{idea} We decided to hold the workshop in Room Blue."),
+    );
+    let req = request(&state, "facts", &room);
+    validate::apply(
+        &mut state,
+        &req,
+        &answer(json!([{
+            "proposalId":"p_lunch","kind":"fact","text":"Proposal to serve lunch outside",
+            "status":"recorded","attention":"normal","evidence":[{"sourceId":room.id,"quote":idea}]
+        }])),
+    )
+    .unwrap();
+    assert_eq!(state.entities.len(), 1);
+    assert_eq!(state.entities[0].kind, "fact");
+}
+
+#[test]
+fn a_mixed_german_fact_keeps_its_observation_and_separate_literal_decision() {
+    let mut state = WorkspaceState::default();
+    let observation = "Die Testgruppe erhält die Einladung für den 12. November.";
+    let decision = "Wir beschließen, mit zwei Geräten zu starten.";
+    let original = source("s_launch", 0, &format!("{observation} {decision}"));
+    let req = request(&state, "facts", &original);
+    validate::apply(&mut state, &req, &answer(json!([{
+        "proposalId":"p_launch","kind":"fact",
+        "text":"Testgruppe erhält Einladung für 12. November; Start mit zwei Geräten beschlossen",
+        "status":"recorded","attention":"current","evidence":[{"sourceId":original.id,"quote":original.text}]
+    }]))).unwrap();
+    assert_eq!(state.entities.len(), 2);
+    assert_eq!(state.entities[0].kind, "decision");
+    assert_eq!(state.entities[0].evidence[0].quote, decision);
+    assert_eq!(state.entities[1].kind, "fact");
+    assert_eq!(state.entities[1].text, observation);
+    assert_eq!(state.entities[1].evidence[0].quote, observation);
+}
+
+#[test]
+fn an_explicit_completion_matches_a_task_title_that_echoes_its_deadline() {
+    let mut state = WorkspaceState::default();
+    let promise = source(
+        "s_guide",
+        0,
+        "Nora sagt: Ich erstelle die Anleitung bis Montag.",
+    );
+    let req = request(&state, "tasks", &promise);
+    validate::apply(
+        &mut state,
+        &req,
+        &answer(json!([{
+            "proposalId":"p_guide","kind":"task","text":"Erstelle die Anleitung bis Montag",
+            "status":"open","attention":"current","owner":"Nora","due":"Montag",
+            "evidence":[{"sourceId":promise.id,"quote":promise.text}]
+        }])),
+    )
+    .unwrap();
+    state.originals.push(promise);
+    let done = source("s_guide_done", 3000, "Nora sagt: Die Anleitung ist fertig.");
+    let req = request(&state, "tasks", &done);
+    validate::apply(&mut state, &req, &answer(json!([]))).unwrap();
+    assert_eq!(state.entities[0].status, "completed");
+    assert_eq!(state.entities[0].due.as_deref(), Some("Montag"));
+}
+
+#[test]
+fn an_assignment_and_its_completion_in_one_window_keep_their_order() {
+    for (done_at, expected) in [(3000, "completed"), (0, "open")] {
+        let mut state = WorkspaceState::default();
+        let promise = source(
+            "s_guide",
+            1000,
+            "Nora sagt: Ich erstelle die Anleitung bis Montag.",
+        );
+        let done = source(
+            "s_guide_done",
+            done_at,
+            "Nora sagt: Die Anleitung ist fertig.",
+        );
+        let fresh = vec![promise.clone(), done];
+        let mut req = Request::new(
+            "r_check".into(),
+            &state.context,
+            &state,
+            vec![],
+            &fresh,
+            fresh.clone(),
+        );
+        req.purpose = "tasks".into();
+        let events = validate::apply(
+            &mut state,
+            &req,
+            &answer(json!([{
+                "proposalId":"p_guide","kind":"task","text":"Erstelle die Anleitung bis Montag",
+                "status":"open","attention":"current","owner":"Nora","due":"Montag",
+                "evidence":[{"sourceId":promise.id,"quote":promise.text}]
+            }])),
+        )
+        .unwrap();
+        assert_eq!(state.entities.len(), 1);
+        assert_eq!(state.entities[0].status, expected);
+        assert_eq!(events.len(), if expected == "completed" { 2 } else { 1 });
+    }
+}
+
+#[test]
+fn named_completion_matches_the_german_action_with_an_inflected_title() {
+    let mut state = WorkspaceState::default();
+    let promise = source(
+        "s_promise",
+        0,
+        "Mara sagt: Ich prüfe die Geräte bis Dienstag.",
+    );
+    let req = request(&state, "tasks", &promise);
+    validate::apply(
+        &mut state,
+        &req,
+        &answer(json!([{
+            "proposalId":"p_pruefung","kind":"task","text":"Prüfe die Geräte","status":"open",
+            "attention":"normal","owner":"Mara","due":"Dienstag",
+            "evidence":[{"sourceId":promise.id,"quote":promise.text}]
+        }])),
+    )
+    .unwrap();
+    state.originals.push(promise);
+    let done = source("s_done", 3000, "Mara sagt: Die Geräteprüfung ist erledigt.");
+    let req = request(&state, "tasks", &done);
+    assert_eq!(
+        validate::apply(&mut state, &req, &answer(json!([])))
+            .unwrap()
+            .len(),
+        1
+    );
+    assert_eq!(state.entities[0].status, "completed");
+    assert_eq!(state.entities[0].owner.as_deref(), Some("Mara"));
+    assert_eq!(state.entities[0].due.as_deref(), Some("Dienstag"));
+}
+
+#[test]
+fn a_repeated_observation_without_optional_fields_keeps_its_original() {
+    let mut state = WorkspaceState::default();
+    let first = source("s_first", 0, "The keys are at reception.");
+    let req = request(&state, "facts", &first);
+    let mut change = json!({
+        "proposalId":"p_keys","kind":"fact","text":"Keys are at reception","status":"recorded",
+        "attention":"normal","evidence":[{"sourceId":first.id,"quote":first.text}]
+    });
+    validate::apply(&mut state, &req, &answer(json!([change.clone()]))).unwrap();
+    state.originals.push(first);
+    let original = state.entities[0].clone();
+    let repeated = source(
+        "s_repeated",
+        3000,
+        "As mentioned, the keys are at reception.",
+    );
+    let req = request(&state, "facts", &repeated);
+    change["text"] = json!("Keys are at reception.");
+    change["evidence"] = json!([{"sourceId":repeated.id,"quote":repeated.text}]);
+    assert!(validate::apply(&mut state, &req, &answer(json!([change])))
+        .unwrap()
+        .is_empty());
+    assert_eq!(state.entities, vec![original]);
+}
+
+#[test]
 fn a_room_decision_saved_as_a_fact_survives_the_next_update() {
     for (room_title, room_quote, checklist_title, checklist_quote) in [
         (
@@ -49,7 +240,7 @@ fn a_room_decision_saved_as_a_fact_survives_the_next_update() {
     ] {
         let mut state = WorkspaceState::default();
         let room = source("s_room", 0, room_quote);
-        let seed = request(&state, "facts", &room);
+        let seed = request(&state, "live_update", &room);
         validate::apply(&mut state, &seed, &answer(json!([{
             "proposalId":"p_room","kind":"fact","targetId":null,"targetRevision":null,
             "text":room_title,"status":"recorded","attention":"normal","owner":null,"due":null,
