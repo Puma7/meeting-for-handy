@@ -509,11 +509,12 @@ it.each(
     vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
     const mounted = render(<App api={api} />);
     try {
-      // Choose a microphone before the synthetic recording starts, as in the real flow.
-      const microphone = await screen.findByRole("checkbox", {
-        name: t.microphone,
-      });
-      fireEvent.click(microphone);
+      // The default microphone is selected before the synthetic recording starts.
+      await waitFor(() =>
+        expect(
+          screen.getByRole("checkbox", { name: t.microphone }),
+        ).toHaveProperty("checked", true),
+      );
       current = {
         ...state(active),
         recording: true,
@@ -694,13 +695,13 @@ it("keeps the speaker check archive remedy and its completion outside closed set
 });
 
 describe("migration frontend boundaries (synthetic IPC)", () => {
-  it("requires actual desktop readiness and passes separate microphone selection", async () => {
+  it("selects the default microphone and passes both audio tracks", async () => {
     const api = fakeApi();
     render(<App api={api} />);
     await ready();
-    await userEvent.click(
+    expect(
       screen.getByLabelText("Mikrofon zusätzlich aufnehmen"),
-    );
+    ).toHaveProperty("checked", true);
     await userEvent.click(
       screen.getByRole("button", { name: "Aufnahme starten" }),
     );
@@ -717,6 +718,50 @@ describe("migration frontend boundaries (synthetic IPC)", () => {
     expect(await screen.findByRole("alert")).toHaveProperty(
       "textContent",
       expect.stringContaining("Synthetic capture unavailable"),
+    );
+  });
+  it("remembers when the microphone is turned off", async () => {
+    const api = fakeApi();
+    const { unmount } = render(<App api={api} />);
+    await ready();
+    const microphone = screen.getByLabelText("Mikrofon zusätzlich aufnehmen");
+    expect(microphone).toHaveProperty("checked", true);
+    await userEvent.click(microphone);
+    unmount();
+
+    render(<App api={api} />);
+    await ready();
+    expect(
+      screen.getByLabelText("Mikrofon zusätzlich aufnehmen"),
+    ).toHaveProperty("checked", false);
+    await userEvent.click(
+      screen.getByRole("button", { name: "Aufnahme starten" }),
+    );
+    expect(api.startMeeting).toHaveBeenCalledWith(
+      expect.objectContaining({
+        systemDeviceId: "out",
+        microphoneDeviceId: null,
+      }),
+    );
+  });
+  it("starts with computer audio alone when no microphone is available", async () => {
+    const api = fakeApi();
+    vi.mocked(api.listDevices).mockResolvedValue([
+      { id: "out", name: "Output", source: "system", isDefault: true },
+    ]);
+    render(<App api={api} />);
+    await ready();
+    expect(
+      screen.getByLabelText("Mikrofon zusätzlich aufnehmen"),
+    ).toHaveProperty("checked", false);
+    await userEvent.click(
+      screen.getByRole("button", { name: "Aufnahme starten" }),
+    );
+    expect(api.startMeeting).toHaveBeenCalledWith(
+      expect.objectContaining({
+        systemDeviceId: "out",
+        microphoneDeviceId: null,
+      }),
     );
   });
   it("uses refreshed Handy models and excludes unsupported/uninstalled entries", async () => {
@@ -2321,13 +2366,20 @@ it.each(["de", "en"] as const)(
       await act(async () => {
         await vi.advanceTimersByTimeAsync(1500);
       });
-      vi.mocked(api.listDevices).mockResolvedValue([]);
+      vi.mocked(api.listDevices).mockResolvedValue([
+        {
+          id: "out",
+          name: "Synthetic output",
+          source: "system",
+          isDefault: true,
+        },
+      ]);
       fireEvent.focus(window);
       const shadow = within(host()!.querySelector(".prototype") as HTMLElement);
       const notice = await shadow.findByText(
         locale === "de"
-          ? /aus der Geräteliste verschwunden/
-          : /left the device list/,
+          ? /Synthetic microphone.*aus der Geräteliste verschwunden/
+          : /Synthetic microphone.*left the device list/,
       );
       expect(notice.closest('[role="alert"]')).toBeTruthy();
       expect(notice.textContent).toContain(
@@ -2345,8 +2397,8 @@ it.each(["de", "en"] as const)(
         expect(
           shadow.queryByText(
             locale === "de"
-              ? /aus der Geräteliste verschwunden/
-              : /left the device list/,
+              ? /Synthetic microphone.*aus der Geräteliste verschwunden/
+              : /Synthetic microphone.*left the device list/,
           ),
         ).toBeNull(),
       );

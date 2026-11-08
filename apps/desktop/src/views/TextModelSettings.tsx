@@ -102,6 +102,11 @@ export default function TextModelSettings({
           <button
             type="button"
             className="primary settings-model-detect"
+            title={
+              de
+                ? "Nach laufenden lokalen Diensten und ihren verfügbaren Modellen suchen."
+                : "Look for running local services and their available models."
+            }
             disabled={disabled || !connected}
             aria-expanded={discoveryOpen}
             onClick={() => setDiscoveryOpen((open) => !open)}
@@ -132,6 +137,11 @@ export default function TextModelSettings({
           {t.processing}
           <select
             value={mode}
+            title={
+              de
+                ? "Auswählen, wo der Meetingtext ausgewertet wird."
+                : "Choose where meeting text is analyzed."
+            }
             disabled={disabled}
             onChange={(e) => setMode(e.target.value as "local" | "cloud")}
           >
@@ -143,6 +153,11 @@ export default function TextModelSettings({
           {mode === "local" ? t.localEndpoint : t.endpoint}
           <input
             type="url"
+            title={
+              de
+                ? "Adresse des ausgewählten Textmodelldienstes."
+                : "Address of the selected text model service."
+            }
             value={endpoint}
             disabled={disabled}
             onChange={(e) => setEndpoint(e.target.value)}
@@ -155,6 +170,11 @@ export default function TextModelSettings({
             <div className="inline-control">
               <select
                 aria-label={t.textModel}
+                title={
+                  de
+                    ? "Ein vom Dienst gemeldetes Textmodell auswählen."
+                    : "Choose a text model reported by the service."
+                }
                 value={textModel}
                 disabled={disabled || modelsLoading}
                 onChange={(e) => setTextModel(e.target.value)}
@@ -190,6 +210,11 @@ export default function TextModelSettings({
           ) : (
             <input
               aria-label={t.textModel}
+              title={
+                de
+                  ? "Den genauen Modellnamen des Dienstes eingeben."
+                  : "Enter the exact model name used by the service."
+              }
               value={textModel}
               disabled={disabled}
               onChange={(e) => setTextModel(e.target.value)}
@@ -204,6 +229,11 @@ export default function TextModelSettings({
             <label className="checkbox-label">
               <input
                 type="checkbox"
+                title={
+                  de
+                    ? "Den Modellnamen selbst eingeben."
+                    : "Enter the model name yourself."
+                }
                 checked={manualModel}
                 disabled={disabled}
                 onChange={(e) => setManualModel(e.target.checked)}
@@ -211,7 +241,7 @@ export default function TextModelSettings({
               {t.manualTextModel}
             </label>
             <details className="local-service-help">
-              <summary>{t.setupHelp}</summary>
+              <summary title={t.setupHelp}>{t.setupHelp}</summary>
               <p>{t.localServiceHelp}</p>
               <p>{t.firstModelLoad}</p>
             </details>

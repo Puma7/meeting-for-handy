@@ -226,7 +226,7 @@ export default function MeetingView({
           open={setupOpen}
           onToggle={(event) => setSetupOpen(event.currentTarget.open)}
         >
-          <summary>
+          <summary title={t.captureSetupTooltip}>
             <strong>{t.captureSetup}</strong>
             <span>
               {models.find((model) => model.id === modelId)?.name ?? t.choose}
@@ -237,6 +237,7 @@ export default function MeetingView({
               {t.title}
               <input
                 value={title}
+                title={t.meetingTitleTooltip}
                 disabled={recording || busy}
                 placeholder={defaultTitle}
                 maxLength={200}
@@ -365,6 +366,7 @@ export default function MeetingView({
               className="secondary"
               disabled={busy || !connected}
               onClick={resume}
+              title={t.resumeTooltip}
             >
               <RefreshCw size={15} />
               {x.resume}
@@ -405,6 +407,7 @@ export default function MeetingView({
             className="primary"
             disabled={busy || !recentParts.length}
             onClick={onAnalyse}
+            title={t.analyzeMeetingTooltip}
           >
             <Sparkles size={16} />
             {t.analyzeMeeting}
@@ -421,6 +424,7 @@ export default function MeetingView({
             <button
               className="secondary"
               aria-pressed={!liveFocus}
+              title={t.showTranscriptTooltip}
               onClick={() => onLiveFocus(false)}
             >
               {locale === "de" ? "Transkript" : "Transcript"}
@@ -428,6 +432,7 @@ export default function MeetingView({
             <button
               className="secondary"
               aria-pressed={liveFocus}
+              title={t.showLiveSummaryTooltip}
               onClick={() => onLiveFocus(true)}
             >
               {locale === "de" ? "Zusammenfassung" : "Summary"}
@@ -455,6 +460,7 @@ export default function MeetingView({
               <button
                 className="text-button"
                 disabled={transcriptLoading}
+                title={t.loadTranscriptTooltip}
                 onClick={() => void loadFullTranscript()}
               >
                 {transcriptLoading

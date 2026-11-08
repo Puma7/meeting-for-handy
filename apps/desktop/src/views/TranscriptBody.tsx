@@ -54,6 +54,7 @@ export default function TranscriptBody({
           <label>
             <Search size={14} aria-hidden="true" />
             <input
+              title={t.transcriptSearchTooltip}
               type="search"
               value={query}
               placeholder={de ? "Im Transkript suchen" : "Search transcript"}

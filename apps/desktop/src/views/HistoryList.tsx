@@ -37,6 +37,7 @@ export default function HistoryList({
           className="secondary"
           disabled={busy || !connected}
           onClick={onRefresh}
+          title={t.refreshHistoryTooltip}
         >
           <RefreshCw size={15} />
           {t.refresh}
@@ -76,6 +77,7 @@ export default function HistoryList({
                   className="secondary"
                   disabled={busy}
                   onClick={() => onOpen(item.id)}
+                  title={t.openMeetingTooltip}
                 >
                   {t.open}
                 </button>

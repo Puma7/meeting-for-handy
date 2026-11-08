@@ -68,7 +68,13 @@ export default function RecordingControls({
       </div>
       {/* Also reachable without hover: keyboard and touch users open it explicitly. */}
       <details className="capture-control-help">
-        <summary>
+        <summary
+          title={
+            de
+              ? "Nachlesen, welche Tonspuren beim Pausieren oder Stummschalten weiterlaufen."
+              : "See which audio tracks continue when you pause or mute."
+          }
+        >
           {de
             ? "Was bewirken Pause und Stummschaltung?"
             : "What do pause and mute do?"}

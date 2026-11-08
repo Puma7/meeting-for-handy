@@ -105,6 +105,7 @@ export default function AudioSources({
             <div className="inline-control audio-source-controls">
               <select
                 id={systemSelect}
+                title={t.systemDeviceTooltip}
                 value={systemId}
                 disabled={recording || busy || !hasSystemDevice}
                 onChange={(event) => setSystemId(event.target.value)}
@@ -146,6 +147,7 @@ export default function AudioSources({
               <input
                 type="checkbox"
                 aria-label={t.microphone}
+                title={t.microphoneToggleTooltip}
                 checked={microphoneIncluded}
                 disabled={recording || busy}
                 onChange={(event) => setMicEnabled(event.target.checked)}
@@ -158,6 +160,7 @@ export default function AudioSources({
             <div className="audio-source-controls">
               <select
                 aria-label={t.sourceMicrophone}
+                title={t.microphoneDeviceTooltip}
                 value={micId}
                 disabled={!micEnabled || recording || busy}
                 onChange={(event) => setMicId(event.target.value)}

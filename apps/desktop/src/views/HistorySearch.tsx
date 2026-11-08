@@ -125,6 +125,11 @@ export default function HistorySearch({
         </h2>
         <button
           className="secondary"
+          title={
+            de
+              ? "Gespeicherte Meetings und Suchergebnisse neu laden."
+              : "Reload saved meetings and search results."
+          }
           disabled={loading}
           onClick={() => {
             onRefresh?.();
@@ -143,6 +148,11 @@ export default function HistorySearch({
             : "Search meeting names and transcripts"}
         </span>
         <input
+          title={
+            de
+              ? "Titel und gespeicherte Transkripte durchsuchen."
+              : "Search titles and saved transcripts."
+          }
           type="search"
           value={query}
           onChange={(e) => {
@@ -213,6 +223,11 @@ export default function HistorySearch({
                 )}
                 <button
                   className="secondary"
+                  title={
+                    de
+                      ? "Das Meeting am gefundenen Abschnitt öffnen, falls vorhanden."
+                      : "Open the meeting at the matching section when available."
+                  }
                   onClick={() => onOpen(item.id, item.sourceId)}
                 >
                   <ArrowRight size={15} />
@@ -255,6 +270,11 @@ export default function HistorySearch({
               </div>
               <button
                 className="secondary"
+                title={
+                  de
+                    ? "Die gespeicherte Sitzung öffnen."
+                    : "Open the saved session."
+                }
                 onClick={() => onOpen(item.id, null)}
               >
                 <ArrowRight size={15} />
@@ -269,6 +289,9 @@ export default function HistorySearch({
           <button
             className="secondary"
             disabled={loading || viewOffset === 0}
+            title={
+              de ? "Die vorherige Seite anzeigen." : "Show the previous page."
+            }
             onClick={() => setOffset(Math.max(0, viewOffset - 25))}
           >
             {de ? "Zurück" : "Previous"}
@@ -279,6 +302,7 @@ export default function HistorySearch({
           <button
             className="secondary"
             disabled={loading || viewOffset + 25 >= visiblePage.total}
+            title={de ? "Die nächste Seite anzeigen." : "Show the next page."}
             onClick={() => setOffset(viewOffset + 25)}
           >
             {de ? "Weiter" : "Next"}

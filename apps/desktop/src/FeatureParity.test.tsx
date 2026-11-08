@@ -487,7 +487,10 @@ it("passes only the approved agent scope and current UI devices without starting
       ).disabled,
     ).toBe(false),
   );
-  await userEvent.click(screen.getByLabelText("Mikrofon zusätzlich aufnehmen"));
+  expect(screen.getByLabelText("Mikrofon zusätzlich aufnehmen")).toHaveProperty(
+    "checked",
+    true,
+  );
   await userEvent.click(
     screen.getByRole("button", { name: "Diese Aufnahme erlauben" }),
   );

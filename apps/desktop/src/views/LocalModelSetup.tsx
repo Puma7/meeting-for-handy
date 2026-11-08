@@ -211,6 +211,11 @@ export default function LocalModelSetup({
                     ).map((model) => (
                       <button
                         key={model}
+                        title={
+                          de
+                            ? "Diesen Dienst und dieses Modell für die Textauswertung auswählen."
+                            : "Select this service and model for text analysis."
+                        }
                         className="secondary"
                         disabled={disabled}
                         onClick={() => {
@@ -239,6 +244,11 @@ export default function LocalModelSetup({
                             <button
                               className="secondary"
                               onClick={() => void api.cancelModelPull?.()}
+                              title={
+                                de
+                                  ? "Den laufenden Modell-Download abbrechen."
+                                  : "Cancel the current model download."
+                              }
                             >
                               <X size={14} />
                               {de ? "Abbrechen" : "Cancel"}
@@ -249,6 +259,11 @@ export default function LocalModelSetup({
                             className="primary"
                             disabled={disabled || !api.pullOllamaModel}
                             onClick={() => void startPull()}
+                            title={
+                              de
+                                ? "Dieses Modell über Ollama herunterladen."
+                                : "Download this model through Ollama."
+                            }
                           >
                             <Download size={14} />
                             {de

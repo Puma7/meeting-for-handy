@@ -207,6 +207,9 @@ export default function LiveNotesPanel({
   connectionLocked = false,
 }: Props) {
   const de = locale === "de";
+  const textModelSettingsHelp = de
+    ? "Verbindung und Modell für die Textauswertung einstellen."
+    : "Configure the connection and model for text analysis.";
   const [loaded, setStatus] = useState<LiveNotesStatus | null>(null),
     [error, setError] = useState<string | null>(null),
     [busy, setBusy] = useState(false),
@@ -602,13 +605,22 @@ export default function LiveNotesPanel({
         )}
         <button
           className="link-button"
+          title={
+            de
+              ? "Lokal verfügbare Textmodelldienste anzeigen."
+              : "Show available local text model services."
+          }
           onClick={() => setSetupOpen((open) => !open)}
         >
           <Settings2 size={13} />
           {de ? "Lokales Modell einrichten" : "Set up local model"}
         </button>
         {connection.mode === "cloud" && !modelReady && (
-          <button className="link-button" onClick={onOpenTextModelSettings}>
+          <button
+            className="link-button"
+            title={textModelSettingsHelp}
+            onClick={onOpenTextModelSettings}
+          >
             {de ? "Alle Textmodell-Einstellungen" : "All text model settings"}
           </button>
         )}
@@ -658,6 +670,11 @@ export default function LiveNotesPanel({
               className="secondary"
               disabled={busy}
               onClick={() => void stop()}
+              title={
+                de
+                  ? "Nur die Zusammenfassung beenden. Die Aufnahme läuft weiter."
+                  : "Stop the summary. The recording continues."
+              }
             >
               <Square size={14} />
               {de ? "Beenden" : "Stop"}
@@ -671,6 +688,11 @@ export default function LiveNotesPanel({
                 status?.status === "updating"
               }
               onClick={() => void refresh()}
+              title={
+                de
+                  ? "Eine Aktualisierung mit den bisher vorliegenden Transkriptabschnitten anfordern."
+                  : "Request an update with the transcript sections available so far."
+              }
             >
               <RefreshCw size={14} />
               {refreshPending || status?.refreshRequested
@@ -691,6 +713,11 @@ export default function LiveNotesPanel({
             className="primary"
             disabled={!canStart}
             onClick={() => void start()}
+            title={
+              de
+                ? "Die laufende Zusammenfassung mit dem gewählten Textmodell starten."
+                : "Start the live summary with the selected text model."
+            }
           >
             <Play size={14} />
             {staleOverview
@@ -704,7 +731,13 @@ export default function LiveNotesPanel({
         )}
       </div>
       <details className="help-disclosure live-options">
-        <summary>
+        <summary
+          title={
+            de
+              ? "Intervall, automatischen Start und Modelloptionen anzeigen."
+              : "Show the interval, automatic start and model options."
+          }
+        >
           {de ? "Optionen und Hinweise" : "Options and guidance"}
         </summary>
         <div className="live-controls">
@@ -712,6 +745,11 @@ export default function LiveNotesPanel({
             {de ? "Alle" : "Every"}
             <select
               value={preferences.intervalMinutes}
+              title={
+                de
+                  ? "Das Intervall zwischen Zusammenfassungen einstellen."
+                  : "Set the interval between summaries."
+              }
               onChange={(e) => void changeInterval(Number(e.target.value))}
             >
               {INTERVAL_CHOICES.map((minutes) => (
@@ -725,6 +763,11 @@ export default function LiveNotesPanel({
             <input
               type="checkbox"
               checked={preferences.auto}
+              title={
+                de
+                  ? "Die lokale Zusammenfassung zusammen mit der Aufnahme starten."
+                  : "Start the local summary when recording starts."
+              }
               onChange={(e) =>
                 setPreferences({ ...preferences, auto: e.target.checked })
               }
@@ -743,7 +786,11 @@ export default function LiveNotesPanel({
           </p>
         )}
         {(connection.mode !== "cloud" || modelReady) && (
-          <button className="link-button" onClick={onOpenTextModelSettings}>
+          <button
+            className="link-button"
+            title={textModelSettingsHelp}
+            onClick={onOpenTextModelSettings}
+          >
             {de ? "Alle Textmodell-Einstellungen" : "All text model settings"}
           </button>
         )}

@@ -26,6 +26,7 @@ export default function MeetingFiles({
       <label className="transcript-format">
         {t.exportFormat}
         <select
+          title={t.exportFormatTooltip}
           value={format}
           disabled={disabled}
           onChange={(event) =>

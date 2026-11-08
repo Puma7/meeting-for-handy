@@ -416,6 +416,7 @@ export default function RetentionPanel({
             type="number"
             min={minimum}
             max={key === "maxVisibleMeetings" ? 1000000 : 36500}
+            title={ruleHelp[key]}
             aria-label={label}
             value={number}
             disabled={busy || running}
@@ -454,6 +455,11 @@ export default function RetentionPanel({
               type="number"
               min={1}
               max={36500}
+              title={
+                de
+                  ? "So viele Tage lang bleiben neue Meetings unangetastet."
+                  : "Leave new meetings untouched for this many days."
+              }
               value={draft.untouchedDays}
               disabled={busy || running}
               onChange={(e) =>
@@ -501,6 +507,11 @@ export default function RetentionPanel({
           <label>
             {de ? "Optionales Audioformat" : "Optional audio format"}
             <select
+              title={
+                de
+                  ? "Format für zusätzlich umgewandelte Audiokopien auswählen."
+                  : "Choose the format for additional converted audio copies."
+              }
               value={draft.codec}
               disabled={busy || running}
               onChange={(e) =>
@@ -572,6 +583,11 @@ export default function RetentionPanel({
           <button
             className="secondary"
             disabled={busy || running || !changed}
+            title={
+              de
+                ? "Regeln speichern, ohne sie sofort auf Dateien anzuwenden."
+                : "Save the rules without applying them to files immediately."
+            }
             onClick={() => void save()}
           >
             {de ? "Regeln speichern" : "Save rules"}
@@ -579,6 +595,11 @@ export default function RetentionPanel({
           <button
             className="secondary"
             disabled={busy || running || changed}
+            title={
+              de
+                ? "Mögliche Schritte anzeigen, ohne Dateien zu ändern."
+                : "Show proposed actions without changing any files."
+            }
             onClick={() => void preview()}
           >
             {de ? "Aufräumvorschau erstellen" : "Create retention preview"}
@@ -631,6 +652,11 @@ export default function RetentionPanel({
                   {api.applyRetention && (
                     <button
                       className="secondary"
+                      title={
+                        de
+                          ? "Details und Bestätigung für diesen einzelnen Schritt öffnen."
+                          : "Open details and confirmation for this single action."
+                      }
                       disabled={busy || running || changed}
                       onClick={() => {
                         setSelected(page * 25 + i);
@@ -728,6 +754,11 @@ export default function RetentionPanel({
               busy ||
               running ||
               (deleting ? confirmation !== expectedDelete : !accepted)
+            }
+            title={
+              de
+                ? "Nur den oben beschriebenen und bestätigten Schritt ausführen."
+                : "Run only the action described and confirmed above."
             }
             onClick={() => void apply()}
           >

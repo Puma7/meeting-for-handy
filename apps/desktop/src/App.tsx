@@ -85,12 +85,13 @@ type MeetingOpenRequest = {
   selection: number;
 };
 /**
- * Reads only locale/theme preferences. Malformed saved data returns safe defaults with
+ * Reads the local app preferences. Malformed saved data returns safe defaults with
  * persistence disabled so the original value is retained.
  */
 function loadPreferences(): {
   locale: Locale;
   theme: Theme;
+  microphone: boolean | null;
   persistable: boolean;
 } {
   try {
@@ -102,10 +103,17 @@ function loadPreferences(): {
       theme: ["dark", "light", "system"].includes(value.theme)
         ? value.theme
         : "system",
+      microphone:
+        typeof value.microphone === "boolean" ? value.microphone : null,
       persistable: true,
     };
   } catch {
-    return { locale: "de", theme: "system", persistable: false };
+    return {
+      locale: "de",
+      theme: "system",
+      microphone: null,
+      persistable: false,
+    };
   }
 }
 const LIVE_PREFS_KEY = "handymeeting.rust.live-notes.v1";
@@ -326,8 +334,9 @@ export default function App({ api = desktopApi }: { api?: DesktopApi }) {
     [modelId, setModelId] = useState(""),
     [systemId, setSystemId] = useState(""),
     [micId, setMicId] = useState(""),
-    [micEnabled, setMicEnabled] = useState(false),
+    [microphonePreference, setMicEnabled] = useState(preferences.microphone),
     [handyPath, setHandyPath] = useState("");
+  const micEnabled = microphonePreference ?? Boolean(micId);
   const templateStore = useTemplateLibrary(api, connected, locale);
   const templates = useMemo(
     () =>
@@ -577,12 +586,19 @@ export default function App({ api = desktopApi }: { api?: DesktopApi }) {
         throw new Error("Invalid preferences");
       localStorage.setItem(
         PREFS_KEY,
-        JSON.stringify({ ...previous, locale, theme }),
+        JSON.stringify({
+          ...previous,
+          locale,
+          theme,
+          ...(microphonePreference === null
+            ? {}
+            : { microphone: microphonePreference }),
+        }),
       );
     } catch {
       setError(t.preferencesError);
     }
-  }, [locale, theme]);
+  }, [locale, theme, microphonePreference]);
   useEffect(() => {
     try {
       const previous = JSON.parse(localStorage.getItem(LIVE_PREFS_KEY) ?? "{}");
