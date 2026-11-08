@@ -336,7 +336,7 @@ export default function App({ api = desktopApi }: { api?: DesktopApi }) {
     [micId, setMicId] = useState(""),
     [microphonePreference, setMicEnabled] = useState(preferences.microphone),
     [handyPath, setHandyPath] = useState("");
-  const micEnabled = microphonePreference ?? Boolean(micId);
+  const micEnabled = microphonePreference !== false && Boolean(micId);
   const templateStore = useTemplateLibrary(api, connected, locale);
   const templates = useMemo(
     () =>

@@ -744,26 +744,48 @@ describe("migration frontend boundaries (synthetic IPC)", () => {
       }),
     );
   });
-  it("starts with computer audio alone when no microphone is available", async () => {
-    const api = fakeApi();
-    vi.mocked(api.listDevices).mockResolvedValue([
-      { id: "out", name: "Output", source: "system", isDefault: true },
-    ]);
-    render(<App api={api} />);
-    await ready();
-    expect(
-      screen.getByLabelText("Mikrofon zusätzlich aufnehmen"),
-    ).toHaveProperty("checked", false);
-    await userEvent.click(
-      screen.getByRole("button", { name: "Aufnahme starten" }),
-    );
-    expect(api.startMeeting).toHaveBeenCalledWith(
-      expect.objectContaining({
-        systemDeviceId: "out",
-        microphoneDeviceId: null,
-      }),
-    );
-  });
+  it.each([{}, { microphone: true }])(
+    "starts with computer audio alone when no microphone is available (%j)",
+    async (preferences) => {
+      const preferencesKey = "handymeeting.rust.beta.preferences.v1";
+      localStorage.setItem(preferencesKey, JSON.stringify(preferences));
+      const api = fakeApi();
+      vi.mocked(api.listDevices).mockResolvedValue([
+        { id: "out", name: "Output", source: "system", isDefault: true },
+      ]);
+      render(<App api={api} />);
+      await ready();
+      const microphone = screen.getByLabelText("Mikrofon zusätzlich aufnehmen");
+      expect(microphone).toHaveProperty("checked", false);
+      expect(microphone).toHaveProperty("disabled", true);
+      await userEvent.click(
+        screen.getByRole("button", { name: "Aufnahme starten" }),
+      );
+      expect(api.startMeeting).toHaveBeenCalledWith(
+        expect.objectContaining({
+          systemDeviceId: "out",
+          microphoneDeviceId: null,
+        }),
+      );
+      expect(JSON.parse(localStorage.getItem(preferencesKey)!)).toEqual(
+        expect.objectContaining(preferences),
+      );
+      vi.mocked(api.listDevices).mockResolvedValue([
+        { id: "out", name: "Output", source: "system", isDefault: true },
+        {
+          id: "mic",
+          name: "Microphone",
+          source: "microphone",
+          isDefault: true,
+        },
+      ]);
+      fireEvent.focus(window);
+      await waitFor(() => {
+        expect(microphone).toHaveProperty("checked", true);
+        expect(microphone).toHaveProperty("disabled", false);
+      });
+    },
+  );
   it("uses refreshed Handy models and excludes unsupported/uninstalled entries", async () => {
     const api = fakeApi();
     const refreshed = {
