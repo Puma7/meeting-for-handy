@@ -8,9 +8,13 @@ use std::{
     time::{Duration, Instant},
 };
 
+// A fixed target inside the virtual verifier's 8–10 second PCM window.
+const VIRTUAL_PROBE_DURATION: Duration = Duration::from_millis(9500);
+
 #[derive(Debug, PartialEq)]
 enum Action {
     Record { root: PathBuf, seconds: u64 },
+    VirtualProbe { root: PathBuf },
     Recover { root: PathBuf },
     ListDevices,
 }
@@ -25,10 +29,13 @@ fn parse(args: &[String]) -> meeting_core::Result<Action> {
         if flag == "--recover" {
             return Ok(Action::Recover { root: root.into() });
         }
+        if flag == "--virtual-audio-probe" {
+            return Ok(Action::VirtualProbe { root: root.into() });
+        }
     }
     if !(2..=3).contains(&args.len()) {
         return Err(
-            "Supply NEW_OUTPUT SECONDS [--allow-long-recording], --recover OUTPUT or --list-devices"
+            "Supply NEW_OUTPUT SECONDS [--allow-long-recording], --virtual-audio-probe NEW_OUTPUT, --recover OUTPUT or --list-devices"
                 .into(),
         );
     }
@@ -149,7 +156,8 @@ fn recover(root: &Path) -> meeting_core::Result<()> {
 
 fn main() -> meeting_core::Result<()> {
     match parse(&std::env::args().skip(1).collect::<Vec<_>>())? {
-        Action::Record { root, seconds } => record(&root, seconds),
+        Action::Record { root, seconds } => record(&root, Some(seconds)),
+        Action::VirtualProbe { root } => record(&root, None),
         Action::Recover { root } => recover(&root),
         // Read-only: the platform adapter's actual device query; nothing is recorded.
         Action::ListDevices => {
@@ -162,22 +170,28 @@ fn main() -> meeting_core::Result<()> {
     }
 }
 
-fn record(root: &Path, seconds: u64) -> meeting_core::Result<()> {
+/// The private probe budgets startup and recording together. Manual hardware
+/// diagnostics continue to request their full recording time after readiness.
+fn record(root: &Path, device_seconds: Option<u64>) -> meeting_core::Result<()> {
     if root.exists() {
         return Err("Use a new directory; existing diagnostic evidence is retained".into());
     }
     // Fixed before capture; not adjusted to the observed measurements.
     let allowed_track_difference_ms = 500_u64;
     std::fs::create_dir_all(root.join("checkpoints"))?;
-    create_json(
-        &root.join("plan.json"),
-        &serde_json::json!({
-            "version":env!("CARGO_PKG_VERSION"),"seconds":seconds,"allowedTrackDifferenceMs":allowed_track_difference_ms,
-            "realHardware":true,"microphone":true,"speechRecognition":false,"cloud":false,
-            "os":std::env::consts::OS,"arch":std::env::consts::ARCH,"ownedProcessId":std::process::id(),
-            "checkpointIntervalSeconds":10,"longRecordingExplicit":seconds>60
-        }),
-    )?;
+    let mut plan = serde_json::json!({
+        "version":env!("CARGO_PKG_VERSION"),"allowedTrackDifferenceMs":allowed_track_difference_ms,
+        "realHardware":true,"microphone":true,"speechRecognition":false,"cloud":false,
+        "os":std::env::consts::OS,"arch":std::env::consts::ARCH,"ownedProcessId":std::process::id(),
+        "checkpointIntervalSeconds":10,"longRecordingExplicit":device_seconds.is_some_and(|seconds| seconds > 60)
+    });
+    if let Some(seconds) = device_seconds {
+        plan["seconds"] = seconds.into();
+    } else {
+        plan["stopTargetFromCaptureStartMs"] =
+            serde_json::json!(VIRTUAL_PROBE_DURATION.as_millis());
+    }
+    create_json(&root.join("plan.json"), &plan)?;
     let store = SessionStore::create(
         &root.join("sessions"),
         "Explicit local hardware diagnostic",
@@ -203,13 +217,18 @@ fn record(root: &Path, seconds: u64) -> meeting_core::Result<()> {
     )?;
     let recording_started = Instant::now();
     let mut index = 0;
-    while recording_started.elapsed() < Duration::from_secs(seconds) {
-        std::thread::sleep(Duration::from_secs(1));
-        if recording_started.elapsed().as_secs() / 10 > u64::from(index) {
-            checkpoint(root, &store, index)?;
-            index += 1;
+    if let Some(seconds) = device_seconds {
+        while recording_started.elapsed() < Duration::from_secs(seconds) {
+            std::thread::sleep(Duration::from_secs(1));
+            if recording_started.elapsed().as_secs() / 10 > u64::from(index) {
+                checkpoint(root, &store, index)?;
+                index += 1;
+            }
         }
+    } else {
+        std::thread::sleep(virtual_probe_wait(started.elapsed()));
     }
+    let stop_requested = Instant::now();
     capture.stop()?;
     checkpoint(root, &store, index)?;
     let elapsed_ms = started.elapsed().as_millis();
@@ -227,9 +246,21 @@ fn record(root: &Path, seconds: u64) -> meeting_core::Result<()> {
     let result = serde_json::json!({"version":env!("CARGO_PKG_VERSION"),"realHardware":true,"speechRecognition":false,"sessionId":data.id,"elapsedMs":elapsed_ms,"systemMs":system_ms,"microphoneMs":microphone_ms,"differenceMs":system_ms.abs_diff(microphone_ms),"trackDifferenceWithinLimit":system_ms.abs_diff(microphone_ms)<=allowed_track_difference_ms,"captureIncomplete":data.capture_incomplete,"warnings":data.warnings,"limits":"Audio-only live-device diagnostic of the actual requested duration; no ASR, full-disk or general reliability claim. Recovery is a separate explicit action."});
     let mut result = result;
     result["portableStartup"] = serde_json::to_value(portable_startup)?;
+    if device_seconds.is_none() {
+        result["limits"] = "Audio-only device probe with a fixed stop target that includes startup. The PCM verifier measures the saved audio separately.".into();
+        result["virtualProbeTiming"] = serde_json::json!({
+            "stopTargetFromCaptureStartMs": VIRTUAL_PROBE_DURATION.as_millis(),
+            "readyFromCaptureStartMs": recording_started.duration_since(started).as_millis(),
+            "stopRequestedFromCaptureStartMs": stop_requested.duration_since(started).as_millis()
+        });
+    }
     create_json(&root.join("result.json"), &result)?;
     println!("{}", serde_json::to_string_pretty(&result)?);
     Ok(())
+}
+
+fn virtual_probe_wait(elapsed_since_start: Duration) -> Duration {
+    VIRTUAL_PROBE_DURATION.saturating_sub(elapsed_since_start)
 }
 
 #[cfg(test)]
@@ -260,6 +291,22 @@ mod tests {
                 root: "owned-output".into()
             }
         );
+    }
+
+    #[test]
+    fn virtual_audio_probe_counts_readiness_in_its_stop_budget() {
+        assert_eq!(
+            parse(&args(&["--virtual-audio-probe", "new-output"])).unwrap(),
+            Action::VirtualProbe {
+                root: "new-output".into()
+            }
+        );
+        // With 1.2 seconds of startup, the old nine-second post-ready wait
+        // would request stop at 10.2 seconds on the capture clock.
+        let startup = Duration::from_millis(1200);
+        assert!(startup + Duration::from_secs(9) > Duration::from_secs(10));
+        assert_eq!(virtual_probe_wait(startup), Duration::from_millis(8300));
+        assert_eq!(virtual_probe_wait(Duration::from_secs(10)), Duration::ZERO);
     }
 
     #[test]
