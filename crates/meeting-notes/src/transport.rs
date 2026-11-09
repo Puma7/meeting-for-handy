@@ -104,6 +104,9 @@ pub struct TextClient {
 }
 
 impl TextClient {
+    pub(crate) fn is_local(&self) -> bool {
+        self.local
+    }
     /// Validates explicit local/cloud consent and endpoint scope, disabling proxies and redirects.
     pub fn new(config: &Connection) -> Result<Self> {
         let mut base = Url::parse(config.endpoint.trim()).context("Ungültige KI-Adresse.")?;

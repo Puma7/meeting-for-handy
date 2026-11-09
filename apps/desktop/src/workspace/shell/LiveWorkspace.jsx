@@ -1,7 +1,14 @@
 import { useWorkspaceText, WorkspaceLanguage } from "./workspaceLocale.jsx";
 import { workspaceStorageKey } from "../workspaceStorage";
 import { useTranscriptOrder } from "../../useTranscriptOrder";
-import { Fragment, useContext, useEffect, useRef, useState } from "react";
+import {
+  Fragment,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import {
   Activity,
   ArrowLeft,
@@ -29,10 +36,15 @@ import {
   Search,
   Settings2,
   Square,
+  Volume2,
+  Stethoscope,
+  MessageCircleQuestion,
 } from "lucide-react";
 import { CustomOverview } from "./CustomOverview.jsx";
 import { Notes } from "./Notes.jsx";
 import SourceAudioPreview from "../SourceAudioPreview";
+import AnalysisDiagnostics from "../AnalysisDiagnostics";
+import MeetingQuestions from "../MeetingQuestions";
 import SavedWorkspaceHistory from "../SavedWorkspaceHistory";
 import { IconButton, Modal, Panel, Status } from "./ui.jsx";
 import { usePanelSettings } from "./usePanelSettings.jsx";
@@ -72,6 +84,7 @@ const statusName = {
   completed: "Laut Gespräch erledigt",
   withdrawn: "Zurückgenommen",
   unclear: "Zuordnung prüfen",
+  confirmed: "Bestätigt",
 };
 
 /** Present native/action failures consistently while preserving non-Error rejection values. */
@@ -256,13 +269,20 @@ function WorkspaceContents({
     alive = useRef(true);
   current.current = state;
   const workspace = status?.view?.workspace;
+  const [resultExport, setResultExport] = useState("");
   const entities = workspace?.entities || [],
     originals = workspace?.originals || [];
+  const currentSourceIds = useMemo(() => {
+    const superseded = new Set(workspace?.supersededSources);
+    return new Set(
+      workspace?.originals
+        ?.filter((s) => !superseded.has(s.id))
+        .map((s) => s.id),
+    );
+  }, [workspace]);
   const lastEvidenceEnd = originals.reduce(
     (end, source) =>
-      workspace?.supersededSources?.includes(source.id)
-        ? end
-        : Math.max(end, source.endMs),
+      currentSourceIds.has(source.id) ? Math.max(end, source.endMs) : end,
     0,
   );
   /** Hydrate authoritative native progress and context, then synchronize only committed inputs when idle. */
@@ -566,7 +586,12 @@ function WorkspaceContents({
       setPanelViews((v) => ({ ...v, [id]: { ...v[id], ...patch } })),
     openModal: setModal,
     onSource: (id) =>
-      setModal((previous) => ({ type: "source", id, back: previous })),
+      setModal((previous) => ({
+        type: "source",
+        id,
+        runId: status?.view?.runId,
+        back: previous,
+      })),
     setNote: (kind, text) =>
       mutate((v) => ({
         ...v,
@@ -638,14 +663,37 @@ function WorkspaceContents({
     return (
       <div className="live-evidence">
         {item.evidence?.map((ev, index) => (
-          <button
-            type="button"
-            className="quote text-button"
-            key={`${ev.sourceId}-${index}`}
-            onClick={() => ctx.onSource(ev.sourceId)}
-          >
-            „{ev.quote}“ <span aria-hidden="true">↗</span>
-          </button>
+          <div className="evidence-actions" key={`${ev.sourceId}-${index}`}>
+            <button
+              type="button"
+              className="quote text-button"
+              onClick={() => ctx.onSource(ev.sourceId)}
+            >
+              „{ev.quote}“ <span aria-hidden="true">↗</span>
+            </button>
+            {adapter.sourceAudio &&
+              status?.view?.runId &&
+              currentSourceIds.has(ev.sourceId) && (
+                <IconButton
+                  label={
+                    language === "de"
+                      ? "Originalton laden"
+                      : "Load original audio"
+                  }
+                  onClick={() =>
+                    setModal((back) => ({
+                      type: "source",
+                      id: ev.sourceId,
+                      runId: status?.view?.runId,
+                      audio: true,
+                      back,
+                    }))
+                  }
+                >
+                  <Volume2 size={15} aria-hidden="true" />
+                </IconButton>
+              )}
+          </div>
         ))}
       </div>
     );
@@ -693,7 +741,9 @@ function WorkspaceContents({
     );
   }
   const source =
-    modal?.type === "source" && originals.find((s) => s.id === modal.id);
+    modal?.type === "source" &&
+    modal.runId === status?.view?.runId &&
+    originals.find((s) => s.id === modal.id);
   const sourceParts =
     source && !workspace?.supersededSources?.includes(source.id)
       ? meeting.parts.filter(
@@ -718,7 +768,7 @@ function WorkspaceContents({
           : workspaceStatusText(status, language)
         : t("Gespeicherte Auswertung wird geladen …"),
     lastEvidenceEnd > 0 &&
-      `${t("Belege bis")} ${formatTime(lastEvidenceEnd / 1000)}`,
+      `${language === "de" ? "Jüngster Beleg" : "Latest evidence"} ${formatTime(lastEvidenceEnd / 1000)}`,
     status?.running &&
       status.pendingChars > 0 &&
       `${status.pendingChars.toLocaleString(language)} ${t("Zeichen noch nicht ausgewertet")}`,
@@ -768,6 +818,44 @@ function WorkspaceContents({
               <History size={16} aria-hidden="true" />
             </IconButton>
           )}
+          {adapter.copy && adapter.version && (
+            <IconButton
+              label={
+                language === "de"
+                  ? "Technische Diagnose öffnen"
+                  : "Open technical diagnostics"
+              }
+              onClick={() => setModal({ type: "diagnostics" })}
+            >
+              <Stethoscope size={16} aria-hidden="true" />
+            </IconButton>
+          )}
+          {workspace && status?.view?.runId && adapter.exportResults && (
+            <IconButton
+              label={
+                language === "de"
+                  ? "Ergebnisse als JSON speichern"
+                  : "Save results as JSON"
+              }
+              disabled={busy}
+              onClick={() =>
+                action(async () => {
+                  setResultExport("");
+                  setResultExport(
+                    await adapter.exportResults(status.view.runId),
+                  );
+                })
+              }
+            >
+              <FileText size={16} aria-hidden="true" />
+            </IconButton>
+          )}
+          <IconButton
+            label={language === "de" ? "Meeting befragen" : "Ask this meeting"}
+            onClick={() => setModal({ type: "meeting-questions" })}
+          >
+            <MessageCircleQuestion size={16} aria-hidden="true" />
+          </IconButton>
           <IconButton
             label={
               dark
@@ -1000,6 +1088,14 @@ function WorkspaceContents({
               {notices && (
                 <div className="workspace-native-notices">{notices}</div>
               )}
+              {resultExport && (
+                <div className="state-banner" role="status">
+                  {language === "de"
+                    ? "Ergebnisse gespeichert"
+                    : "Results saved"}{" "}
+                  · {resultExport}
+                </div>
+              )}
               {captureError && (
                 <div className="state-banner warning" role="alert">
                   {captureError}
@@ -1174,6 +1270,35 @@ function WorkspaceContents({
           {renderPanel(modal.panel, true)}
         </Modal>
       )}
+      {modal?.type === "diagnostics" && (
+        <Modal
+          title={
+            language === "de" ? "Technische Diagnose" : "Technical diagnostics"
+          }
+          onClose={() => setModal(null)}
+        >
+          <AnalysisDiagnostics
+            status={status}
+            pendingAudioMs={meeting.pendingAudioMs}
+            locale={language}
+            copy={adapter.copy}
+            readVersion={adapter.version}
+          />
+        </Modal>
+      )}
+      {modal?.type === "meeting-questions" && (
+        <Modal
+          title={language === "de" ? "Meeting befragen" : "Ask this meeting"}
+          wide
+          onClose={() => setModal(null)}
+        >
+          <MeetingQuestions
+            workspace={workspace}
+            locale={language}
+            openSource={ctx.onSource}
+          />
+        </Modal>
+      )}
       {modal?.type === "saved-history" &&
         adapter.history &&
         adapter.historyView && (
@@ -1211,25 +1336,24 @@ function WorkspaceContents({
                 {formatTime(source.endMs / 1000)} {t("· Abschnittszeiten")}
               </div>
               <blockquote className="source-quote">{source.text}</blockquote>
-              {sourceParts.length === 1 && (
-                <div className="source-actions">
+              <div className="source-actions">
+                {sourceParts.length === 1 && (
                   <button onClick={() => openTranscript(sourceParts[0].file)}>
                     {t("Im Transkript ansehen")}
                   </button>
-                  {adapter.sourceAudio && (
+                )}
+                {adapter.sourceAudio &&
+                  modal.runId &&
+                  currentSourceIds.has(source.id) && (
                     <SourceAudioPreview
                       key={source.id}
-                      file={sourceParts[0].file}
+                      sourceId={source.id}
+                      runId={modal.runId}
                       load={adapter.sourceAudio}
-                      offsetSeconds={Math.max(
-                        0,
-                        source.startMs / 1000 -
-                          sourceParts[0].startSample / 16000,
-                      )}
+                      loadOnOpen={Boolean(modal.audio)}
                     />
                   )}
-                </div>
-              )}
+              </div>
             </>
           ) : (
             <p>
@@ -1434,14 +1558,39 @@ function LivePanel({
             !["completed", "withdrawn", "discussed"].includes(item.status),
         )
       : [];
+  const shownRelevant = full ? relevant : relevant.slice(0, 4);
+  let shownRelevantCount = 0;
+  let hiddenSummaryItems = 0;
   if (panel === "summary") {
+    const relevantIds = new Set(relevant.map(({ id }) => id));
+    const byId = new Map(items.map((item) => [item.id, item]));
     const overview = (workspace?.overviewRefs || [])
-      .map((id) => items.find((item) => item.id === id))
+      .filter((id) => !relevantIds.has(id))
+      .map((id) => byId.get(id))
       .filter(Boolean);
-    items = [
-      ...relevant,
-      ...overview.filter((item) => !relevant.some(({ id }) => id === item.id)),
-    ];
+    items = [...shownRelevant, ...(full ? overview : overview.slice(0, 4))];
+    if (!full) {
+      const visibleTaskQuotes = new Set(
+        items
+          .filter(({ kind }) => kind === "task")
+          .flatMap(({ evidence = [] }) =>
+            evidence.map(({ sourceId, quote }) =>
+              JSON.stringify([sourceId, quote.trim()]),
+            ),
+          ),
+      );
+      items = items.filter(
+        (item) =>
+          item.kind !== "fact" ||
+          !item.evidence?.some(
+            ({ sourceId, quote }) =>
+              item.text.trim() === quote.trim() &&
+              visibleTaskQuotes.has(JSON.stringify([sourceId, quote.trim()])),
+          ),
+      );
+    }
+    shownRelevantCount = items.filter(({ id }) => relevantIds.has(id)).length;
+    hiddenSummaryItems = relevant.length + overview.length - items.length;
   }
   if (panel === "details")
     items = items.filter((e) => !["agenda", "impulse"].includes(e.kind));
@@ -1750,6 +1899,19 @@ function LivePanel({
                         {e.human ? t(" · manuell") : ""}
                       </Status>
                     </div>
+                    <span className="result-origin">
+                      {e.status === "confirmed"
+                        ? language === "de"
+                          ? "Inhalt bestätigt"
+                          : "Content confirmed"
+                        : e.human
+                          ? language === "de"
+                            ? "Status manuell gesetzt"
+                            : "Status set manually"
+                          : language === "de"
+                            ? "KI-Änderung"
+                            : "AI change"}
+                    </span>
                     {additions.get(e.id)?.isAddition && (
                       <details className="history-full-stand">
                         <summary>{t("Vollständigen Stand anzeigen")}</summary>
@@ -1764,12 +1926,12 @@ function LivePanel({
                 <Fragment key={item.id}>
                   {panel === "summary" &&
                     index === 0 &&
-                    relevant.length > 0 && (
+                    shownRelevantCount > 0 && (
                       <h3 className="overview-section-title">
                         {t("Jetzt relevant")}
                       </h3>
                     )}
-                  {panel === "summary" && index === relevant.length && (
+                  {panel === "summary" && index === shownRelevantCount && (
                     <h3 className="overview-section-title">
                       {t("Bisheriger Stand")}
                     </h3>
@@ -1793,6 +1955,25 @@ function LivePanel({
                         {item.humanLocked ? t(" · manuell") : ""}
                       </Status>
                     </div>
+                    <span className="result-origin">
+                      {workspace?.events?.some(
+                        (e) =>
+                          e.human &&
+                          e.status === "confirmed" &&
+                          e.entityId === item.id &&
+                          e.revision === item.revision,
+                      )
+                        ? language === "de"
+                          ? "Inhalt bestätigt"
+                          : "Content confirmed"
+                        : item.humanLocked
+                          ? language === "de"
+                            ? "KI-Entwurf · Status manuell gesetzt"
+                            : "AI draft · status set manually"
+                          : language === "de"
+                            ? "KI-Entwurf"
+                            : "AI draft"}
+                    </span>
                     {item.kind === "task" && (
                       <small>
                         {t("Zuständig:")} {item.owner || t("nicht benannt")}{" "}
@@ -1805,6 +1986,30 @@ function LivePanel({
                       </small>
                     )}
                     {quote(item)}
+                    {item.evidence?.length > 0 &&
+                      item.evidence.every(
+                        (e) =>
+                          !workspace?.supersededSources?.includes(e.sourceId),
+                      ) &&
+                      !workspace?.contextExcludedIds?.includes(item.id) &&
+                      !workspace?.events?.some(
+                        (e) =>
+                          e.human &&
+                          e.status === "confirmed" &&
+                          e.entityId === item.id &&
+                          e.revision === item.revision,
+                      ) && (
+                        <button
+                          type="button"
+                          className="subtle-button"
+                          onClick={() => override(item, "confirmed")}
+                        >
+                          <Check size={14} aria-hidden="true" />
+                          {language === "de"
+                            ? "Inhalt bestätigen"
+                            : "Confirm content"}
+                        </button>
+                      )}
                     {panel === "impulses" && (
                       <div className="impulse-actions">
                         <button
@@ -1855,6 +2060,13 @@ function LivePanel({
                   </article>
                 </Fragment>
               ))}
+        {hiddenSummaryItems > 0 && (
+          <button type="button" className="subtle-button" onClick={onExpand}>
+            {language === "de"
+              ? `Alle anzeigen (${hiddenSummaryItems} weitere)`
+              : `Show all (${hiddenSummaryItems} more)`}
+          </button>
+        )}
         {panel === "transcript" && !transcriptRows.length && (
           <p className="empty-inline">
             {t("Für diese Auswahl kein Transkriptabschnitt.")}

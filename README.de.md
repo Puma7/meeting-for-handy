@@ -38,6 +38,16 @@ Die Pakete sind nicht codesigniert (macOS: ad hoc signiert, nicht notarisiert), 
 
 Jede Aussage einer Zusammenfassung verweist auf einen vorhandenen Transkriptabschnitt und ein wörtliches Zitat; unbekannte Zuständige und Termine bleiben unbekannt. Ergebnisse bleiben KI-Entwürfe zum Prüfen.
 
+Unter **Historie** kannst du Meetingnamen und gespeicherte Transkripte lokal durchsuchen. Zeitraum, VIP-Markierung und „Nur Treffer im Transkript“ grenzen die Suche ein. Ein Transkripttreffer öffnet den Originalabschnitt. Bei der Rückkehr zur Historie bleiben Suchbegriff und Filter erhalten.
+
+Unter **Meetings befragen** kannst du mit dem eingerichteten lokalen Textmodell eine freie Frage über mehrere Meetings stellen. Die App sucht anhand von Begriffen aus der Frage und übergibt höchstens acht passende Transkriptstellen. Zeitraum und VIP-Filter gelten auch hier. Die Antwort besteht aus geprüften wörtlichen Zitaten. **Originalstelle öffnen** springt zur jeweiligen Textstelle. Nach der Rückkehr zur Historie kannst du weitere Belege derselben Antwort öffnen.
+
+Du kannst die Frage auf bis zu zwölf ausgewählte Meetings begrenzen oder sie in den Sitzungsdetails an genau dieses Meeting richten. Bei Transkripttreffern in der Historie kannst du den gespeicherten Originalton als kurze Vorschau laden. Die Vorschau läuft bei direkt anschließenden, verifizierten Abschnitten auf derselben Spur weiter. In der erweiterten Ansicht kannst du belegte Einträge einzeln bestätigen und den Auswertungsstand mit dem Bearbeitungsstatus als JSON speichern.
+
+Die Aufnahme-Einrichtung bietet eine synthetische Funktionsprobe für Audiospeicherung, Transkriptionssoftware und das gewählte lokale Textmodell. Über eine lokale Kalenderdatei kannst du einen Termin zur Vorbereitung wählen und Titel und Vorlage übernehmen. Der Aufnahmestart bleibt eine eigene Handlung.
+
+In den Sitzungsdetails kannst du eine **verschlüsselte Kopie** einer gespeicherten nativen Sitzung anlegen. Unter **Einstellungen → Daten und Wartung** lässt sie sich mit der Passphrase oder dem separat angezeigten Wiederherstellungsschlüssel in ein separates Profil wiederherstellen. Bewahre beide Zugangsdaten getrennt von der Sicherung auf. Die aktive Sitzung und ihr Suchindex bleiben lesbar in ihrer bisherigen Ablage.
+
 ![Transkript und lokale Dateien in Meeting for Handy](assets/screenshots/transcript-light.png)
 *Echte App-Komponenten mit künstlichen Demo-Inhalten. Deutsch und Englisch sind enthalten.*
 

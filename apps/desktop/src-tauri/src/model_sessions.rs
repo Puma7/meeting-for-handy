@@ -32,6 +32,18 @@ pub(crate) struct ModelWork {
     expected: Weak<Work>,
 }
 impl Models {
+    /// Share provider ownership with other work and release it when a transient
+    /// read-only query ends. No resumable owner entry is created.
+    pub(crate) fn temporary_lease(
+        &self,
+        connection: &Connection,
+        provider: LocalProvider,
+    ) -> AppResult<Arc<ModelLease>> {
+        self.0
+            .pool
+            .reserve(connection, provider)
+            .map_err(|error| error.to_string())
+    }
     /// Reuses failed work on the same route/model. Other meetings and independently
     /// running live/post work retain their anchors until their own completion.
     pub(crate) fn reserve(

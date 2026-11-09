@@ -43,6 +43,16 @@ The packages are not code-signed (macOS: ad-hoc signed, not notarized), so the o
 
 Every statement in a summary links to an existing transcript section and a verbatim quote; unknown owners and deadlines stay unknown. Results remain AI drafts to review.
 
+In **History**, search meeting names and saved transcripts locally. Narrow the search by date range, VIP status or transcript matches. Open a transcript match to jump to the original section. Your search and filters stay in place when you return to History.
+
+Use **Ask your meetings** to ask a question across several meetings with your configured local text model. The app searches for terms from the question and sends at most eight matching transcript passages. The date range and VIP filters also apply. The answer consists of verified verbatim quotes. **Open original passage** jumps to the cited section. Return to History to check other sources from the same answer.
+
+Limit a question to up to twelve selected meetings, or ask about one meeting from its detail view. Transcript matches in History offer a short preview of the saved original audio. It continues across adjacent, verified sections on the same track. In the advanced workspace, you can confirm individual evidence-backed entries and save results with their review status as JSON.
+
+Recording setup offers a synthetic check of audio storage, transcription software and the selected local text model. Prepare a meeting from a local calendar file and explicitly apply its title and a template. Starting capture is a separate action.
+
+From a saved native meeting's details, create an **encrypted copy**. Under **Settings → Data and maintenance**, recover it into a separate profile with its passphrase or the separately displayed recovery key. Store both credentials away from the backup. The active meeting and search index stay readable in their existing storage.
+
 ![Meeting for Handy transcript and local file controls](assets/screenshots/transcript-light.png)
 *Real app components with synthetic demo data. English and German interfaces are included.*
 

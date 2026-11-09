@@ -269,6 +269,11 @@ fn apply_response(
                         if weekdays.all(|other| other.eq_ignore_ascii_case(first)) {
                             c.due = Some(first.to_owned());
                         }
+                    } else if let [witness] = c.evidence.as_slice() {
+                        if super::matching::calendar_task_matches(title, &witness.quote) {
+                            c.due = crate::validation::explicit_task_calendar_date(&witness.quote)
+                                .map(str::to_owned);
+                        }
                     }
                 }
             }

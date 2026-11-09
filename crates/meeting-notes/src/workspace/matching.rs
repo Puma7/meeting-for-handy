@@ -147,6 +147,41 @@ pub(super) fn task_title_matches(title: &str, quote: &str) -> bool {
     task_object_matches(title, "", quote)
 }
 
+/// Match a German infinitive against a finite assignment, retaining the particle
+/// of a separable verb and the same concrete object.
+pub(super) fn calendar_task_matches(title: &str, quote: &str) -> bool {
+    if task_title_matches(title, quote) {
+        return true;
+    }
+    let title = title.to_lowercase();
+    let Some((object, action)) = title.rsplit_once(' ') else {
+        return false;
+    };
+    let Some(infinitive_stem) = action.strip_suffix("en") else {
+        return false;
+    };
+    if !super::assertions::present_assignment_quote(super::assertions::assignment_text(quote))
+        || !task_title_matches(object, quote)
+    {
+        return false;
+    }
+    let quote = quote.to_lowercase();
+    let words: Vec<_> = quote
+        .split(|character: char| !character.is_alphabetic())
+        .filter(|word| !word.is_empty())
+        .collect();
+    let particle = words.last().copied().unwrap_or_default();
+    words
+        .iter()
+        .filter_map(|word| word.strip_suffix('t'))
+        .any(|finite| {
+            finite.chars().count() >= 4
+                && (infinitive_stem == finite
+                    || (["ab", "an", "auf", "ein", "mit", "vor", "zu"].contains(&particle)
+                        && infinitive_stem.strip_prefix(particle) == Some(finite)))
+        })
+}
+
 fn task_object_matches(title: &str, owner: &str, quote: &str) -> bool {
     let mut object = terms(title);
     let owner = terms(owner);

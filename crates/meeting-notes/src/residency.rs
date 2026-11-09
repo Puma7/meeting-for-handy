@@ -289,6 +289,7 @@ impl ModelLease {
             }
             return Ok(());
         }
+        let _preparation = control.begin_model_preparation();
         let client = &state.client;
         let loaded = match state.provider {
             LocalProvider::Ollama => {

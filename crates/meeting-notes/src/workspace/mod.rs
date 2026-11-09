@@ -1072,7 +1072,7 @@ fn quote_options(text: &str) -> Vec<String> {
 }
 
 /// Keep decimal points and spoken ordinal dates inside their literal sentence.
-fn evidence_sentences(text: &str) -> impl Iterator<Item = &str> {
+pub(crate) fn evidence_sentences(text: &str) -> impl Iterator<Item = &str> {
     let mut start = 0;
     text.char_indices()
         .chain(std::iter::once((text.len(), '\n')))

@@ -15,6 +15,57 @@ const QUIET_SAMPLES: usize = SAMPLE_RATE as usize * 450 / 1000;
 const QUIET_AMPLITUDE: u16 = 160;
 const CHECKPOINT_INTERVAL: Duration = Duration::from_millis(500);
 
+#[test]
+fn quiet_boundary_keeps_every_low_amplitude_sample_on_both_sides() {
+    let root = tempfile::tempdir().unwrap();
+    let store = SessionStore::create(
+        root.path(),
+        "Synthetic quiet boundary",
+        "test",
+        "synthetic",
+        None,
+    )
+    .unwrap()
+    .with_quiet_sections();
+    let rate = SAMPLE_RATE as usize;
+    let mut samples = vec![0_i16; rate * 22];
+    // A low-amplitude signal crosses the first possible quiet section cut.
+    for (index, sample) in samples[rate * 20 + 4_000..rate * 20 + 12_000]
+        .iter_mut()
+        .enumerate()
+    {
+        *sample = if index % 2 == 0 { 1 } else { -1 };
+    }
+    let mut writer = PcmWriter::new(store.clone(), "system").unwrap();
+    for packet in samples.chunks(rate) {
+        writer.append(packet).unwrap();
+    }
+    writer.finish().unwrap();
+    let folder = store.folder().to_owned();
+    drop(writer);
+    drop(store);
+    let snapshot = crate::inspect_journals(&folder).unwrap();
+    assert_eq!(snapshot.parts.len(), 2);
+    assert_eq!(
+        snapshot.parts[1].start_sample,
+        QUIET_SEARCH_AFTER + QUIET_SAMPLES as u64
+    );
+    assert!(snapshot
+        .parts
+        .iter()
+        .all(|part| part.has_signal && part.audio_closed));
+    let actual: Vec<_> = snapshot
+        .parts
+        .iter()
+        .flat_map(|part| crate::read_closed_audio(&folder, part).unwrap())
+        .collect();
+    assert_eq!(actual.len(), samples.len());
+    assert!(actual
+        .iter()
+        .zip(samples)
+        .all(|(actual, sample)| *actual == f32::from(sample) / 32768.0));
+}
+
 /// Hound serializes WAVE. Its flush updates the header and reaches sync_all here.
 struct SyncFile(File);
 impl Write for SyncFile {
@@ -282,17 +333,51 @@ pub fn read_pcm_samples(path: &Path, offset: u64, count: usize) -> Result<Vec<f3
 }
 
 pub(crate) fn verify_confirmed(path: &Path, part: &AudioPart) -> Result<()> {
+    visit_confirmed_pcm(path, part, |_, _| {})
+}
+
+/// Collect only samples that were read during the successful digest check.
+pub(crate) fn read_verified_pcm_range(
+    path: &Path,
+    part: &AudioPart,
+    offset: u64,
+    count: usize,
+) -> Result<Vec<f32>> {
+    let offset = usize::try_from(offset)?;
+    let end = offset
+        .checked_add(count)
+        .ok_or("Audio range is out of bounds")?;
+    let mut pcm = Vec::with_capacity(count);
+    visit_confirmed_pcm(path, part, |index, sample| {
+        if (offset..end).contains(&index) {
+            pcm.push(f32::from(sample) / 32768.0);
+        }
+    })?;
+    if pcm.len() != count {
+        return Err("Confirmed audio ended early".into());
+    }
+    Ok(pcm)
+}
+
+fn visit_confirmed_pcm(
+    path: &Path,
+    part: &AudioPart,
+    mut visit: impl FnMut(usize, i16),
+) -> Result<()> {
     let mut reader = hound::WavReader::open(path)?;
     verify_spec(reader.spec())?;
     if u64::from(reader.duration()) < part.confirmed_sample_count {
         return Err("Confirmed audio is shorter than its checkpoint".into());
     }
     let mut digest = Sha256::new();
-    for sample in reader
+    for (index, sample) in reader
         .samples::<i16>()
         .take(usize::try_from(part.confirmed_sample_count)?)
+        .enumerate()
     {
-        digest.update(sample?.to_le_bytes());
+        let sample = sample?;
+        digest.update(sample.to_le_bytes());
+        visit(index, sample);
     }
     if format!("{:x}", digest.finalize()) != part.confirmed_sha256 {
         return Err("Confirmed audio SHA-256 mismatch".into());

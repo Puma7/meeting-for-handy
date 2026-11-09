@@ -1046,6 +1046,75 @@ function fixture() {
   };
   return { adapter, meeting, status };
 }
+
+it("sends explicit content confirmation for the shown revision and exports the active run", async () => {
+  const f = fixture();
+  Object.assign(f.status.view.workspace.entities[0], {
+    kind: "decision",
+    status: "recorded",
+  });
+  f.status.status = "waiting";
+  f.adapter.context.mockResolvedValue(true);
+  const exportResults = vi.fn().mockResolvedValue("exports/results-test.json");
+  render(
+    <LiveWorkspace
+      adapter={{ ...f.adapter, exportResults }}
+      meeting={f.meeting}
+      onBack={() => {}}
+    />,
+  );
+  fireEvent.click(await screen.findByRole("tab", { name: "Details" }));
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Inhalt bestätigen" }),
+  );
+  await waitFor(() =>
+    expect(f.adapter.context).toHaveBeenCalledWith(
+      expect.objectContaining({
+        overrides: [
+          expect.objectContaining({
+            id: "e_impulse",
+            expectedRevision: 1,
+            status: "confirmed",
+          }),
+        ],
+      }),
+      "run-current",
+    ),
+  );
+  fireEvent.click(
+    screen.getByRole("button", { name: "Ergebnisse als JSON speichern" }),
+  );
+  expect(await screen.findByText(/exports\/results-test\.json/)).toBeTruthy();
+  expect(exportResults).toHaveBeenCalledExactlyOnceWith("run-current");
+});
+
+it("lets a user confirm a grounded impulse without marking it discussed", async () => {
+  const f = fixture();
+  f.status.status = "waiting";
+  f.adapter.context.mockResolvedValue(true);
+  render(
+    <LiveWorkspace adapter={f.adapter} meeting={f.meeting} onBack={() => {}} />,
+  );
+  fireEvent.click(await screen.findByRole("tab", { name: "Impulse" }));
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Inhalt bestätigen" }),
+  );
+  await waitFor(() =>
+    expect(f.adapter.context).toHaveBeenCalledWith(
+      expect.objectContaining({
+        overrides: [
+          expect.objectContaining({
+            id: "e_impulse",
+            expectedRevision: 1,
+            status: "confirmed",
+          }),
+        ],
+      }),
+      "run-current",
+    ),
+  );
+  expect(screen.getByRole("button", { name: /besprochen/i })).toBeTruthy();
+});
 /** Drive only the two-second workspace poll; keep async assertion timers and the test deadline real. */
 function controlWorkspacePolling() {
   const callbacks = new Map<ReturnType<typeof setInterval>, () => void>();
@@ -1517,7 +1586,7 @@ describe("Native workspace boundary", () => {
       screen.getByText("Abschnittstranskription · offenes Audio 00:15"),
     ).toBeTruthy();
     await screen.findByText(
-      "Auswertung läuft · 3:30 · weiterer Text folgt danach · Belege bis 00:30 · 180 Zeichen noch nicht ausgewertet",
+      "Auswertung läuft · 3:30 · weiterer Text folgt danach · Jüngster Beleg 00:30 · 180 Zeichen noch nicht ausgewertet",
     );
     fireEvent.click(screen.getByRole("button", { name: "Aktualisieren" }));
     await waitFor(() => expect(f.adapter.refresh).toHaveBeenCalledTimes(1));
@@ -1911,7 +1980,7 @@ it("requests WAV bytes only on demand and revokes them when the source closes", 
     await within(source).findByLabelText(
       "Audiovorschau des Originalabschnitts",
     );
-    expect(load).toHaveBeenCalledExactlyOnceWith("generated-one");
+    expect(load).toHaveBeenCalledExactlyOnceWith("s_one", "run-current");
     expect((create.mock.calls[0] as unknown[])[0]).toBeInstanceOf(Blob);
     fireEvent.click(
       within(source).getByRole("button", { name: "Im Transkript ansehen" }),
@@ -1958,16 +2027,12 @@ it.each(["success", "failure"] as const)(
       configurable: true,
       value: revoke,
     });
-    const mounted = render(
-      <SourceAudioPreview file="first" load={load} offsetSeconds={0} />,
-    );
+    const mounted = render(<SourceAudioPreview sourceId="first" load={load} />);
     try {
       fireEvent.click(
         screen.getByRole("button", { name: "Audiovorschau laden" }),
       );
-      mounted.rerender(
-        <SourceAudioPreview file="second" load={load} offsetSeconds={0} />,
-      );
+      mounted.rerender(<SourceAudioPreview sourceId="second" load={load} />);
       const next = screen.getByRole("button", { name: "Audiovorschau laden" });
       expect(next.hasAttribute("disabled")).toBe(false);
       fireEvent.click(next);
@@ -1989,9 +2054,7 @@ it.each(["success", "failure"] as const)(
       await screen.findByLabelText("Audiovorschau des Originalabschnitts");
       expect(create).toHaveBeenCalledOnce();
       expect((create.mock.calls[0] as unknown as [Blob])[0].size).toBe(88);
-      mounted.rerender(
-        <SourceAudioPreview file="third" load={load} offsetSeconds={0} />,
-      );
+      mounted.rerender(<SourceAudioPreview sourceId="third" load={load} />);
       expect(
         screen.queryByLabelText("Audiovorschau des Originalabschnitts"),
       ).toBeNull();
@@ -2020,6 +2083,60 @@ it.each(["success", "failure"] as const)(
     }
   },
 );
+
+it("loads the original once on a direct click and hides it when the run changes", async () => {
+  const f = fixture();
+  const load = vi.fn(async () => new ArrayBuffer(44));
+  const createDescriptor = Object.getOwnPropertyDescriptor(
+    URL,
+    "createObjectURL",
+  );
+  const revokeDescriptor = Object.getOwnPropertyDescriptor(
+    URL,
+    "revokeObjectURL",
+  );
+  Object.defineProperty(URL, "createObjectURL", {
+    configurable: true,
+    value: () => "blob:direct-preview",
+  });
+  Object.defineProperty(URL, "revokeObjectURL", {
+    configurable: true,
+    value: vi.fn(),
+  });
+  const polling = controlWorkspacePolling();
+  const mounted = render(
+    <StrictMode>
+      <LiveWorkspace
+        adapter={{ ...f.adapter, sourceAudio: load }}
+        meeting={{ ...f.meeting, parts: [] }}
+        onBack={() => {}}
+      />
+    </StrictMode>,
+  );
+  try {
+    fireEvent.click(screen.getByRole("tab", { name: "Impulse" }));
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Originalton laden" }),
+    );
+    await screen.findByLabelText("Audiovorschau des Originalabschnitts");
+    expect(load).toHaveBeenCalledExactlyOnceWith("s_one", "run-current");
+    f.status.view.runId = "new-run";
+    await polling.advance(2000);
+    expect(
+      screen.queryByLabelText("Audiovorschau des Originalabschnitts"),
+    ).toBeNull();
+    expect(load).toHaveBeenCalledTimes(1);
+  } finally {
+    mounted.unmount();
+    polling.restore();
+    if (createDescriptor)
+      Object.defineProperty(URL, "createObjectURL", createDescriptor);
+    else Reflect.deleteProperty(URL, "createObjectURL");
+    if (revokeDescriptor)
+      Object.defineProperty(URL, "revokeObjectURL", revokeDescriptor);
+    else Reflect.deleteProperty(URL, "revokeObjectURL");
+  }
+});
 
 it.each(["stop", "override", "interval-only", "unmounted"] as const)(
   "coalesces mutation refresh after an active workspace status read (%s)",
@@ -2184,6 +2301,39 @@ it("shows a relevant result only once inside the live overview", async () => {
   ).toBeTruthy();
   expect(overview.getAllByText("Welche Freigabe fehlt?")).toHaveLength(1);
   expect(screen.queryByRole("region", { name: "Jetzt relevant" })).toBeNull();
+});
+
+it("hides a literal duplicate of a visible task in the compact overview only", async () => {
+  const f = fixture();
+  const workspace = f.status.view.workspace;
+  const task = {
+    ...workspace.entities[0],
+    id: "task",
+    kind: "task",
+    text: "Freigabe klären",
+  };
+  const fact = {
+    ...task,
+    id: "fact",
+    kind: "fact",
+    status: "recorded",
+    text: task.evidence[0].quote,
+  };
+  workspace.entities = [task, fact];
+  render(
+    <LiveWorkspace adapter={f.adapter} meeting={f.meeting} onBack={() => {}} />,
+  );
+  const overview = within(
+    screen.getByRole("region", { name: "Live-Überblick" }),
+  );
+  await overview.findByText("Freigabe klären");
+  expect(overview.getAllByRole("article")).toHaveLength(1);
+  fireEvent.click(
+    overview.getByRole("button", { name: "Alle anzeigen (1 weitere)" }),
+  );
+  expect(
+    within(screen.getByRole("dialog")).getAllByRole("article"),
+  ).toHaveLength(2);
 });
 
 it.each([

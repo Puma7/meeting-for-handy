@@ -416,6 +416,105 @@ enum WorkerKind {
     Speaker(Arc<AtomicBool>),
 }
 
+/// Exercise the same file and worker protocol on generated samples in a private
+/// scratch directory, with no capture handle and no user session or recording.
+pub(crate) fn setup_signal_probe(
+    root: &Path,
+    model: &handy_bridge::HandyModel,
+    resolved: &handy_bridge::ResolvedModel,
+    backend: &Path,
+) -> Result<(bool, bool), String> {
+    struct OwnedScratch(PathBuf);
+    impl Drop for OwnedScratch {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+    let scratch = root.join(format!(".setup-probe-{}", meeting_notes::new_job_id()));
+    std::fs::create_dir(&scratch).map_err(|_| "Die Testablage konnte nicht angelegt werden. / Could not create the setup scratch directory.")?;
+    let scratch = OwnedScratch(scratch);
+    let store = SessionStore::create(
+        &scratch.0,
+        "Synthetic setup probe",
+        &model.id,
+        "generated",
+        None,
+    )
+    .map_err(|error| error.to_string())?;
+    let samples: Vec<i16> = (0..meeting_core::SAMPLE_RATE as usize * 2)
+        .map(|index| {
+            if index < 8_000 {
+                if index % 40 < 20 {
+                    256
+                } else {
+                    -256
+                }
+            } else {
+                0
+            }
+        })
+        .collect();
+    let mut writer =
+        meeting_core::PcmWriter::new(store.clone(), "system").map_err(|error| error.to_string())?;
+    writer
+        .append(&samples)
+        .and_then(|_| writer.finish())
+        .map_err(|error| error.to_string())?;
+    let snapshot = store.snapshot().map_err(|error| error.to_string())?;
+    let part = snapshot
+        .parts
+        .first()
+        .ok_or("Testabschnitt fehlt. / The test section is missing.")?;
+    let pcm =
+        meeting_core::read_closed_audio(store.folder(), part).map_err(|error| error.to_string())?;
+    let audio = pcm.len() == samples.len()
+        && pcm
+            .iter()
+            .zip(&samples)
+            .all(|(read, original)| *read == f32::from(*original) / 32768.0);
+    if !audio {
+        return Ok((false, false));
+    }
+    handy_bridge::write_model_snapshot(
+        store.folder(),
+        model,
+        resolved,
+        &serde_json::json!({"synthetic":true,"purpose":"setup check"}),
+    )
+    .map_err(|error| error.to_string())?;
+    let batch = model.ready_for_batch();
+    let inference = (|| -> Result<(), String> {
+        let mut worker = Worker::start(
+            &resolved.path,
+            backend,
+            store.folder(),
+            if batch { "batch" } else { "system" },
+            true,
+            Some(Instant::now() + Duration::from_secs(90)),
+        )?;
+        if batch {
+            worker.call(Request::BatchSection {
+                part: part.clone(),
+                previous: None,
+            })?;
+        } else {
+            worker.call(Request::Begin {
+                file: part.file.clone(),
+            })?;
+            for offset in (0..samples.len()).step_by(FEED_SAMPLES) {
+                worker.call(Request::Feed {
+                    offset_samples: offset as u64,
+                    sample_count: (samples.len() - offset).min(FEED_SAMPLES),
+                    confirmed_samples: samples.len() as u64,
+                })?;
+            }
+            worker.call(Request::Finalize)?;
+        }
+        Ok(())
+    })();
+    Ok((true, inference.is_ok()))
+}
+
 /// Preserve process-loss classification across the startup handshake without
 /// turning model, protocol or integrity errors into automatic retries.
 #[derive(Debug)]

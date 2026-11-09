@@ -2404,6 +2404,7 @@ dependencies = [
  "chrono",
  "fs2",
  "hound",
+ "ring",
  "rusqlite",
  "serde",
  "serde_json",
@@ -2411,6 +2412,7 @@ dependencies = [
  "tempfile",
  "uuid",
  "wasapi",
+ "zeroize",
  "zip",
 ]
 

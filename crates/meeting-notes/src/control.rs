@@ -11,9 +11,19 @@ pub fn new_job_id() -> String {
 #[derive(Clone, Debug, Default)]
 pub struct AnalysisControl {
     cancelled: Arc<AtomicBool>,
+    model_preparations: Arc<AtomicU64>,
     response_bytes: Arc<AtomicU64>,
     validation_retries: Arc<AtomicU64>,
     last_response: Arc<Mutex<Option<std::time::Instant>>>,
+}
+
+/// Ends the visible model preparation phase even when the provider returns an error.
+pub(crate) struct ModelPreparation<'a>(&'a AtomicU64);
+
+impl Drop for ModelPreparation<'_> {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::Release);
+    }
 }
 
 #[derive(Debug)]
@@ -26,6 +36,15 @@ impl std::fmt::Display for AnalysisCancelled {
 impl std::error::Error for AnalysisCancelled {}
 
 impl AnalysisControl {
+    pub(crate) fn begin_model_preparation(&self) -> ModelPreparation<'_> {
+        self.model_preparations.fetch_add(1, Ordering::Release);
+        ModelPreparation(&self.model_preparations)
+    }
+
+    pub fn preparing_model(&self) -> bool {
+        self.model_preparations.load(Ordering::Acquire) != 0
+    }
+
     pub(crate) fn begin_workspace_update(&self) {
         self.validation_retries.store(0, Ordering::Release);
     }
@@ -90,4 +109,27 @@ pub struct AnalysisProgress {
     pub total_batches: usize,
     pub confirmed_tasks: usize,
     pub total_tasks: usize,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn model_preparation_is_shared_and_cleared_when_work_ends() {
+        let control = AnalysisControl::default();
+        let observer = control.clone();
+        assert!(!observer.preparing_model());
+        {
+            let _preparation = control.begin_model_preparation();
+            assert!(observer.preparing_model());
+            {
+                let _other = control.begin_model_preparation();
+                observer.cancel();
+            }
+            assert!(observer.preparing_model());
+        }
+        assert!(!observer.preparing_model());
+        assert!(observer.is_cancelled());
+    }
 }

@@ -32,6 +32,13 @@ pub struct LiveSource {
     pub text: String,
 }
 impl LiveSource {
+    /// Check the current text at this exact chunk, including prior identical wording elsewhere.
+    pub fn matches_transcript(&self, text: &str) -> bool {
+        chunks(text)
+            .into_iter()
+            .any(|(index, value)| index == self.chunk && value == self.text)
+    }
+
     pub fn as_source(&self) -> Source {
         Source {
             id: self.id.clone(),

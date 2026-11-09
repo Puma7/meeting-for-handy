@@ -5,6 +5,7 @@ mod cli;
 mod credential_commands;
 mod credential_service;
 mod deletion_commands;
+mod history_questions;
 mod library_commands;
 mod library_service;
 mod live_commands;
@@ -18,7 +19,9 @@ mod notes_service;
 mod operations;
 mod path_selection;
 mod retention_commands;
+mod sealed_commands;
 mod session_service;
+mod setup_probe;
 mod source_audio;
 mod speaker_check_archive;
 mod speaker_commands;
@@ -171,6 +174,7 @@ struct Service {
     speaker_jobs: Arc<speaker_jobs::Jobs>,
     maintenance_jobs: Arc<library_service::Jobs>,
     deletion_previews: deletion_commands::Previews,
+    sealed_backups: sealed_commands::Control,
 }
 impl Service {
     /// The fast meter poll never waits behind a long application-state operation,
@@ -251,6 +255,7 @@ impl Service {
             speaker_jobs: Arc::new(speaker_jobs::Jobs::default()),
             maintenance_jobs: Arc::new(library_service::Jobs::default()),
             deletion_previews: deletion_commands::Previews::default(),
+            sealed_backups: sealed_commands::Control::default(),
         })
     }
     fn lock(&self) -> AppResult<MutexGuard<'_, Inner>> {
@@ -1123,7 +1128,7 @@ pub fn run() {
         if std::env::args().skip(1).eq(["--agent", "serve"]) { agent::start_stdio(Arc::clone(&service)).map_err(std::io::Error::other)?; }
         tauri::async_runtime::spawn_blocking(move|| {let _=service.refresh(None);});
         Ok(())
-    }).invoke_handler(tauri::generate_handler![deletion_commands::preview_meeting_erasure,deletion_commands::get_meeting_erasure_preview,deletion_commands::erase_meeting_now,deletion_commands::list_pending_erasures,path_selection::choose_handy_executable,path_selection::choose_ffmpeg_executable,path_selection::choose_legacy_manifest,app_commands::get_app_state,app_commands::get_audio_levels,app_commands::get_system_load,retention_commands::list_audio_copies,retention_commands::transcribe_audio_copy,retention_commands::compact_archive,retention_commands::list_archives,retention_commands::list_unfinished_deletions,retention_commands::resume_permanent_deletion,retention_commands::restore_archive,retention_commands::apply_retention,retention_commands::get_retention_policy,retention_commands::save_retention_policy,retention_commands::preview_retention,retention_commands::get_retention_plan,retention_commands::get_maintenance_progress,retention_commands::cancel_maintenance,library_commands::edit_meeting_metadata,library_commands::search_meetings,library_commands::rebuild_search_index,library_commands::get_library_progress,library_commands::cancel_library_job,speaker_commands::archive_speaker_model_checks,speaker_commands::check_speaker_model,speaker_commands::get_speaker_labels,speaker_commands::save_speaker_labels,speaker_commands::start_speaker_experiment,speaker_commands::get_speaker_progress,speaker_commands::get_speaker_sections,speaker_commands::cancel_speaker_experiment,update_commands::check_for_update,update_commands::download_update,update_commands::get_update_progress,update_commands::cancel_update,update_commands::install_update,update_commands::open_release_page,app_commands::refresh_handy,app_commands::list_devices,app_commands::start_meeting,app_commands::stop_meeting,app_commands::set_capture_paused,app_commands::set_microphone_muted,app_commands::reconnect_microphone,app_commands::agent_decide_recording,app_commands::agent_revoke,app_commands::list_meetings,app_commands::get_meeting,app_commands::resume_meeting,app_commands::import_legacy,app_commands::copy_text,app_commands::open_meeting_folder,app_commands::export_transcript,app_commands::generate_notes,app_commands::list_analyses,notes_commands::list_unfinished_analyses,notes_commands::list_text_models,notes_commands::get_notes_progress,notes_commands::cancel_notes,notes_commands::notes_markdown,live_commands::list_workspace_history,live_commands::read_workspace_history,live_commands::start_live_notes,live_commands::stop_live_notes,live_commands::refresh_live_notes,live_commands::set_live_notes_interval,live_commands::get_live_notes,live_commands::set_workspace_context,source_audio::get_source_audio,live_commands::local_model_setup,live_commands::pull_ollama_model,live_commands::get_model_pull_progress,live_commands::cancel_model_pull,template_commands::list_templates,template_commands::save_templates,template_commands::import_templates,credential_commands::credential_status,credential_commands::save_credential,credential_commands::remove_credential])
+    }).invoke_handler(tauri::generate_handler![deletion_commands::preview_meeting_erasure,deletion_commands::get_meeting_erasure_preview,deletion_commands::erase_meeting_now,deletion_commands::list_pending_erasures,path_selection::choose_handy_executable,path_selection::choose_ffmpeg_executable,path_selection::choose_legacy_manifest,app_commands::get_app_state,setup_probe::check_meeting_setup,sealed_commands::create_encrypted_backup,sealed_commands::recover_encrypted_backup,sealed_commands::cancel_encrypted_backup,app_commands::get_audio_levels,app_commands::get_system_load,retention_commands::list_audio_copies,retention_commands::transcribe_audio_copy,retention_commands::compact_archive,retention_commands::list_archives,retention_commands::list_unfinished_deletions,retention_commands::resume_permanent_deletion,retention_commands::restore_archive,retention_commands::apply_retention,retention_commands::get_retention_policy,retention_commands::save_retention_policy,retention_commands::preview_retention,retention_commands::get_retention_plan,retention_commands::get_maintenance_progress,retention_commands::cancel_maintenance,library_commands::edit_meeting_metadata,library_commands::search_meetings,history_questions::ask_meeting_history,library_commands::rebuild_search_index,library_commands::get_library_progress,library_commands::cancel_library_job,speaker_commands::archive_speaker_model_checks,speaker_commands::check_speaker_model,speaker_commands::get_speaker_labels,speaker_commands::save_speaker_labels,speaker_commands::start_speaker_experiment,speaker_commands::get_speaker_progress,speaker_commands::get_speaker_sections,speaker_commands::cancel_speaker_experiment,update_commands::check_for_update,update_commands::download_update,update_commands::get_update_progress,update_commands::cancel_update,update_commands::install_update,update_commands::open_release_page,app_commands::refresh_handy,app_commands::list_devices,app_commands::start_meeting,app_commands::stop_meeting,app_commands::set_capture_paused,app_commands::set_microphone_muted,app_commands::reconnect_microphone,app_commands::agent_decide_recording,app_commands::agent_revoke,app_commands::list_meetings,app_commands::get_meeting,app_commands::resume_meeting,app_commands::import_legacy,app_commands::copy_text,app_commands::open_meeting_folder,app_commands::export_transcript,app_commands::generate_notes,app_commands::list_analyses,notes_commands::list_unfinished_analyses,notes_commands::list_text_models,notes_commands::get_notes_progress,notes_commands::cancel_notes,notes_commands::notes_markdown,live_commands::list_workspace_history,live_commands::read_workspace_history,live_commands::export_workspace_results,live_commands::start_live_notes,live_commands::stop_live_notes,live_commands::refresh_live_notes,live_commands::set_live_notes_interval,live_commands::get_live_notes,live_commands::set_workspace_context,source_audio::get_source_audio,source_audio::get_transcript_audio,live_commands::local_model_setup,live_commands::pull_ollama_model,live_commands::get_model_pull_progress,live_commands::cancel_model_pull,template_commands::list_templates,template_commands::save_templates,template_commands::import_templates,credential_commands::credential_status,credential_commands::save_credential,credential_commands::remove_credential])
     .on_window_event(|window,event|{if let tauri::WindowEvent::CloseRequested{api,..}=event{let service=window.state::<Arc<Service>>();let blocked=service.lock().is_ok_and(|inner|inner.transitioning||inner.active.as_ref().is_some_and(|a|a.capture.is_some()));if blocked{api.prevent_close();if let Ok(mut inner)=service.lock(){inner.error=Some(if inner.transitioning { "Ein Vorgang läuft noch. Bitte warten, bis Audioabschluss und Verarbeitung beendet sind.".into() } else { "Bitte zuerst „Meeting beenden“ wählen. Audio wird gesichert und offene Abschnitte werden verarbeitet.".into() });}let _=window.emit("recording-close-blocked",());}}})
     .run(tauri::generate_context!()).expect("HandyMeeting konnte nicht gestartet werden.");
 }

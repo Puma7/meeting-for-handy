@@ -619,7 +619,7 @@ it("never attaches a revoked preview URL when retrying a media failure", async (
     });
   const load = vi.fn(async () => new ArrayBuffer(44));
   const view = render(
-    <SourceAudioPreview file="synthetic.wav" load={load} offsetSeconds={2} />,
+    <SourceAudioPreview sourceId="synthetic-source" load={load} />,
   );
   try {
     fireEvent.click(

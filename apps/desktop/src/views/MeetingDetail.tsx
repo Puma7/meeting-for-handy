@@ -27,6 +27,8 @@ export default function MeetingDetail({
   speakers,
   workspace,
   workspaceSwitcher,
+  questions,
+  encryptedBackup,
 }: {
   meeting: Meeting;
   locale: Locale;
@@ -44,6 +46,8 @@ export default function MeetingDetail({
   speakers?: Record<string, string>;
   workspace?: ReactNode;
   workspaceSwitcher?: ReactNode;
+  questions?: ReactNode;
+  encryptedBackup?: ReactNode;
 }) {
   const parts = [...meeting.parts]
     .sort(
@@ -114,6 +118,8 @@ export default function MeetingDetail({
         />
       </div>
       <SessionWarnings warnings={meeting.warnings} locale={locale} t={t} />
+      {encryptedBackup}
+      {questions}
       {workspace ?? (
         <TranscriptBody
           parts={parts}

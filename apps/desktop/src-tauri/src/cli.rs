@@ -52,6 +52,7 @@ pub(crate) fn run_cli(args: &[String]) -> Option<AppResult<()>> {
         Some("--asr-worker") => Some(asr::worker_main(&args[1..])),
         Some("--speaker-worker") => Some(speaker_jobs::worker_main(&args[1..])),
         Some("--synthetic-smoke") => Some(asr::synthetic_smoke(&args[1..])),
+        Some("--setup-check-synthetic") => Some(setup_probe::check_cli(&args[1..])),
         Some("--list-text-models") => Some((|| {
             if args.len() != 2 {
                 return Err("Genau eine lokale KI-Adresse wird benötigt.".into());

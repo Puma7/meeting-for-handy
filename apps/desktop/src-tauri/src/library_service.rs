@@ -1,6 +1,6 @@
 //! Derived search jobs do not own capture, ASR workers or original transcript writers.
 use meeting_core::{
-    library::{LibraryIndex, SearchPage},
+    library::{LibraryIndex, SearchPage, SearchScope},
     metadata, SessionData,
 };
 use serde::Serialize;
@@ -310,8 +310,9 @@ pub(super) fn search(
     query: &str,
     offset: u64,
     limit: u32,
+    scope: &SearchScope,
 ) -> Result<SearchPage, String> {
-    LibraryIndex::open(root).and_then(|index|index.search(query,offset,limit)).map_err(|_|"Search is unavailable. Update the local index; original sessions are preserved. / Suche nicht verfügbar. Bitte den lokalen Suchindex aktualisieren.".into())
+    LibraryIndex::open(root).and_then(|index|index.search_scoped(query,offset,limit,scope)).map_err(|_|"Search is unavailable. Update the local index; original sessions are preserved. / Suche nicht verfügbar. Bitte den lokalen Suchindex aktualisieren.".into())
 }
 /// Retain index admission from source revalidation through upsert, so a maintenance
 /// snapshot delayed past erasure cannot restore content to a newly created cache.

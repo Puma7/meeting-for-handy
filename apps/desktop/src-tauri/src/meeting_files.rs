@@ -359,7 +359,19 @@ pub(super) fn save_transcript_format(
             "Transkriptexport überschreitet 32 MiB. / Transcript export exceeds 32 MiB.".into(),
         );
     }
-    let exports = export_directory(&folder)?;
+    save_export_bytes(&folder, "transcript", extension, text.as_bytes())
+}
+
+pub(crate) fn save_export_bytes(
+    folder: &Path,
+    prefix: &str,
+    extension: &str,
+    bytes: &[u8],
+) -> AppResult<String> {
+    if bytes.len() > 32 * 1024 * 1024 {
+        return Err("Der Export überschreitet 32 MiB. / Export exceeds 32 MiB.".into());
+    }
+    let exports = export_directory(folder)?;
     static SEQUENCE: AtomicU64 = AtomicU64::new(0);
     let at = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -367,7 +379,7 @@ pub(super) fn save_transcript_format(
         .as_millis();
     for _ in 0..32 {
         let name = format!(
-            "transcript-{at}-{}.{extension}",
+            "{prefix}-{at}-{}.{extension}",
             SEQUENCE.fetch_add(1, Ordering::Relaxed)
         );
         // A failed write remains explicitly pending; only synced complete text
@@ -378,7 +390,7 @@ pub(super) fn save_transcript_format(
             Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
             Err(_) => return Err("Textexport konnte nicht angelegt werden. Speicherplatz und Ordnerrechte prüfen. / Could not create transcript export; check free space and folder permissions.".into()),
         };
-        file.write_all(text.as_bytes()).and_then(|_| file.sync_all()).map_err(|_| "Textexport nicht vollständig gespeichert. Vorhandene Originale bleiben erhalten. / Export was not fully saved; originals are retained.")?;
+        file.write_all(bytes).and_then(|_| file.sync_all()).map_err(|_| "Textexport nicht vollständig gespeichert. Vorhandene Originale bleiben erhalten. / Export was not fully saved; originals are retained.")?;
         drop(file);
         publish_export(&path, &exports.join(&name))?;
         // Only our own redundant temporary link is removed after publication.

@@ -17,6 +17,7 @@ mod audio;
 mod deletion;
 mod immediate;
 mod restore;
+pub mod sealed;
 pub use audio::{archive_audio, read_archived_transcript, restore_audio};
 pub use deletion::{
     delete_archived_meeting, deletion_fingerprint, resume_deletion, unfinished_deletions,

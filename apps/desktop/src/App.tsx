@@ -7,7 +7,12 @@ import MeetingLabels from "./views/MeetingLabels";
 import SpeakerLabels from "./views/SpeakerLabels";
 import SpeakerExperiments from "./views/SpeakerExperiments";
 import { SPEAKER_NAME_TEMPLATE } from "./speaker-proposals";
-import HistorySearch from "./views/HistorySearch";
+import HistorySearch, {
+  initialHistorySearch,
+  type HistoryQuestionReturn,
+} from "./views/HistorySearch";
+import HistoryQuestions from "./views/HistoryQuestions";
+import EncryptedBackup from "./views/EncryptedBackup";
 import LibraryStatus from "./views/LibraryStatus";
 import UpdatePanel from "./views/UpdatePanel";
 import SettingsView from "./views/SettingsView";
@@ -19,6 +24,7 @@ import ResumeAnalysisDialog from "./views/ResumeAnalysisDialog";
 import Sidebar, { type Page } from "./views/Sidebar";
 import RecordingStatus from "./views/RecordingStatus";
 import MeetingView from "./views/MeetingView";
+import CalendarPreparation from "./views/CalendarPreparation";
 import LiveNotesPanel, {
   INTERVAL_CHOICES,
   type LivePreferences,
@@ -81,6 +87,7 @@ type MeetingOpenRequest = {
   id: string;
   nextPage: Page;
   source: string | null;
+  expectedQuote: string | null;
   epoch: number;
   selection: number;
 };
@@ -213,6 +220,10 @@ export default function App({ api = desktopApi }: { api?: DesktopApi }) {
     [theme, setTheme] = useState<Theme>(preferences.theme);
   const t = locale === "de" ? de : en,
     x = locale === "de" ? extraDe : extraEn;
+  const historySearchState = useRef(initialHistorySearch);
+  const historyQuestionReturn = useRef<HistoryQuestionReturn | undefined>(
+    undefined,
+  );
   const [page, setPage] = useState<Page>("meeting"),
     [app, setApp] = useState<AppState | null>(null),
     [connected, setConnected] = useState(false),
@@ -1291,6 +1302,13 @@ export default function App({ api = desktopApi }: { api?: DesktopApi }) {
     invalidateMeetingSelection();
     notesJob.forget(id);
     erasureBlocked.current.add(id);
+    if (
+      historyQuestionReturn.current?.answer.citations.some(
+        (citation) => citation.meetingId === id,
+      )
+    ) {
+      historyQuestionReturn.current = undefined;
+    }
     ++erasureEpoch.current;
     ++requestSequence.current;
     ++notesLoadSequence.current;
@@ -1409,6 +1427,7 @@ export default function App({ api = desktopApi }: { api?: DesktopApi }) {
     id: string,
     nextPage: Page = "detail",
     source: string | null = null,
+    expectedQuote: string | null = null,
   ) {
     if (nextPage === "notes") {
       await openNotesFor(id);
@@ -1422,6 +1441,7 @@ export default function App({ api = desktopApi }: { api?: DesktopApi }) {
       id,
       nextPage,
       source,
+      expectedQuote,
       epoch: erasureEpoch.current,
       selection: meetingSelectionEpoch.current,
     };
@@ -1430,6 +1450,7 @@ export default function App({ api = desktopApi }: { api?: DesktopApi }) {
         active.id === id &&
         active.nextPage === nextPage &&
         active.source === source &&
+        active.expectedQuote === expectedQuote &&
         active.epoch === request.epoch &&
         active.selection === request.selection
           ? null
@@ -1462,6 +1483,23 @@ export default function App({ api = desktopApi }: { api?: DesktopApi }) {
               return;
             }
             if (!isCurrentSelection() || pendingMeetingRef.current) return;
+            if (requested.expectedQuote) {
+              const parts = item.parts.filter(
+                (part) => part.file === requested.source,
+              );
+              if (
+                item.id !== requested.id ||
+                parts.length !== 1 ||
+                parts[0].status !== "complete" ||
+                !parts[0].text?.includes(requested.expectedQuote)
+              ) {
+                throw new Error(
+                  locale === "de"
+                    ? "Die Originalstelle hat sich geändert. Stelle die Frage erneut."
+                    : "The original passage has changed. Ask the question again.",
+                );
+              }
+            }
             // A search hit applies only to the meeting it opened; other opens clear it.
             setSearchSource(
               requested.source
@@ -2531,6 +2569,16 @@ export default function App({ api = desktopApi }: { api?: DesktopApi }) {
         />
         {page === "meeting" && (
           <MeetingView
+            calendarPreparation={
+              <CalendarPreparation
+                locale={locale}
+                disabled={busy}
+                onTitle={setTitle}
+                onCopyAgenda={(agenda) => api.copyText(agenda)}
+                templates={templates}
+                onTemplate={setTemplateId}
+              />
+            }
             t={t}
             x={x}
             app={app}
@@ -2635,6 +2683,42 @@ export default function App({ api = desktopApi }: { api?: DesktopApi }) {
             liveNotes={livePanel(false)}
             refreshHandy={() => void action(() => refreshModels(false))}
             refreshDevices={() => void action(refreshDevices)}
+            textModelCheck={{
+              state:
+                mode === "cloud"
+                  ? "cloud"
+                  : !endpoint.trim() || !textModel.trim()
+                    ? "unconfigured"
+                    : localTextModels.loading
+                      ? "checking"
+                      : localTextModels.error
+                        ? "unavailable"
+                        : !localTextModels.loaded
+                          ? "unchecked"
+                          : localTextModels.models.includes(textModel.trim())
+                            ? "found"
+                            : "missing",
+              check: () => void localTextModels.refresh(),
+              probeKey: JSON.stringify([modelId, mode, endpoint, textModel]),
+              probe: api.checkMeetingSetup
+                ? () =>
+                    api.checkMeetingSetup!({
+                      modelId,
+                      ...(mode === "local" &&
+                      endpoint.trim() &&
+                      textModel.trim()
+                        ? {
+                            text: {
+                              endpoint,
+                              model: textModel,
+                              apiKey: useSavedKey ? undefined : apiKey,
+                              useSavedKey,
+                            },
+                          }
+                        : {}),
+                    })
+                : undefined,
+            }}
             resume={() =>
               void action(async () => {
                 if (!meeting) return;
@@ -2651,6 +2735,52 @@ export default function App({ api = desktopApi }: { api?: DesktopApi }) {
         {page === "detail" && meeting && (
           <MeetingDetail
             meeting={meeting}
+            encryptedBackup={
+              api.createEncryptedBackup &&
+              !meeting.id.startsWith("legacy-") &&
+              !meeting.readOnly && (
+                <EncryptedBackup
+                  key={meeting.id}
+                  locale={locale}
+                  disabled={busy || recording || catchingUp}
+                  run={(passphrase) =>
+                    api.createEncryptedBackup!(meeting.id, passphrase)
+                  }
+                  cancel={api.cancelEncryptedBackup}
+                />
+              )
+            }
+            questions={
+              api.askMeetingHistory &&
+              !meeting.id.startsWith("legacy-") && (
+                <HistoryQuestions
+                  key={meeting.id}
+                  ask={api.askMeetingHistory}
+                  locale={locale}
+                  invalidDates={false}
+                  meetingId={meeting.id}
+                  model={
+                    mode === "local" && endpoint.trim() && textModel.trim()
+                      ? {
+                          endpoint,
+                          model: textModel,
+                          apiKey: useSavedKey ? undefined : apiKey,
+                          useSavedKey,
+                        }
+                      : undefined
+                  }
+                  onOpen={(hit) => {
+                    if (hit.meetingId === meeting.id)
+                      void openMeeting(
+                        hit.meetingId,
+                        "detail",
+                        hit.sourceId,
+                        hit.quote,
+                      );
+                  }}
+                />
+              )
+            }
             workspaceSwitcher={classicViewSwitcher}
             onErase={
               canEraseMeeting ? () => openMeetingErasure(meeting) : undefined
@@ -2691,6 +2821,38 @@ export default function App({ api = desktopApi }: { api?: DesktopApi }) {
           <HistorySearch
             api={api}
             locale={locale}
+            initialState={historySearchState.current}
+            historyModel={
+              mode === "local" && endpoint.trim() && textModel.trim()
+                ? {
+                    endpoint,
+                    model: textModel,
+                    apiKey: useSavedKey ? undefined : apiKey,
+                    useSavedKey,
+                  }
+                : undefined
+            }
+            questionReturn={historyQuestionReturn.current}
+            onOpenCitation={(hit, result) => {
+              historyQuestionReturn.current = result;
+              void openMeeting(
+                hit.meetingId,
+                "detail",
+                hit.sourceId,
+                hit.quote,
+              );
+            }}
+            onStateChange={(state) => {
+              const previous = historySearchState.current;
+              if (
+                previous.from !== state.from ||
+                previous.through !== state.through ||
+                previous.pinnedOnly !== state.pinnedOnly
+              ) {
+                historyQuestionReturn.current = undefined;
+              }
+              historySearchState.current = state;
+            }}
             imported={history.filter((item) => item.id.startsWith("legacy-"))}
             nativeMeetings={history.filter(
               (item) => !item.id.startsWith("legacy-"),

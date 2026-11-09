@@ -2009,6 +2009,68 @@ describe("template structure", () => {
 });
 
 describe("workspace navigation (synthetic IPC)", () => {
+  it("opens the verified original and keeps the answer when returning to check other citations", async () => {
+    localStorage.setItem(
+      "handymeeting.rust.live-notes.v1",
+      JSON.stringify({
+        endpoint: "http://127.0.0.1:1235/v1/",
+        model: "synthetic-text-model",
+      }),
+    );
+    const api = fakeApi(meeting);
+    api.searchMeetings = vi.fn();
+    api.askMeetingHistory = vi.fn().mockResolvedValue({
+      searchedPassages: 1,
+      citations: [
+        {
+          meetingId: meeting.id,
+          meetingTitle: meeting.title,
+          sourceId: meeting.parts[0].file,
+          startMs: 0,
+          quote: meeting.parts[0].text!,
+        },
+        {
+          meetingId: meeting.id,
+          meetingTitle: meeting.title,
+          sourceId: meeting.parts[0].file,
+          startMs: 0,
+          quote: "Ein alter Wortlaut aus einem früheren Transkriptstand.",
+        },
+      ],
+    });
+    render(<App api={api} />);
+    await ready();
+    await userEvent.click(screen.getByRole("button", { name: "Historie" }));
+    await userEvent.click(screen.getByText("Meetings befragen"));
+    await userEvent.type(
+      screen.getByLabelText("Frage an deine Meetings"),
+      "Was wurde entschieden?",
+    );
+    await userEvent.click(
+      screen.getByRole("button", { name: "Lokal beantworten" }),
+    );
+    const links = await screen.findAllByRole("button", {
+      name: "Originalstelle öffnen",
+    });
+    await userEvent.click(links[0]);
+    await screen.findByRole("heading", { name: "Sitzungsdetails" });
+    expect(document.querySelector("[data-highlighted]")?.textContent).toContain(
+      meeting.parts[0].text,
+    );
+    await userEvent.click(screen.getByRole("button", { name: "Historie" }));
+    const retained = screen.getAllByRole("button", {
+      name: "Originalstelle öffnen",
+    });
+    await userEvent.click(retained[1]);
+    expect(api.askMeetingHistory).toHaveBeenCalledTimes(1);
+    await screen.findByText(
+      "Die Originalstelle hat sich geändert. Stelle die Frage erneut.",
+    );
+    expect(
+      screen.queryByRole("heading", { name: "Sitzungsdetails" }),
+    ).toBeNull();
+  });
+
   it("keeps an explicit search source visible after resetting the previous page", async () => {
     const consoleError = vi.spyOn(console, "error");
     const api = fakeApi(meeting);
@@ -2044,6 +2106,17 @@ describe("workspace navigation (synthetic IPC)", () => {
       await userEvent.type(screen.getByRole("searchbox"), "Quelle");
       await screen.findByText(meeting.parts[0].text!);
       expect(api.searchMeetings).toHaveBeenCalledWith("Quelle", 0, 25);
+      await userEvent.click(
+        screen.getByRole("checkbox", { name: "Nur Treffer im Transkript" }),
+      );
+      await waitFor(() =>
+        expect(api.searchMeetings).toHaveBeenLastCalledWith(
+          "Quelle",
+          0,
+          25,
+          expect.objectContaining({ pinnedOnly: false, transcriptOnly: true }),
+        ),
+      );
       const main = screen.getByRole("main");
       main.scrollTop = 747;
       await userEvent.click(
@@ -2055,6 +2128,17 @@ describe("workspace navigation (synthetic IPC)", () => {
         meeting.parts[0].text,
       );
       expect(main.scrollTop).toBe(300);
+      await userEvent.click(screen.getByRole("button", { name: "Historie" }));
+      expect((screen.getByRole("searchbox") as HTMLInputElement).value).toBe(
+        "Quelle",
+      );
+      expect(
+        (
+          screen.getByRole("checkbox", {
+            name: "Nur Treffer im Transkript",
+          }) as HTMLInputElement
+        ).checked,
+      ).toBe(true);
       expect(consoleError).not.toHaveBeenCalled();
     } finally {
       Element.prototype.scrollIntoView = previousScroll;

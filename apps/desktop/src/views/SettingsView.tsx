@@ -4,6 +4,7 @@ import type { MessageKey } from "../i18n";
 import RetentionPanel from "./RetentionPanel";
 import { useState, type ReactNode } from "react";
 import UpdatePanel from "./UpdatePanel";
+import EncryptedBackup from "./EncryptedBackup";
 
 /**
  * Presents read-only program paths and delegates native selection/import to the parent.
@@ -240,6 +241,18 @@ export default function SettingsView({
       </section>
       <section className="settings-group" id="settings-data" tabIndex={-1}>
         <h2>{de ? "Daten und Wartung" : "Data and maintenance"}</h2>
+        {api.recoverEncryptedBackup && (
+          <EncryptedBackup
+            locale={locale}
+            restore
+            disabled={unavailable}
+            run={async (credential, kind) => {
+              const file = await api.recoverEncryptedBackup!(credential, kind);
+              return file === null ? null : { file };
+            }}
+            cancel={api.cancelEncryptedBackup}
+          />
+        )}
         <details className="settings-disclosure">
           <summary
             title={

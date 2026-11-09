@@ -23,6 +23,7 @@ import SessionWarnings from "./SessionWarnings";
 import MeetingFiles from "./MeetingFiles";
 import RecordingControls from "./RecordingControls";
 import AudioSources from "./AudioSources";
+import SetupProbe from "./SetupProbe";
 type Props = {
   t: Record<MessageKey, string>;
   x: Record<keyof typeof extraDe, string>;
@@ -65,6 +66,19 @@ type Props = {
   refreshHandy: () => void;
   /** Re-reads the audio devices, for example after connecting a headset. */
   refreshDevices?: () => void;
+  textModelCheck?: {
+    state:
+      | "unconfigured"
+      | "cloud"
+      | "unchecked"
+      | "checking"
+      | "found"
+      | "missing"
+      | "unavailable";
+    check: () => void;
+    probe?: () => ReturnType<NonNullable<DesktopApi["checkMeetingSetup"]>>;
+    probeKey?: string;
+  };
   start: () => Promise<void>;
   stop: () => Promise<void>;
   savedByTrack: (track: "system" | "microphone") => number;
@@ -74,6 +88,7 @@ type Props = {
   liveNotes?: ReactNode;
   workspace?: ReactNode;
   workspaceSwitcher?: ReactNode;
+  calendarPreparation?: ReactNode;
   /** Only the live summary is shown; the transcript stays available behind a toggle. */
   liveFocus?: boolean;
   onLiveFocus?: (focus: boolean) => void;
@@ -122,6 +137,7 @@ export default function MeetingView({
   setMicEnabled,
   refreshHandy,
   refreshDevices,
+  textModelCheck,
   start,
   stop,
   savedByTrack,
@@ -130,10 +146,43 @@ export default function MeetingView({
   liveNotes,
   workspace,
   workspaceSwitcher,
+  calendarPreparation,
   liveFocus = false,
   onLiveFocus,
 }: Props) {
   const [setupOpen, setSetupOpen] = useState(!meeting && !recording);
+  const de = locale === "de";
+  const selectedModel = models.find(({ id }) => id === modelId);
+  const audioDevicesReady =
+    connected &&
+    devices.some(({ id, source }) => id === systemId && source === "system") &&
+    (!micEnabled ||
+      devices.some(
+        ({ id, source }) => id === micId && source === "microphone",
+      ));
+  const recognitionReady = Boolean(
+    connected &&
+      selectedModel?.isDownloaded &&
+      (selectedModel.supportsStreaming || selectedModel.supportsBatch) &&
+      !selectedModel.compatibilityError,
+  );
+  const modelStatus = {
+    unconfigured: de
+      ? "Optional · kein Modell ausgewählt"
+      : "Optional · no model selected",
+    cloud: de
+      ? "Cloud ausgewählt · Freigabe je Auswertung"
+      : "Cloud selected · consent per analysis",
+    unchecked: de ? "Lokalen Dienst prüfen" : "Check the local service",
+    checking: de ? "Dienst wird geprüft …" : "Checking service …",
+    found: de ? "Ausgewähltes Modell gefunden" : "Selected model found",
+    missing: de
+      ? "Ausgewähltes Modell fehlt im Dienst"
+      : "Selected model is missing from the service",
+    unavailable: de
+      ? "Dienst nicht erreichbar · Einstellungen prüfen"
+      : "Service unavailable · check settings",
+  };
   const agentOwnsCapture = Boolean(
     app?.agent?.activeCapture &&
       app.agent.ownedSessionId === app.activeMeeting?.id,
@@ -232,7 +281,64 @@ export default function MeetingView({
               {models.find((model) => model.id === modelId)?.name ?? t.choose}
             </span>
           </summary>
+          {setupOpen && !recording && textModelCheck && (
+            <div
+              className="setup-readiness"
+              aria-label={de ? "Einrichtung prüfen" : "Check setup"}
+            >
+              <ul>
+                <li>
+                  Audio ·{" "}
+                  {audioDevicesReady
+                    ? de
+                      ? "Geräte erkannt"
+                      : "Devices found"
+                    : de
+                      ? "Aufnahmegeräte auswählen oder aktualisieren"
+                      : "Select or refresh recording devices"}
+                </li>
+                <li>
+                  {de ? "Transkription" : "Transcription"} ·{" "}
+                  {recognitionReady
+                    ? de
+                      ? "Handy-Modell verfügbar"
+                      : "Handy model available"
+                    : de
+                      ? "Kompatibles Handy-Modell auswählen"
+                      : "Select a compatible Handy model"}
+                </li>
+                <li role="status">
+                  {de ? "Textauswertung" : "Text analysis"} ·{" "}
+                  {modelStatus[textModelCheck.state]}
+                </li>
+              </ul>
+              {textModelCheck.state !== "cloud" &&
+                textModelCheck.state !== "unconfigured" && (
+                  <button
+                    type="button"
+                    className="secondary"
+                    disabled={
+                      !connected || busy || textModelCheck.state === "checking"
+                    }
+                    onClick={textModelCheck.check}
+                  >
+                    {de
+                      ? "Lokalen Textdienst prüfen"
+                      : "Check local text service"}
+                  </button>
+                )}
+              {textModelCheck.probe && (
+                <SetupProbe
+                  key={textModelCheck.probeKey}
+                  run={textModelCheck.probe}
+                  disabled={!recognitionReady || busy}
+                  locale={locale}
+                />
+              )}
+            </div>
+          )}
           <div className="setup-grid">
+            {!recording && !isStopping && calendarPreparation}
             <label className="full">
               {t.title}
               <input

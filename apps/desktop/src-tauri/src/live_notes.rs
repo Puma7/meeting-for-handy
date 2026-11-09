@@ -65,18 +65,21 @@ pub(crate) struct LiveNotesStatus {
     running: bool,
     refresh_requested: bool,
     waiting_for_transcript: bool,
+    waiting_for_memory: bool,
+    preparing_model: bool,
     error: Option<String>,
     pending_chars: usize,
     interval_ms: u64,
     next_update_in_ms: Option<u64>,
     last_trigger: Option<Trigger>,
-    view: Option<LiveView>,
+    pub(crate) view: Option<LiveView>,
 }
 
 struct Shared {
     status: String,
     update_started: Option<Instant>,
     waiting_for_transcript: bool,
+    waiting_for_memory: bool,
     error: Option<String>,
     pending_chars: usize,
     last_update: Instant,
@@ -146,6 +149,8 @@ impl Job {
             running,
             refresh_requested: running && self.manual.load(Ordering::Acquire),
             waiting_for_transcript: running && shared.waiting_for_transcript,
+            waiting_for_memory: running && shared.waiting_for_memory,
+            preparing_model: running && self.control.preparing_model(),
             error: shared.error.clone(),
             pending_chars: shared.pending_chars,
             interval_ms,
@@ -169,6 +174,8 @@ fn off(meeting_id: &str, view: Option<LiveView>, error: Option<String>) -> LiveN
         running: false,
         refresh_requested: false,
         waiting_for_transcript: false,
+        waiting_for_memory: false,
+        preparing_model: false,
         error,
         pending_chars: 0,
         interval_ms: DEFAULT_INTERVAL_MS,
@@ -184,6 +191,53 @@ pub(crate) struct LiveNotes(Mutex<Option<Job>>);
 fn clamp_interval(ms: Option<u64>) -> u64 {
     ms.unwrap_or(DEFAULT_INTERVAL_MS)
         .clamp(live::MIN_INTERVAL_MS, live::MAX_INTERVAL_MS)
+}
+
+/// Pause admission of new local workspace requests below 512 MiB of physical
+/// RAM. Resume at 1 GiB to avoid flipping phases around a single threshold.
+fn low_memory(previous: bool, available_bytes: Option<u64>) -> bool {
+    const MIB: u64 = 1024 * 1024;
+    available_bytes
+        .is_some_and(|available| available < if previous { 1024 * MIB } else { 512 * MIB })
+}
+
+/// Keep the standard six-second cooldown, giving the recorder more recovery
+/// time only when a local update exceeded its interval under scarce RAM.
+fn recording_cooldown(elapsed: Duration, interval_ms: u64, available: Option<u64>) -> Duration {
+    if elapsed > Duration::from_millis(interval_ms)
+        && available.is_some_and(|bytes| bytes < 2 * 1024 * 1024 * 1024)
+    {
+        return WORKSPACE_COOLDOWN * 2;
+    }
+    WORKSPACE_COOLDOWN
+}
+
+#[test]
+fn measured_slow_updates_back_off_only_under_recording_memory_pressure() {
+    let slow = Duration::from_secs(121);
+    assert_eq!(
+        recording_cooldown(slow, 120_000, Some(1 << 30)),
+        Duration::from_secs(12)
+    );
+    assert_eq!(
+        recording_cooldown(slow, 120_000, Some(2 << 30)),
+        WORKSPACE_COOLDOWN
+    );
+    assert_eq!(recording_cooldown(slow, 120_000, None), WORKSPACE_COOLDOWN);
+    assert_eq!(
+        recording_cooldown(Duration::from_secs(120), 120_000, Some(1 << 30)),
+        WORKSPACE_COOLDOWN
+    );
+}
+
+#[test]
+fn memory_wait_has_separate_entry_and_exit_thresholds() {
+    const MIB: u64 = 1024 * 1024;
+    assert!(low_memory(false, Some(511 * MIB)));
+    assert!(!low_memory(false, Some(512 * MIB)));
+    assert!(low_memory(true, Some(700 * MIB)));
+    assert!(!low_memory(true, Some(1024 * MIB)));
+    assert!(!low_memory(true, None));
 }
 
 fn live_root(service: &Service, meeting_id: &str) -> std::path::PathBuf {
@@ -691,6 +745,7 @@ impl LiveNotes {
             status: "starting".into(),
             update_started: None,
             waiting_for_transcript: false,
+            waiting_for_memory: false,
             error: None,
             pending_chars: live::pending_chars(&runner.pending(&texts)),
             last_update: Instant::now(),
@@ -863,6 +918,7 @@ impl Worker {
         let mut workspace_started = false;
         let mut finished_state: Option<SessionData> = None;
         let mut deferred_since: Option<Instant> = None;
+        let mut memory_deferred = false;
         self.set(|s| s.status = "waiting".into());
         while !self.control.is_cancelled() {
             let snapshot = match self
@@ -900,22 +956,29 @@ impl Worker {
                 .unwrap_or((Duration::ZERO, None));
             self.set(|s| s.pending_chars = pending_chars);
             let recognition_defer = snapshot.recognition_needs_priority();
-            // Local-model load admission verifies current memory at the actual load.
-            // A model already resident can process text without waiting for load headroom.
-            let defer = recognition_defer;
-            self.set(|s| s.waiting_for_transcript = recognition_defer);
-            if defer {
+            memory_deferred = workspace
+                && snapshot.active
+                && runner.run().mode == "local"
+                && low_memory(
+                    memory_deferred,
+                    crate::system_load::available_memory_bytes(),
+                );
+            self.set(|s| {
+                s.waiting_for_transcript = recognition_defer;
+                s.waiting_for_memory = memory_deferred;
+            });
+            if recognition_defer {
                 let since = deferred_since.get_or_insert_with(Instant::now);
-                if recognition_defer && since.elapsed() >= Duration::from_secs(120) {
+                if since.elapsed() >= Duration::from_secs(120) {
                     self.set(|s| s.error = Some(RECOGNITION_WAIT.into()));
                 }
-                // Keep manual requests queued, but never busy-spin on them while ASR
-                // catches up. No new model request competes with the recording worker.
+            } else if deferred_since.take().is_some() {
+                self.set(|s| clear_recognition_wait(&mut s.error));
+            }
+            if recognition_defer || memory_deferred {
+                // Leave manual work queued and allow an in-flight update to finish.
                 self.wait_with_manual(false);
                 continue;
-            }
-            if deferred_since.take().is_some() {
-                self.set(|s| clear_recognition_wait(&mut s.error));
             }
             let backing_off = retry_at.is_some_and(|at| Instant::now() < at);
             let manual = self.manual.swap(false, Ordering::AcqRel);
@@ -984,7 +1047,17 @@ impl Worker {
                     };
                     let result = runner.update(&input, trigger, &self.control);
                     let completed = Instant::now();
-                    let cooldown = workspace.then_some(completed + WORKSPACE_COOLDOWN);
+                    let interval_pause =
+                        if workspace && snapshot.active && runner.run().mode == "local" {
+                            recording_cooldown(
+                                completed.saturating_duration_since(update_started),
+                                interval,
+                                crate::system_load::available_memory_bytes(),
+                            )
+                        } else {
+                            WORKSPACE_COOLDOWN
+                        };
+                    let cooldown = workspace.then_some(completed + interval_pause);
                     if self.control.is_cancelled() {
                         break;
                     }
@@ -1015,6 +1088,7 @@ impl Worker {
                                         if workspace { completed } else { update_started };
                                     s.last_trigger = Some(trigger);
                                 }
+                                s.waiting_for_memory = interval_pause > WORKSPACE_COOLDOWN;
                                 s.retry_at = cooldown;
                                 s.view = Some(view);
                             });
@@ -1144,6 +1218,7 @@ mod tests {
             status: "starting".into(),
             update_started: None,
             waiting_for_transcript: false,
+            waiting_for_memory: false,
             error: None,
             pending_chars: 0,
             last_update: Instant::now(),
@@ -1285,6 +1360,7 @@ mod tests {
                 status: "updating".into(),
                 update_started: Some(Instant::now()),
                 waiting_for_transcript: false,
+                waiting_for_memory: false,
                 error: None,
                 pending_chars: 200,
                 last_update: Instant::now(),
@@ -1415,6 +1491,7 @@ mod tests {
                 status: "waiting".into(),
                 update_started: None,
                 waiting_for_transcript: false,
+                waiting_for_memory: false,
                 error: None,
                 pending_chars: 200,
                 last_update: Instant::now(),
@@ -1507,6 +1584,7 @@ mod tests {
                 status: "stopped".into(),
                 update_started: None,
                 waiting_for_transcript: false,
+                waiting_for_memory: false,
                 error: None,
                 pending_chars: 0,
                 last_update: Instant::now(),
@@ -1545,6 +1623,7 @@ mod tests {
             update_started: None,
             status: "waiting".into(),
             waiting_for_transcript: true,
+            waiting_for_memory: false,
             error: None,
             pending_chars: 250,
             last_update: Instant::now(),

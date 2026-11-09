@@ -32,6 +32,65 @@ fn answer(changes: serde_json::Value) -> String {
 }
 
 #[test]
+fn omitted_calendar_due_is_saved_from_the_literal_task_witness() {
+    for (language, quote, title, expected) in [
+        (
+            "de",
+            "Jana holt die Technik bis zum dreiundzwanzigsten neunten ab.",
+            "Technik abholen",
+            Some("dreiundzwanzigsten neunten"),
+        ),
+        (
+            "en",
+            "Jana will collect the equipment by September twenty-third.",
+            "Collect the equipment",
+            Some("September twenty-third"),
+        ),
+        (
+            "de",
+            "Leon bringt die Unterlagen bis zum vierundzwanzigsten neunten mit.",
+            "Unterlagen mitbringen",
+            Some("vierundzwanzigsten neunten"),
+        ),
+        (
+            "de",
+            "Mara besorgt die Getränke bis zum fünfundzwanzigsten neunten.",
+            "Getränke besorgen",
+            Some("fünfundzwanzigsten neunten"),
+        ),
+        (
+            "de",
+            "Leon holt die Unterlagen bis zum vierundzwanzigsten neunten ab.",
+            "Unterlagen mitbringen",
+            None,
+        ),
+        (
+            "en",
+            "I will write the guide, maybe by September twenty-third.",
+            "Write the guide",
+            None,
+        ),
+    ] {
+        let mut state = WorkspaceState::default();
+        let witness = source("s_task", 0, quote);
+        let mut req = request(&state, "tasks", &witness);
+        req.language = language.into();
+        validate::apply(
+            &mut state,
+            &req,
+            &answer(json!([{
+                "proposalId":"p_task","kind":"task","text":title,"due":null,
+                "status":"open","attention":"current",
+                "evidence":[{"sourceId":witness.id,"quote":quote}]
+            }])),
+        )
+        .unwrap();
+        assert_eq!(state.entities[0].due.as_deref(), expected, "{quote}");
+        assert_eq!(state.entities[0].evidence[0].quote, quote);
+    }
+}
+
+#[test]
 fn codex_review_translated_task_closes_from_original_language_evidence() {
     let mut state = WorkspaceState::default();
     let promise = source("s_pickup", 0, "Ich hole das Mikrofon ab.");
