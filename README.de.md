@@ -46,7 +46,7 @@ Du kannst die Frage auf bis zu zwölf ausgewählte Meetings begrenzen oder sie i
 
 Die Aufnahme-Einrichtung bietet eine synthetische Funktionsprobe für Audiospeicherung, Transkriptionssoftware und das gewählte lokale Textmodell. Über eine lokale Kalenderdatei kannst du einen Termin zur Vorbereitung wählen und Titel und Vorlage übernehmen. Der Aufnahmestart bleibt eine eigene Handlung.
 
-Unter Windows kannst du über **Einstellungen → Daten und Wartung → Sitzungsspeicher verschlüsseln** eine geprüfte Profilkopie auf einem lokalen NTFS-Laufwerk mit EFS erstellen. Wenn du die Kopie öffnest, speichert die App neue Sitzungen und den neu aufgebauten Suchindex verschlüsselt. Die vorhandenen Dateien und privaten Arbeitsbereichsentwürfe bleiben im Originalprofil erhalten. [Geschütztes Windows-Profil](docs/RUST_STORAGE.md#protected-windows-profile)
+Über **Einstellungen → Daten und Wartung → Sitzungsspeicher verschlüsseln** erstellst du eine geprüfte Kopie deines nativen Profils. Windows braucht dafür ein lokales NTFS-Laufwerk mit EFS. macOS verwendet ein verschlüsseltes Laufwerksabbild. Linux braucht das systemweit installierte `gocryptfs` und funktionierendes FUSE. Unter macOS und Linux legst du beim Erstellen eine Passphrase fest und gibst sie zum Öffnen erneut ein. Neue Sitzungen und der neu aufgebaute Suchindex liegen im geschützten Speicher. Die vorhandenen Dateien und privaten Arbeitsbereichsentwürfe bleiben im Originalprofil erhalten. [Geschützte Profile und Wiederherstellung](docs/RUST_STORAGE.md#encrypted-session-storage)
 
 Eine **verschlüsselte Kopie** einer einzelnen gespeicherten nativen Sitzung erstellst du in den Sitzungsdetails. Unter **Einstellungen → Daten und Wartung** stellst du sie mit der Passphrase oder dem separat angezeigten Wiederherstellungsschlüssel in einem separaten Profil wieder her. Bewahre beide Zugangsdaten getrennt von der Sicherung auf.
 
@@ -80,7 +80,7 @@ Siehe [Anbietervoraussetzungen, Referenzprüfung und Grenzen](docs/validation/lo
 - **Zwei Spuren sind keine Personenerkennung.** Namen werden nur nach deiner Bestätigung zugeordnet; optionale Sprecherexperimente liefern neutrale Kennungen je Abschnitt.
 - **Keine versteckte Aufnahme.** Lokale Agenten brauchen für jede Aufnahme eine sichtbare Freigabe und eine eigene Mikrofonfreigabe ([Agentenprotokoll](docs/RUST_AGENT_PROTOCOL.md)).
 
-Die Daten liegen im lokalen Anwendungsdatenordner `HandyMeeting/RustBeta` (Name aus Kompatibilitätsgründen beibehalten). Dateien sind nicht verschlüsselt; ein Synchronisierungsdienst kann sie hochladen.
+Das Standardprofil speichert lesbare Dateien im lokalen Anwendungsdatenordner `HandyMeeting/RustBeta` (Name aus Kompatibilitätsgründen beibehalten). Ein Synchronisierungsdienst mit Zugriff auf diesen Ordner kann sie hochladen.
 
 ## Im Handy-Ökosystem
 

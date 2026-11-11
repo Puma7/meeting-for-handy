@@ -1,5 +1,4 @@
-//! Migrate a local profile by copying its authoritative files to an EFS directory.
-//! The operating system protects writes made by the audio workers and SQLite too.
+//! Migrate authoritative profile files into storage that encrypts native writes.
 use super::{digest, metadata, operation_lock, publication_lease, reject_link};
 use crate::{storage, Result};
 use serde::Serialize;
@@ -12,6 +11,10 @@ use std::{
 
 #[cfg(test)]
 mod tests;
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+mod volume;
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+pub use volume::{migrate_volume, open_volume, MountedVolume};
 
 const MARKER: &str = "protected-profile.v1";
 const DIRECTORY_PREFIX: &str = "HandyMeeting-Protected-";
@@ -38,7 +41,23 @@ const UNAVAILABLE: &str = "Windows file encryption is unavailable for this folde
 const NOT_PROTECTED: &str = "The protected profile is missing or contains unencrypted files. Check the folder and your Windows encryption key. / Das geschützte Profil fehlt oder enthält unverschlüsselte Dateien. Bitte Ordner und Windows-Schlüssel prüfen.";
 
 pub fn supported() -> bool {
-    cfg!(target_os = "windows")
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    {
+        volume::available()
+    }
+    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+    {
+        cfg!(target_os = "windows")
+    }
+}
+
+pub fn provider_name() -> Option<&'static str> {
+    match std::env::consts::OS {
+        "windows" => Some("windowsEfs"),
+        "macos" => Some("macosImage"),
+        "linux" => Some("linuxGocryptfs"),
+        _ => None,
+    }
 }
 
 /// GUI processes cooperate even before a recording acquires its individual session lease.
@@ -169,15 +188,19 @@ fn inventory(root: &Path) -> Result<BTreeMap<PathBuf, Entry>> {
 }
 
 fn verify_with(root: &Path, protection: &impl Protection) -> Result<()> {
+    verify_marked(root, protection, MARKER_CONTENT)
+}
+
+fn verify_marked(root: &Path, protection: &impl Protection, marker_content: &[u8]) -> Result<()> {
     let root = checked_root(root).map_err(|_| NOT_PROTECTED)?;
     let marker = root.join(MARKER);
     reject_link(&marker).map_err(|_| NOT_PROTECTED)?;
     protection.check(&marker)?;
     let mut contents = Vec::new();
     File::open(&marker)?
-        .take(MARKER_CONTENT.len() as u64 + 1)
+        .take(marker_content.len() as u64 + 1)
         .read_to_end(&mut contents)?;
-    if contents != MARKER_CONTENT {
+    if contents != marker_content {
         return Err(NOT_PROTECTED.into());
     }
     let mut remaining = MAX_ENTRIES;
@@ -229,6 +252,21 @@ fn session_leases(root: &Path) -> Result<Vec<storage::RelocationGuard>> {
 }
 
 fn migrate_with(source: &Path, parent: &Path, protection: &impl Protection) -> Result<Receipt> {
+    let (source, parent) = migration_paths(source, parent)?;
+    let stage = tempfile::Builder::new()
+        .prefix(DIRECTORY_PREFIX)
+        .tempdir_in(parent)?;
+    let root = stage.path();
+    protection.enable_directory(root).map_err(|_| UNAVAILABLE)?;
+    let (files, bytes) = copy_profile(&source, root, protection, MARKER_CONTENT)?;
+    Ok(Receipt {
+        path: stage.keep(),
+        files,
+        bytes,
+    })
+}
+
+fn migration_paths(source: &Path, parent: &Path) -> Result<(PathBuf, PathBuf)> {
     let source = checked_root(source)?;
     let parent = checked_root(parent)?;
     #[cfg(windows)]
@@ -241,15 +279,20 @@ fn migrate_with(source: &Path, parent: &Path, protection: &impl Protection) -> R
     if nested {
         return Err("Choose a folder outside the current profile. / Bitte einen Ordner außerhalb der aktiven Ablage wählen.".into());
     }
-    let _archive = operation_lock(&source)?;
-    let _publication = publication_lease(&source, true)?;
-    let _sessions = session_leases(&source)?;
-    let stage = tempfile::Builder::new()
-        .prefix(DIRECTORY_PREFIX)
-        .tempdir_in(parent)?;
-    let root = stage.path();
-    protection.enable_directory(root).map_err(|_| UNAVAILABLE)?;
-    let before = inventory(&source)?;
+    Ok((source, parent))
+}
+
+fn copy_profile(
+    source: &Path,
+    root: &Path,
+    protection: &impl Protection,
+    marker_content: &[u8],
+) -> Result<(usize, u64)> {
+    let _archive = operation_lock(source)?;
+    let _publication = publication_lease(source, true)?;
+    let _sessions = session_leases(source)?;
+    protection.check(root)?;
+    let before = inventory(source)?;
     let mut files = 0usize;
     let mut bytes = 0u64;
     for (name, entry) in &before {
@@ -281,7 +324,7 @@ fn migrate_with(source: &Path, parent: &Path, protection: &impl Protection) -> R
             }
         }
     }
-    if inventory(&source)? != before {
+    if inventory(source)? != before {
         return Err(
             "The source changed during migration. / Die Quelle hat sich beim Kopieren geändert."
                 .into(),
@@ -293,15 +336,11 @@ fn migrate_with(source: &Path, parent: &Path, protection: &impl Protection) -> R
         .create_new(true)
         .open(&marker)?;
     protection.check(&marker)?;
-    file.write_all(MARKER_CONTENT)?;
+    file.write_all(marker_content)?;
     file.sync_all()?;
     drop(file);
-    verify_with(root, protection)?;
-    Ok(Receipt {
-        path: stage.keep(),
-        files,
-        bytes,
-    })
+    verify_marked(root, protection, marker_content)?;
+    Ok((files, bytes))
 }
 
 #[cfg(target_os = "windows")]

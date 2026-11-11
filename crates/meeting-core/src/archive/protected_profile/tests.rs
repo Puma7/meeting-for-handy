@@ -189,3 +189,89 @@ fn native_efs_inherits_for_new_audio_and_sqlite_index() {
     }
     verify(&result.path).unwrap();
 }
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+#[test]
+#[ignore = "Requires the native encrypted-volume provider and a disposable local test environment"]
+fn native_volume_migrates_and_recovers_from_a_detached_ciphertext_copy() {
+    fn copy_ciphertext(from: &Path, to: &Path) {
+        reject_link(from).unwrap();
+        if from.is_dir() {
+            fs::create_dir(to).unwrap();
+            for entry in fs::read_dir(from).unwrap() {
+                let entry = entry.unwrap();
+                copy_ciphertext(&entry.path(), &to.join(entry.file_name()));
+            }
+        } else {
+            assert!(from.is_file());
+            let bytes = fs::read(from).unwrap();
+            assert!(!bytes
+                .windows(b"migrationalpha".len())
+                .any(|data| data == b"migrationalpha"));
+            fs::copy(from, to).unwrap();
+        }
+    }
+
+    use ring::rand::{generate, SystemRandom};
+    let random_password = || {
+        generate::<[u8; 16]>(&SystemRandom::new())
+            .unwrap()
+            .expose()
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>()
+    };
+    let password = zeroize::Zeroizing::new(random_password());
+    let wrong = zeroize::Zeroizing::new(random_password());
+    let source = tempfile::tempdir().unwrap();
+    let vaults = tempfile::tempdir().unwrap();
+    let copies = tempfile::tempdir().unwrap();
+    let id = session(source.path());
+    drop(reindex(source.path(), &id));
+    let original_index = fs::read(source.path().join("library-index/library.sqlite3")).unwrap();
+    let before = inventory(source.path()).unwrap();
+    let receipt = migrate_volume(source.path(), vaults.path(), &password).unwrap();
+    assert!(receipt.files > 0 && receipt.bytes > 0);
+    assert_eq!(before, inventory(source.path()).unwrap());
+    assert_eq!(
+        original_index,
+        fs::read(source.path().join("library-index/library.sqlite3")).unwrap()
+    );
+    assert!(open_volume(&receipt.path, &wrong).is_err());
+
+    let opened = open_volume(&receipt.path, &password).unwrap();
+    assert_eq!(before, inventory(opened.root()).unwrap());
+    assert!(!opened.root().join("library-index").exists());
+    let index = reindex(opened.root(), &id);
+    let new_id = session(opened.root());
+    for name in [
+        "library.sqlite3",
+        "library.sqlite3-wal",
+        "library.sqlite3-shm",
+    ] {
+        assert!(opened.root().join("library-index").join(name).is_file());
+    }
+    opened.verify().unwrap();
+    assert!(open_volume(&receipt.path, &password).is_err());
+    drop(index);
+    let after = inventory(opened.root()).unwrap();
+    opened.unmount().unwrap();
+
+    let copied = copies.path().join("restored-vault");
+    copy_ciphertext(&receipt.path, &copied);
+    let recovered = open_volume(&copied, &password).unwrap();
+    assert_eq!(after, inventory(recovered.root()).unwrap());
+    assert_eq!(
+        LibraryIndex::open(recovered.root())
+            .unwrap()
+            .search("migrationalpha", 0, 10)
+            .unwrap()
+            .total,
+        1
+    );
+    let newly_written =
+        SessionStore::open(&recovered.root().join("sessions").join(new_id)).unwrap();
+    assert_eq!(newly_written.snapshot().unwrap().parts.len(), 2);
+    drop(newly_written);
+    recovered.unmount().unwrap();
+}

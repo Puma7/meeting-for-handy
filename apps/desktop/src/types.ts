@@ -5,7 +5,15 @@ import type {
 export type Locale = "de" | "en";
 export type BackupCredential = "passphrase" | "recoveryKey";
 
-export type ProtectedProfileStatus = { supported: boolean; active: boolean };
+export type ProtectedProfileProvider =
+  | "windowsEfs"
+  | "macosImage"
+  | "linuxGocryptfs";
+export type ProtectedProfileStatus = {
+  supported: boolean;
+  active: boolean;
+  provider: ProtectedProfileProvider;
+};
 export type ProtectedProfileReceipt = {
   path: string;
   files: number;
@@ -583,8 +591,10 @@ export interface DesktopApi {
   ): Promise<string | null>;
   cancelEncryptedBackup?(): Promise<boolean>;
   protectedProfileStatus?(): Promise<ProtectedProfileStatus>;
-  createProtectedProfile?(): Promise<ProtectedProfileReceipt | null>;
-  openProtectedProfile?(): Promise<boolean | null>;
+  createProtectedProfile?(
+    passphrase?: string,
+  ): Promise<ProtectedProfileReceipt | null>;
+  openProtectedProfile?(passphrase?: string): Promise<boolean | null>;
   checkMeetingSetup?(request: {
     modelId: string;
     text?: Omit<HistoryQuestionRequest, "question" | "scope" | "meetingIds">;

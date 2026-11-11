@@ -178,7 +178,9 @@ struct Service {
     sealed_backups: sealed_commands::Control,
     protected_profile: bool,
     protected_profile_copy: Mutex<Option<PathBuf>>,
-    _profile_lease: Option<fs::File>,
+    _profile_lease: Mutex<Option<fs::File>>,
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    protected_volume: Mutex<Option<meeting_core::archive::protected_profile::MountedVolume>>,
 }
 impl Service {
     /// The fast meter poll never waits behind a long application-state operation,
@@ -262,13 +264,34 @@ impl Service {
             sealed_backups: sealed_commands::Control::default(),
             protected_profile: false,
             protected_profile_copy: Mutex::new(None),
-            _profile_lease: None,
+            _profile_lease: Mutex::new(None),
+            #[cfg(any(target_os = "linux", target_os = "macos"))]
+            protected_volume: Mutex::new(None),
         })
     }
     fn lock(&self) -> AppResult<MutexGuard<'_, Inner>> {
         self.inner.lock().map_err(|_| {
             "Der Anwendungszustand ist gesperrt. Gesicherte Sitzungen bleiben erhalten.".into()
         })
+    }
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    fn close_protected_volume(&self) -> AppResult<()> {
+        let _admission = self.reserve_operation(operations::Kind::Maintenance)?;
+        if let Some(volume) = self
+            .protected_volume
+            .lock()
+            .map_err(|_| "Protected profile state is unavailable")?
+            .take()
+        {
+            drop(
+                self._profile_lease
+                    .lock()
+                    .map_err(|_| "Protected profile state is unavailable")?
+                    .take(),
+            );
+            volume.unmount().map_err(|error| error.to_string())?;
+        }
+        Ok(())
     }
     /// Try the recording transition mutex without waiting; contention returns a busy error.
     /// Waits a bounded time for a transition that is known to be ending (a cancelled
@@ -1124,12 +1147,30 @@ fn desktop_service() -> AppResult<Service> {
     use meeting_core::archive::protected_profile as storage;
     let args: Vec<_> = std::env::args_os().skip(1).collect();
     let selected = protected_profile::launch_path(&args)?;
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    if let Some(path) = &selected {
+        let volume = protected_profile::unlock(path)?;
+        let root = volume.root().to_owned();
+        let lease = storage::reserve_runtime(&root).map_err(|error| error.to_string())?;
+        let mut service = Service::new(root)?;
+        service.protected_profile = true;
+        service._profile_lease = Mutex::new(Some(lease));
+        #[cfg(target_os = "linux")]
+        fs::create_dir_all(service.root.join("webview")).map_err(|error| error.to_string())?;
+        volume.verify().map_err(|error| error.to_string())?;
+        service.protected_volume = Mutex::new(Some(volume));
+        return Ok(service);
+    }
     let root = selected.clone().or_else(|| std::env::var_os("HANDYMEETING_DATA_DIR")
         .map(PathBuf::from)
         .or_else(|| dirs::data_local_dir().map(|base| base.join("HandyMeeting/RustBeta"))))
         .ok_or("Lokaler Anwendungsordner ist nicht verfügbar. / Local application folder is unavailable.")?;
     let protected = selected.is_some()
         || storage::needs_verification(&root).map_err(|error| error.to_string())?;
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    if protected {
+        return Err("Verschlüsseltes Profil über die Einstellungen öffnen. / Open the encrypted profile from Settings.".into());
+    }
     if protected {
         storage::verify(&root).map_err(|error| error.to_string())?;
     } else {
@@ -1138,7 +1179,7 @@ fn desktop_service() -> AppResult<Service> {
     let lease = storage::reserve_runtime(&root).map_err(|error| error.to_string())?;
     let mut service = Service::new(root)?;
     service.protected_profile = protected;
-    service._profile_lease = Some(lease);
+    service._profile_lease = Mutex::new(Some(lease));
     if protected {
         let webview = service.root.join("webview");
         fs::create_dir_all(&webview).map_err(|error| error.to_string())?;
@@ -1156,6 +1197,12 @@ fn desktop_service() -> AppResult<Service> {
 pub fn run() {
     use tauri_plugin_dialog::DialogExt;
     let prepared = desktop_service().map(Arc::new);
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    let protected_service = prepared
+        .as_ref()
+        .ok()
+        .filter(|service| service.protected_profile)
+        .cloned();
     let mut context = tauri::generate_context!();
     if !prepared
         .as_ref()
@@ -1169,7 +1216,7 @@ pub fn run() {
     if let Ok(service) = &prepared {
         builder = builder.manage(Arc::clone(service));
     }
-    builder.setup(move |app| {
+    let builder = builder.setup(move |app| {
         let service = match prepared {
             Ok(service) => service,
             Err(error) => {
@@ -1181,11 +1228,15 @@ pub fn run() {
         if service.protected_profile {
             let config = app.config().app.windows.first().ok_or("Desktop window configuration is missing")?;
             let window = tauri::WebviewWindowBuilder::from_config(app, config).and_then(|builder| {
-                builder.data_directory(service.root.join("webview")).build()
+                #[cfg(target_os = "macos")]
+                let builder = builder.incognito(true);
+                #[cfg(not(target_os = "macos"))]
+                let builder = builder.data_directory(service.root.join("webview"));
+                builder.build()
             });
             if window.is_err() {
                 let handle = app.handle().clone();
-                app.dialog().message("Die geschützte Oberfläche konnte nicht gestartet werden. Bitte den Ordner und WebView2 prüfen. / The protected window could not start. Check the folder and WebView2.")
+                app.dialog().message("Die geschützte Oberfläche konnte nicht gestartet werden. Bitte den Ordner und die Browser-Komponente prüfen. / The protected window could not start. Check the folder and the system webview.")
                     .title("Meeting for Handy").show(move |_| handle.exit(1));
                 return Ok(());
             }
@@ -1195,9 +1246,61 @@ pub fn run() {
         tauri::async_runtime::spawn_blocking(move|| {let _=service.refresh(None);});
         Ok(())
     }).invoke_handler(tauri::generate_handler![deletion_commands::preview_meeting_erasure,deletion_commands::get_meeting_erasure_preview,deletion_commands::erase_meeting_now,deletion_commands::list_pending_erasures,path_selection::choose_handy_executable,path_selection::choose_ffmpeg_executable,path_selection::choose_legacy_manifest,app_commands::get_app_state,setup_probe::check_meeting_setup,protected_profile::protected_profile_status,protected_profile::create_protected_profile,protected_profile::open_protected_profile,sealed_commands::create_encrypted_backup,sealed_commands::recover_encrypted_backup,sealed_commands::cancel_encrypted_backup,app_commands::get_audio_levels,app_commands::get_system_load,retention_commands::list_audio_copies,retention_commands::transcribe_audio_copy,retention_commands::compact_archive,retention_commands::list_archives,retention_commands::list_unfinished_deletions,retention_commands::resume_permanent_deletion,retention_commands::restore_archive,retention_commands::apply_retention,retention_commands::get_retention_policy,retention_commands::save_retention_policy,retention_commands::preview_retention,retention_commands::get_retention_plan,retention_commands::get_maintenance_progress,retention_commands::cancel_maintenance,library_commands::edit_meeting_metadata,library_commands::search_meetings,history_questions::ask_meeting_history,library_commands::rebuild_search_index,library_commands::get_library_progress,library_commands::cancel_library_job,speaker_commands::archive_speaker_model_checks,speaker_commands::check_speaker_model,speaker_commands::get_speaker_labels,speaker_commands::save_speaker_labels,speaker_commands::start_speaker_experiment,speaker_commands::get_speaker_progress,speaker_commands::get_speaker_sections,speaker_commands::cancel_speaker_experiment,update_commands::check_for_update,update_commands::download_update,update_commands::get_update_progress,update_commands::cancel_update,update_commands::install_update,update_commands::open_release_page,app_commands::refresh_handy,app_commands::list_devices,app_commands::start_meeting,app_commands::stop_meeting,app_commands::set_capture_paused,app_commands::set_microphone_muted,app_commands::reconnect_microphone,app_commands::agent_decide_recording,app_commands::agent_revoke,app_commands::list_meetings,app_commands::get_meeting,app_commands::resume_meeting,app_commands::import_legacy,app_commands::copy_text,app_commands::open_meeting_folder,app_commands::export_transcript,app_commands::generate_notes,app_commands::list_analyses,notes_commands::list_unfinished_analyses,notes_commands::list_text_models,notes_commands::get_notes_progress,notes_commands::cancel_notes,notes_commands::notes_markdown,live_commands::list_workspace_history,live_commands::read_workspace_history,live_commands::export_workspace_results,live_commands::start_live_notes,live_commands::stop_live_notes,live_commands::refresh_live_notes,live_commands::set_live_notes_interval,live_commands::get_live_notes,live_commands::set_workspace_context,source_audio::get_source_audio,source_audio::get_transcript_audio,live_commands::local_model_setup,live_commands::pull_ollama_model,live_commands::get_model_pull_progress,live_commands::cancel_model_pull,template_commands::list_templates,template_commands::save_templates,template_commands::import_templates,credential_commands::credential_status,credential_commands::save_credential,credential_commands::remove_credential])
-    .on_window_event(|window,event|{if let tauri::WindowEvent::CloseRequested{api,..}=event{let service=window.state::<Arc<Service>>();let blocked=service.lock().is_ok_and(|inner|inner.transitioning||inner.active.as_ref().is_some_and(|a|a.capture.is_some()));if blocked{api.prevent_close();if let Ok(mut inner)=service.lock(){inner.error=Some(if inner.transitioning { "Ein Vorgang läuft noch. Bitte warten, bis Audioabschluss und Verarbeitung beendet sind.".into() } else { "Bitte zuerst „Meeting beenden“ wählen. Audio wird gesichert und offene Abschnitte werden verarbeitet.".into() });}let _=window.emit("recording-close-blocked",());}}})
-    .run(context).expect("HandyMeeting konnte nicht gestartet werden.");
+    .on_window_event(handle_window_event);
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    if let Some(service) = protected_service {
+        let exit_code = builder
+            .build(context)
+            .expect("HandyMeeting konnte nicht gestartet werden.")
+            .run_return(|_, _| {});
+        // Tauri's normal run exits the process without dropping the mounted-volume guard.
+        // Wait until the window and WebView have closed their files before a normal detach.
+        if let Err(error) = service.close_protected_volume() {
+            eprintln!("{error}");
+        }
+        if exit_code != 0 {
+            std::process::exit(exit_code);
+        }
+        return;
+    }
+    builder
+        .run(context)
+        .expect("HandyMeeting konnte nicht gestartet werden.");
 }
+fn handle_window_event(window: &tauri::Window, event: &tauri::WindowEvent) {
+    let tauri::WindowEvent::CloseRequested { api, .. } = event else {
+        return;
+    };
+    let service = window.state::<Arc<Service>>();
+    let blocked = service.lock().is_ok_and(|inner| {
+        inner.transitioning || inner.active.as_ref().is_some_and(|a| a.capture.is_some())
+    });
+    if blocked {
+        api.prevent_close();
+        if let Ok(mut inner) = service.lock() {
+            inner.error = Some(if inner.transitioning {
+                "Ein Vorgang läuft noch. Bitte warten, bis Audioabschluss und Verarbeitung beendet sind.".into()
+            } else {
+                "Bitte zuerst „Meeting beenden“ wählen. Audio wird gesichert und offene Abschnitte werden verarbeitet.".into()
+            });
+        }
+        let _ = window.emit("recording-close-blocked", ());
+    }
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    if !blocked && service.protected_profile {
+        use tauri_plugin_dialog::DialogExt;
+        let Err(error) = service.reserve_operation(operations::Kind::Maintenance) else {
+            return;
+        };
+        api.prevent_close();
+        window
+            .dialog()
+            .message(error)
+            .title("Meeting for Handy")
+            .show(|_| {});
+    }
+}
+
 /// Expose explicit diagnostic modes without creating a GUI when the dispatcher handles the
 /// supplied arguments.
 pub fn run_cli(args: &[String]) -> Option<AppResult<()>> {

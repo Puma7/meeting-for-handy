@@ -22,17 +22,29 @@ Capture diagnostics do not own the recording lifetime. A warning that cannot be 
 
 ## Encrypted session storage
 
+### Create and open a protected profile
+
+In **Settings → Data and maintenance → Encrypt session storage**, choose **Create encrypted profile**, then select a local parent folder. Finish active operations and close older app versions or other tools that can write into the source. Start the migration from the current window that has the source profile open.
+
+The app prepares protected storage before writing session content. It copies native session files, app-managed archives and stored records such as annotations and retention history. It verifies each copied file's size and SHA-256 digest, then rechecks the source inventory before publishing the protected profile. The source files stay in the original profile. The copy creates its own session and operation leases. The app rebuilds the derived search index in the protected profile, where SQLite keeps the database, write-ahead log and shared-memory files. SQLite keeps temporary tables in memory.
+
+Choose **Open encrypted profile** to launch the verified copy in a separate window. The original window stays open. Later changes apply to the profile where they are made. Use the same action and the folder picker to reopen a previously created profile. A missing marker or failed protection check stops the protected launch before it opens the session store. Browser-only drafts and preferences from the original window remain available in the original profile. Imported legacy originals and exports already saved outside the native profile stay in their original locations.
+
 ### Protected Windows profile
 
-In **Settings → Data and maintenance → Encrypt session storage**, choose **Create encrypted profile**, then select a parent folder on a local NTFS drive that supports Windows Encrypting File System (EFS). Finish any active operations first and close older app versions or other tools that can write into the source. The migration runs from the one current window that has the source profile open.
-
-The app creates a new directory and enables EFS before writing session content. It copies session files, app-managed archives and other stored records such as annotations and retention history. It verifies the size and SHA-256 digest of each copied file and rechecks the source inventory before writing the protected-profile marker. The source files remain available in the original profile. Temporary operation and session leases are created afresh in the copy. [Windows file encryption](https://learn.microsoft.com/en-us/windows/win32/fileio/file-encryption)
-
-The app rebuilds the derived search index inside the protected profile. SQLite places its database, write-ahead log and shared-memory files under that directory and keeps temporary tables in memory. New private workspace drafts are stored in a dedicated WebView directory within the protected profile. Existing browser-only drafts and preferences are accessible in the original profile. Imported legacy originals and exports already saved outside the native profile stay at their original locations.
-
-After verification, choose **Open encrypted profile** to launch the copy in a new window. The original window stays open, and later edits apply to the profile where they are made. The same action can reopen a previously created profile through the native folder picker. A direct launch takes the absolute path of the verified profile, for example `HandyMeeting.exe --protected-profile "C:\MeetingStorage\HandyMeeting-Protected-example"`. A missing marker or failed protection check stops the protected launch before opening the session store.
+Select a local NTFS drive that supports Windows Encrypting File System (EFS). The app enables EFS on a new directory and stores new browser-only drafts and preferences in a dedicated WebView directory within the profile. For a direct launch, pass the absolute path of the verified profile, for example `HandyMeeting.exe --protected-profile "C:\MeetingStorage\HandyMeeting-Protected-example"`. [Windows file encryption](https://learn.microsoft.com/en-us/windows/win32/fileio/file-encryption)
 
 EFS protects file contents at rest through Windows. File and directory names remain visible to users who can list the folder. Access on a different Windows installation depends on the EFS certificate and its private key or an applicable Windows recovery agent. Portable `.hmvault` backups use their own recovery credentials. [EFS files and directories](https://learn.microsoft.com/en-us/windows/win32/fileio/handling-encrypted-files-and-directories) · [Windows EFS certificate backup](https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/cipher)
+
+### Protected macOS and Linux profiles
+
+Use your regular desktop account. macOS uses the built-in disk image tools to create an AES-256-encrypted APFS sparse bundle. Its storage use grows as the image fills. Linux uses the system installation of `gocryptfs` and needs working FUSE, including `/dev/fuse` and the system unmount helper. [Apple disk images](https://support.apple.com/guide/disk-utility/create-a-disk-image-dskutl11888/mac) · [gocryptfs documentation](https://nuetzlich.net/gocryptfs/)
+
+When creating a profile, choose a passphrase of at least 12 characters. Keep it separate from the profile. Enter that passphrase in the app each time you choose **Open encrypted profile**. The app checks the vault and its mounted storage before opening the session data. It holds a lock so a second app process cannot open the same vault, and unmounts the volume on normal exit. If an interruption leaves the volume mounted, close programs using it and eject or unmount it normally before reopening. Files are readable through the mounted profile while it is unlocked.
+
+To make a backup of the full profile, close its protected window and wait for the volume to unmount. Copy the complete outer profile folder created by the app. Keep the sparse bundle or the `gocryptfs` files together with the profile marker. To recover, use **Open encrypted profile** from the original window, select the copied folder and enter the same passphrase on a compatible system. The independent recovery key described below belongs to the single-meeting backup format.
+
+Linux stores new browser-only drafts and preferences in the protected WebView directory. On macOS the protected window uses a nonpersistent WebView, so its browser-only drafts and preferences are temporary. Saved native meeting data and shared settings retain their usual storage behavior.
 
 ### Encrypted session copies
 
