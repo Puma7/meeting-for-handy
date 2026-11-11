@@ -257,11 +257,14 @@ jobs:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
         with:
           persist-credentials: false
+      - name: Install pinned Rust tooling
+        shell: pwsh
+        run: rustup toolchain install 1.91.1 --profile minimal
       - name: Exercise EFS migration and new writes in a temporary profile
         shell: pwsh
         run: |
           $env:HANDYMEETING_EFS_TEST_PARENT = (Resolve-Path -LiteralPath $env:RUNNER_TEMP).Path
-          cargo test -p meeting-core --locked --lib archive::protected_profile::tests::native_efs_inherits_for_new_audio_and_sqlite_index -- --ignored --exact
+          cargo +1.91.1 test -p meeting-core --locked --lib archive::protected_profile::tests::native_efs_inherits_for_new_audio_and_sqlite_index -- --ignored --exact
   portable-core:
     needs: plan
     if: needs.plan.outputs.packages != 'true'
