@@ -3,7 +3,7 @@ use ring::{
         self, Aad, BoundKey, LessSafeKey, Nonce, NonceSequence, OpeningKey, SealingKey, UnboundKey,
     },
     hkdf, pbkdf2,
-    rand::{SecureRandom, SystemRandom},
+    rand::{generate, SecureRandom, SystemRandom},
 };
 use std::{
     io::{self, Read, Write},
@@ -15,7 +15,8 @@ use super::{RecoveryKey, Unlock};
 
 const V1: &[u8; 8] = b"HMSAFE01";
 const V2: &[u8; 8] = b"HMSAFE02";
-const PREFIX_LEN: usize = V1.len() + 32;
+const SALT_LEN: usize = 32;
+const PREFIX_LEN: usize = V1.len() + SALT_LEN;
 const SLOT_LEN: usize = 32 + TAG;
 pub(super) const HEADER_LEN: usize = PREFIX_LEN + 2 * SLOT_LEN;
 pub(super) const BLOCK: usize = 64 * 1024;
@@ -110,15 +111,17 @@ fn write_header(
     password: &[u8],
     recovery: &RecoveryKey,
 ) -> io::Result<([u8; HEADER_LEN], UnboundKey)> {
+    let salt = generate::<[u8; SALT_LEN]>(&SystemRandom::new())
+        .map_err(|_| io::Error::other("Could not generate backup encryption material"))?
+        .expose();
     let mut header = [0u8; HEADER_LEN];
     header[..V2.len()].copy_from_slice(V2);
-    random(&mut header[V2.len()..PREFIX_LEN])?;
-    let salt = &header[V2.len()..PREFIX_LEN];
+    header[V2.len()..PREFIX_LEN].copy_from_slice(&salt);
     let prefix = &header[..PREFIX_LEN];
     let mut data_key = Zeroizing::new([0u8; 32]);
     random(&mut *data_key)?;
-    let password_slot = wrap(derive(salt, password)?, prefix, 0, &data_key)?;
-    let recovery_slot = wrap(recovery_wrap_key(salt, recovery)?, prefix, 1, &data_key)?;
+    let password_slot = wrap(derive(&salt, password)?, prefix, 0, &data_key)?;
+    let recovery_slot = wrap(recovery_wrap_key(&salt, recovery)?, prefix, 1, &data_key)?;
     header[PREFIX_LEN..PREFIX_LEN + SLOT_LEN].copy_from_slice(&password_slot);
     header[PREFIX_LEN + SLOT_LEN..].copy_from_slice(&recovery_slot);
     let key = UnboundKey::new(&aead::AES_256_GCM, &*data_key).map_err(|_| format_error())?;
@@ -130,12 +133,16 @@ fn open_header(
     source: &mut impl Read,
     unlock: Unlock<'_>,
 ) -> io::Result<([u8; HEADER_LEN], usize, UnboundKey)> {
-    let mut header = [0u8; HEADER_LEN];
-    source
-        .read_exact(&mut header[..PREFIX_LEN])
+    let mut prefix = Vec::with_capacity(PREFIX_LEN);
+    (&mut *source)
+        .take(PREFIX_LEN as u64)
+        .read_to_end(&mut prefix)
         .map_err(|_| format_error())?;
-    let salt = &header[V1.len()..PREFIX_LEN];
-    match &header[..V1.len()] {
+    let prefix: [u8; PREFIX_LEN] = prefix.try_into().map_err(|_| format_error())?;
+    let salt = &prefix[V1.len()..];
+    let mut header = [0u8; HEADER_LEN];
+    header[..PREFIX_LEN].copy_from_slice(&prefix);
+    match &prefix[..V1.len()] {
         magic if magic == V1 => {
             let Unlock::Passphrase(password) = unlock else {
                 return Err(format_error());

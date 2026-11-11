@@ -1,8 +1,10 @@
 use super::*;
 
-const PASSWORD: &[u8] = b"synthetic-test-passphrase-77";
-const PASSPHRASE: Unlock<'_> = Unlock::Passphrase(PASSWORD);
 const TITLE: &str = "SYNTHETIC_PRIVATE_BACKUP_TITLE";
+
+fn synthetic_passphrase() -> Zeroizing<String> {
+    RecoveryKey::generate().unwrap().encode()
+}
 
 fn fixture(root: &Path) -> (String, PathBuf) {
     let store = SessionStore::create(
@@ -83,10 +85,10 @@ fn fingerprints(folder: &Path) -> Vec<ArchivedFile> {
         .collect()
 }
 
-fn seal_for_test(path: &Path, manifest: &Inventory, content: &[u8]) {
+fn seal_for_test(path: &Path, manifest: &Inventory, content: &[u8], passphrase: &[u8]) {
     let mut output = File::create(path).unwrap();
     let key = RecoveryKey::generate().unwrap();
-    let mut stream = frames::Encrypt::new(&mut output, PASSWORD, &key).unwrap();
+    let mut stream = frames::Encrypt::new(&mut output, passphrase, &key).unwrap();
     let bytes = serde_json::to_vec(manifest).unwrap();
     stream
         .write_all(&(bytes.len() as u32).to_be_bytes())
@@ -105,14 +107,15 @@ fn backup_and_recovery_preserve_every_source_byte_in_an_independent_profile() {
     let before = fingerprints(&folder);
     let backup = elsewhere.path().join("copy.hmvault");
     let stop = AtomicBool::new(false);
-    let (summary, key) = create(source.path(), &id, &backup, PASSWORD, &stop).unwrap();
+    let passphrase = synthetic_passphrase();
+    let (summary, key) = create(source.path(), &id, &backup, passphrase.as_bytes(), &stop).unwrap();
     assert_eq!(summary.files, before.len() + 1);
     let encoded = key.encode();
     assert_eq!(encoded.len(), 64);
     drop(key);
     let key = RecoveryKey::parse(&encoded.to_ascii_uppercase()).unwrap();
     assert_eq!(fingerprints(&folder), before);
-    assert!(create(source.path(), &id, &backup, PASSWORD, &stop).is_err());
+    assert!(create(source.path(), &id, &backup, passphrase.as_bytes(), &stop).is_err());
     let encrypted = fs::read(&backup).unwrap();
     for secret in [
         TITLE,
@@ -129,7 +132,12 @@ fn backup_and_recovery_preserve_every_source_byte_in_an_independent_profile() {
     assert!(!encrypted
         .windows(encoded.len())
         .any(|window| window == encoded.as_bytes()));
-    assert_eq!(verify(&backup, PASSPHRASE, &stop).unwrap().meeting_id, id);
+    assert_eq!(
+        verify(&backup, Unlock::Passphrase(passphrase.as_bytes()), &stop)
+            .unwrap()
+            .meeting_id,
+        id
+    );
     let preserved = source.path().join("source-preserved-separately");
     fs::rename(&folder, &preserved).unwrap();
     let restored = recover(
@@ -183,14 +191,18 @@ fn wrong_password_corruption_truncation_trailing_bytes_and_cancellation_publish_
     let before = fingerprints(&folder);
     let backup = elsewhere.path().join("copy.hmvault");
     let ready = AtomicBool::new(false);
-    let (_, key) = create(source.path(), &id, &backup, PASSWORD, &ready).unwrap();
+    let passphrase = synthetic_passphrase();
+    let unlock_with_passphrase = Unlock::Passphrase(passphrase.as_bytes());
+    let (_, key) = create(source.path(), &id, &backup, passphrase.as_bytes(), &ready).unwrap();
     let wrong = RecoveryKey::generate().unwrap();
+    let wrong_passphrase = synthetic_passphrase();
+    assert!(passphrase.as_bytes() != wrong_passphrase.as_bytes());
     let valid = fs::read(&backup).unwrap();
     assert!(recover(
         source.path(),
         &backup,
         destination.path(),
-        Unlock::Passphrase(b"synthetic-wrong-key"),
+        Unlock::Passphrase(wrong_passphrase.as_bytes()),
         &ready
     )
     .is_err());
@@ -202,7 +214,7 @@ fn wrong_password_corruption_truncation_trailing_bytes_and_cancellation_publish_
         &ready
     )
     .is_err());
-    assert!(RecoveryKey::parse("synthetic-invalid-recovery-key").is_err());
+    assert!(RecoveryKey::parse(&passphrase[..12]).is_err());
     for (name, data) in [
         ("tampered", {
             let mut bytes = valid.clone();
@@ -234,7 +246,7 @@ fn wrong_password_corruption_truncation_trailing_bytes_and_cancellation_publish_
     ] {
         let modified = elsewhere.path().join(name);
         fs::write(&modified, data).unwrap();
-        for unlock in [PASSPHRASE, Unlock::RecoveryKey(&key)] {
+        for unlock in [unlock_with_passphrase, Unlock::RecoveryKey(&key)] {
             assert!(
                 recover(source.path(), &modified, destination.path(), unlock, &ready).is_err(),
                 "{name}"
@@ -246,7 +258,7 @@ fn wrong_password_corruption_truncation_trailing_bytes_and_cancellation_publish_
         source.path(),
         &backup,
         destination.path(),
-        PASSPHRASE,
+        unlock_with_passphrase,
         &stop
     )
     .is_err());
@@ -254,7 +266,7 @@ fn wrong_password_corruption_truncation_trailing_bytes_and_cancellation_publish_
         source.path(),
         &id,
         &destination.path().join("cancelled.hmvault"),
-        PASSWORD,
+        passphrase.as_bytes(),
         &stop
     )
     .is_err());
@@ -269,17 +281,25 @@ fn rejects_unsafe_authenticated_paths_and_output_inside_the_active_profile() {
     let elsewhere = tempfile::tempdir().unwrap();
     let (id, folder) = fixture(source.path());
     let ready = AtomicBool::new(false);
+    let passphrase = synthetic_passphrase();
     assert!(create(
         source.path(),
         &id,
         &source.path().join("not-external.hmvault"),
-        PASSWORD,
+        passphrase.as_bytes(),
         &ready
     )
     .is_err());
     let active = SessionStore::open(&folder).unwrap();
     let attempted = elsewhere.path().join("active.hmvault");
-    assert!(create(source.path(), &id, &attempted, PASSWORD, &ready).is_err());
+    assert!(create(
+        source.path(),
+        &id,
+        &attempted,
+        passphrase.as_bytes(),
+        &ready
+    )
+    .is_err());
     assert!(!attempted.exists());
     drop(active);
     let malformed = Inventory {
@@ -289,8 +309,15 @@ fn rejects_unsafe_authenticated_paths_and_output_inside_the_active_profile() {
         sidecars: vec![],
     };
     let path = elsewhere.path().join("malformed");
-    seal_for_test(&path, &malformed, &[]);
-    assert!(recover(source.path(), &path, elsewhere.path(), PASSPHRASE, &ready).is_err());
+    seal_for_test(&path, &malformed, &[], passphrase.as_bytes());
+    assert!(recover(
+        source.path(),
+        &path,
+        elsewhere.path(),
+        Unlock::Passphrase(passphrase.as_bytes()),
+        &ready
+    )
+    .is_err());
     assert_eq!(fs::read_dir(elsewhere.path()).unwrap().count(), 1);
 }
 
@@ -317,35 +344,27 @@ fn failed_restore_after_a_plaintext_write_removes_only_its_own_stage() {
         sidecars: vec![],
     };
     let backup = elsewhere.path().join("authenticated-conflict.hmvault");
-    seal_for_test(&backup, &manifest, data);
+    let passphrase = synthetic_passphrase();
+    let unlock = Unlock::Passphrase(passphrase.as_bytes());
+    seal_for_test(&backup, &manifest, data, passphrase.as_bytes());
     let stop = AtomicBool::new(false);
-    assert_eq!(verify(&backup, PASSPHRASE, &stop).unwrap().files, 2);
-    assert!(recover(
-        source.path(),
-        &backup,
-        destination.path(),
-        PASSPHRASE,
-        &stop
-    )
-    .is_err());
+    assert_eq!(verify(&backup, unlock, &stop).unwrap().files, 2);
+    assert!(recover(source.path(), &backup, destination.path(), unlock, &stop).is_err());
     assert_eq!(fs::read_dir(destination.path()).unwrap().count(), 1);
     assert_eq!(fs::read(&original).unwrap(), b"unrelated existing data");
 }
 
 #[test]
 fn reads_an_independently_encoded_version_one_backup() {
-    // Fixed synthetic fixture generated with Node's PBKDF2 and AES-GCM, using
-    // the v1 header, one manifest and file frame, and an authenticated empty frame.
-    let encoded = concat!(
-        "484d5341464530313737373737373737373737373737373737373737373737373737373737373737",
-        "000000d5bbf8e2b591349498786304fc7c2039ea9a795608b958343571784deda61c930279f70464",
-        "0c2293f57e6e974af4b49dee61fd4883a302ed238e07d4f40e976a1828fc4176e5aa50613f5cf539",
-        "608352e27ac91a802dcab13d36e8435c4e3b571eaa8e157b18e03935ad063ecac2f46f102ae10989",
-        "e19db6f548d53fbf8183c1950c66db0121df639fd12d2dd841ebdb5e455dd672d23e9e12eef00a57",
-        "03f4575bd99a8fbfdf9f91ea1da75a2a0c6928655a7055ebf032b0884692b43c9afc4af9f0ded2a8",
-        "1d169dd31a9d5f2b0e46c3299c3b0daf65612e26139791a11e57d78a1f5a68cd2b0000000047a60b",
-        "88704eb268dd9f55540c81134f",
-    );
+    #[derive(Deserialize)]
+    struct Vector {
+        public_passphrase: String,
+        archive_hex: Vec<String>,
+    }
+    // Node independently encoded this fixed v1 compatibility vector.
+    let fixture_path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/sealed-v1.json");
+    let vector: Vector = serde_json::from_reader(File::open(fixture_path).unwrap()).unwrap();
+    let encoded = vector.archive_hex.concat();
     let encrypted: Vec<_> = (0..encoded.len())
         .step_by(2)
         .map(|index| u8::from_str_radix(&encoded[index..index + 2], 16).unwrap())
@@ -354,9 +373,50 @@ fn reads_an_independently_encoded_version_one_backup() {
     let path = directory.path().join("legacy.hmvault");
     fs::write(&path, encrypted).unwrap();
     let ready = AtomicBool::new(false);
-    assert_eq!(verify(&path, PASSPHRASE, &ready).unwrap().files, 1);
+    assert_eq!(
+        verify(
+            &path,
+            Unlock::Passphrase(vector.public_passphrase.as_bytes()),
+            &ready,
+        )
+        .unwrap()
+        .files,
+        1
+    );
     let key = RecoveryKey::generate().unwrap();
     assert!(verify(&path, Unlock::RecoveryKey(&key), &ready).is_err());
+}
+
+#[test]
+fn repeated_sealing_uses_a_fresh_salt_and_both_archives_reopen() {
+    const SALT: std::ops::Range<usize> = 8..40;
+    let passphrase = synthetic_passphrase();
+    let recovery = RecoveryKey::generate().unwrap();
+    let payload = b"synthetic repeatable plaintext";
+    let seal = || {
+        let mut archive = Vec::new();
+        let mut writer =
+            frames::Encrypt::new(&mut archive, passphrase.as_bytes(), &recovery).unwrap();
+        writer.write_all(payload).unwrap();
+        writer.finish().unwrap();
+        archive
+    };
+    let first = seal();
+    let second = seal();
+    assert!(first[SALT] != second[SALT]);
+    for archive in [&first, &second] {
+        for unlock in [
+            Unlock::Passphrase(passphrase.as_bytes()),
+            Unlock::RecoveryKey(&recovery),
+        ] {
+            let mut recovered = Vec::new();
+            frames::Decrypt::new(archive.as_slice(), unlock)
+                .unwrap()
+                .read_to_end(&mut recovered)
+                .unwrap();
+            assert_eq!(recovered, payload);
+        }
+    }
 }
 
 #[test]
