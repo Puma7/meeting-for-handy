@@ -48,6 +48,10 @@ on:
         description: Build and verify Windows installer/ZIP (false runs source checks only)
         type: boolean
         default: true
+      native_profiles:
+        description: Also test encrypted profile migration on macOS and Linux
+        type: boolean
+        default: false
   workflow_call:
     inputs:
       packages:
@@ -266,7 +270,7 @@ jobs:
           $env:HANDYMEETING_EFS_TEST_PARENT = (Resolve-Path -LiteralPath $env:RUNNER_TEMP).Path
           cargo +1.91.1 test -p meeting-core --locked --lib archive::protected_profile::tests::native_efs_inherits_for_new_audio_and_sqlite_index -- --ignored --exact
   unix-protected-profile:
-    if: github.event_name == 'pull_request'
+    if: github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && inputs.native_profiles)
     name: Encrypted profile migration (${{ matrix.runner }})
     strategy:
       fail-fast: false

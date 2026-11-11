@@ -97,7 +97,7 @@ impl MountedVolume {
             Ok(attachment) => attachment,
             Err(error) => {
                 // If the provider is unable to prove it detached, still deny fallback writes.
-                let _ = underlying.set_permissions(Permissions::from_mode(0));
+                let _ = underlying.set_permissions(Permissions::from_mode(0o000));
                 remove_empty_anchor(&anchor, &mount);
                 return Err(error);
             }
@@ -111,7 +111,7 @@ impl MountedVolume {
             protection: MountedProtection(0),
             _use_lock: use_lock,
         };
-        underlying.set_permissions(Permissions::from_mode(0))?;
+        underlying.set_permissions(Permissions::from_mode(0o000))?;
         volume.check_attachment()?;
         let held = File::open(&volume.mount)?;
         let mounted_device = held.metadata()?.dev();
