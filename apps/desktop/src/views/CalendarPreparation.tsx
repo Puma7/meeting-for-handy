@@ -52,7 +52,10 @@ function namedZoneTime(iso: string, zone: string): number | undefined {
 }
 
 /** Accept dated, one-off events and reject unknown or ambiguous zone times. */
-export function calendarEvents(contents: string): CalendarEvent[] {
+export function calendarEvents(
+  contents: string,
+  localZone = Intl.DateTimeFormat().resolvedOptions().timeZone,
+): CalendarEvent[] {
   if (contents.length > MAX_CALENDAR_BYTES) return [];
   const lines = contents.replace(/\r?\n[ \t]/g, "").split(/\r?\n/);
   if (lines[0]?.replace(/^\uFEFF/, "").toUpperCase() !== "BEGIN:VCALENDAR")
@@ -113,23 +116,20 @@ export function calendarEvents(contents: string): CalendarEvent[] {
         }
         const [, y, m, d, h, min, sec, zone] = match;
         const iso = `${y}-${m}-${d}T${h}:${min}:${sec}`;
-        const time = new Date(iso + zone);
         const calendar = new Date(iso + "Z");
         const named = zones[0]?.slice(5).replace(/^"(.*)"$/, "$1");
         if (
-          !Number.isFinite(time.getTime()) ||
           !Number.isFinite(calendar.getTime()) ||
           !calendar.toISOString().startsWith(iso) ||
-          (!zone &&
-            !named &&
-            (time.getHours() !== Number(h) ||
-              time.getMinutes() !== Number(min)))
+          (zones.length && !named)
         ) {
           unsupported = true;
           continue;
         }
-        const resolved = named ? namedZoneTime(iso, named) : time.getTime();
-        if (resolved === undefined || (zones.length && !named)) {
+        const resolved = zone
+          ? calendar.getTime()
+          : namedZoneTime(iso, named ?? localZone);
+        if (resolved === undefined) {
           unsupported = true;
           continue;
         }

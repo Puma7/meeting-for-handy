@@ -114,6 +114,9 @@ impl Service {
                 meeting_core::list_sessions(&self.root.join("sessions"))
                     .map_err(|_| "Sitzungshistorie konnte nicht gelesen werden.")?
             };
+        // A label edit can index a legacy meeting. Its approved original below
+        // is the authority for availability and read-only status.
+        sessions.retain(|meeting| !valid_legacy_id(&meeting.id));
         let (current, legacy) = {
             let inner = self.lock()?;
             (

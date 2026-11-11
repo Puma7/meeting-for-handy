@@ -505,6 +505,103 @@ fn exclusive_reservation_blocks_annotation_policy_and_import_writes_before_worke
     }
 }
 
+/// The index can contain a relabeled legacy meeting. History must still use the
+/// approved read-only original once, alongside native sessions.
+#[test]
+fn indexed_history_lists_a_relabeled_legacy_meeting_once_as_read_only() {
+    struct Fixture(PathBuf);
+    impl Drop for Fixture {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+    let root = fixture_root("legacy-indexed-history");
+    fs::create_dir(&root).unwrap();
+    let fixture = Fixture(root);
+    let root = &fixture.0;
+    let service = Service::new(root.clone()).unwrap();
+    let native =
+        SessionStore::create(&root.join("sessions"), "Synthetic native", "m", "s", None).unwrap();
+    native.set_status("complete").unwrap();
+    let native_id = native.snapshot().unwrap().id;
+    drop(native);
+
+    let legacy = root.join("legacy-fixture");
+    fs::create_dir(&legacy).unwrap();
+    let manifest = legacy.join("session.json");
+    let original = serde_json::to_vec(&serde_json::json!({
+        "SchemaVersion": 1,
+        "Id": "0123456789abcdef0123456789abcdef",
+        "Title": "Synthetic legacy",
+        "StartedAt": "2026-10-27T00:00:00Z",
+        "EndedAt": "2026-10-27T00:00:01Z",
+        "Status": "complete",
+        "ModelId": "m",
+        "Parts": [],
+    }))
+    .unwrap();
+    fs::write(&manifest, &original).unwrap();
+    service
+        .selections
+        .approve_generated_legacy_fixture(&manifest)
+        .unwrap();
+    let legacy_id = service
+        .import(manifest.to_string_lossy().into_owned())
+        .unwrap()
+        .data
+        .id;
+    library_commands::edit_metadata(
+        &service,
+        &legacy_id,
+        0,
+        Some("Synthetic renamed legacy".into()),
+        true,
+    )
+    .unwrap();
+
+    let job = service
+        .library_jobs
+        .start_scan(root.clone(), true, None)
+        .unwrap();
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    loop {
+        let progress = service.library_jobs.snapshot().unwrap();
+        assert_eq!(progress.job_id, job);
+        if progress.status != "running" {
+            assert_eq!(progress.status, "complete", "{:?}", progress.error);
+            break;
+        }
+        assert!(std::time::Instant::now() < deadline);
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    let index = service.library_jobs.completed_history_index(root).unwrap();
+    assert_eq!(
+        index
+            .search("Synthetic renamed legacy", 0, 10)
+            .unwrap()
+            .items[0]
+            .id,
+        legacy_id,
+    );
+    drop(index);
+
+    let history = service.history().unwrap();
+    assert_eq!(history.len(), 2);
+    assert!(history.iter().any(|meeting| meeting.data.id == native_id));
+    let listed = history
+        .iter()
+        .find(|meeting| meeting.data.id == legacy_id)
+        .unwrap();
+    assert!(listed.data.read_only);
+    assert_eq!(listed.data.title, "Synthetic renamed legacy");
+    assert_eq!(fs::read(&manifest).unwrap(), original);
+
+    fs::rename(&manifest, legacy.join("offline-session.json")).unwrap();
+    let history = service.history().unwrap();
+    assert_eq!(history.len(), 1);
+    assert_eq!(history[0].data.id, native_id);
+}
+
 /// Verify separate synthetic user labels can change during recording admission without changing
 /// the capture manifest.
 #[test]

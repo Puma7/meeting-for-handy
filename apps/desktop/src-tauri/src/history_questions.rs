@@ -221,14 +221,9 @@ fn locate(
         if !scope.permits(&data.started_at, meta.pinned) {
             continue;
         }
-        let title: String = meta
-            .title
-            .as_deref()
-            .unwrap_or(&data.title)
-            .chars()
-            .take(160)
-            .collect();
-        let title_lower = title.to_lowercase();
+        let current_title = meta.title.as_deref().unwrap_or(&data.title);
+        let title_matches = questions::matches_keywords(current_title, terms);
+        let title: String = current_title.chars().take(160).collect();
         let mut matches = group.into_iter().filter_map(|hit| {
             let file = hit.source_id?;
             let mut found = data.parts.iter().filter(|p| p.file == file);
@@ -237,11 +232,7 @@ fn locate(
                 return None;
             }
             let text = questions::excerpt(part.text.as_deref()?, terms);
-            if text.is_empty()
-                || !terms
-                    .iter()
-                    .any(|term| title_lower.contains(term) || text.to_lowercase().contains(term))
-            {
+            if text.is_empty() || (!title_matches && !questions::matches_keywords(text, terms)) {
                 return None;
             }
             Some(LocatedPassage {
@@ -351,6 +342,14 @@ mod tests {
             ..scope
         };
         assert!(locate(&service, &vip_scope, &terms, hits).is_empty());
+
+        let terms = questions::keywords("Wie ist die anderung?");
+        let hits = index.question_candidates(&terms, &scope, &[]).unwrap();
+        assert_eq!(hits.len(), 1);
+        let passages = locate(&service, &scope, &terms, hits);
+        assert_eq!(passages.len(), 1);
+        assert_eq!(passages[0].meeting_id, SECOND);
+        assert!(passages[0].passage.text.contains("Änderung"));
     }
 
     #[test]

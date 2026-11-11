@@ -20,9 +20,19 @@ Digital silence on the system track is padded against a monotonic clock. Track s
 
 Capture diagnostics do not own the recording lifetime. A warning that cannot be saved remains visible in the opened session, while writable PCM continues. Such a warning is not crash-durable until storage recovers. Stopping attempts every owned writer join and final status save before returning collected diagnostic failures. Real PCM-write errors still stop the affected track and retain confirmed data.
 
-## Requirements for an encrypted session store
+## Encrypted session storage
 
-The session store still writes local plaintext. Application-level encryption needs one storage boundary shared by capture, recovery, playback, analysis, archives and erasure. A new encrypted format must authenticate file and section identity along with payload and revision. The full-text index and its journals, transcript mirrors, archive staging and app-managed exports need an explicit encryption or rebuild policy. Old unprotected copies need a separate reviewed retention decision.
+### Protected Windows profile
+
+In **Settings → Data and maintenance → Encrypt session storage**, choose **Create encrypted profile**, then select a parent folder on a local NTFS drive that supports Windows Encrypting File System (EFS). Finish any active operations first and close older app versions or other tools that can write into the source. The migration runs from the one current window that has the source profile open.
+
+The app creates a new directory and enables EFS before writing session content. It copies session files, app-managed archives and other stored records such as annotations and retention history. It verifies the size and SHA-256 digest of each copied file and rechecks the source inventory before writing the protected-profile marker. The source files remain available in the original profile. Temporary operation and session leases are created afresh in the copy. [Windows file encryption](https://learn.microsoft.com/en-us/windows/win32/fileio/file-encryption)
+
+The app rebuilds the derived search index inside the protected profile. SQLite places its database, write-ahead log and shared-memory files under that directory and keeps temporary tables in memory. New private workspace drafts are stored in a dedicated WebView directory within the protected profile. Existing browser-only drafts and preferences are accessible in the original profile. Imported legacy originals and exports already saved outside the native profile stay at their original locations.
+
+After verification, choose **Open encrypted profile** to launch the copy in a new window. The original window stays open, and later edits apply to the profile where they are made. The same action can reopen a previously created profile through the native folder picker. A direct launch takes the absolute path of the verified profile, for example `HandyMeeting.exe --protected-profile "C:\MeetingStorage\HandyMeeting-Protected-example"`. A missing marker or failed protection check stops the protected launch before opening the session store.
+
+EFS protects file contents at rest through Windows. File and directory names remain visible to users who can list the folder. Access on a different Windows installation depends on the EFS certificate and its private key or an applicable Windows recovery agent. Portable `.hmvault` backups use their own recovery credentials. [EFS files and directories](https://learn.microsoft.com/en-us/windows/win32/fileio/handling-encrypted-files-and-directories) · [Windows EFS certificate backup](https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/cipher)
 
 ### Encrypted session copies
 
@@ -33,8 +43,6 @@ New backups use version 2. Each backup has a random content key and a random 32-
 AES-256-GCM authenticates sequential 64 KiB frames with a monotonic nonce and binds the full header and frame length to each frame. The encrypted inventory includes paths and SHA-256 digests. An authenticated terminal frame and physical end-of-file are required. Before publishing, the application verifies the whole temporary file through the passphrase and independently authenticates the first frame through the recovery key. [Pinned encryption implementation](https://docs.rs/ring/0.17.14/ring/aead/) · [Passphrase derivation parameters](https://cheatsheetseries.owasp.org/cheatsheets/Password_Storage_Cheat_Sheet.html).
 
 Recovery authenticates the complete backup before writing plaintext. It writes into an owned staging directory in the selected private destination, verifies the bytes on disk, reopens the native session and publishes a new independent profile. For an isolated application start, set `HANDYMEETING_DATA_DIR` to the returned `profile` directory. The search index can be rebuilt from recovered transcripts. Recovery intentionally produces readable files. A forced process stop or a filesystem error during cleanup can leave a directory named `.handy-recovery-*` with partially restored plaintext in the chosen target. Such a directory is never published as a recovered profile and should be inspected and removed by its owner.
-
-Migration must keep the source readable and write to a separate generation under the storage lease. Verify every migrated session and its journal, audio and archive references before switching one durable generation pointer. The next start must be able to recover before and after that switch. Verify missing and incorrect recovery credentials, interrupted migration, concurrent capture, disk exhaustion, rollback, index rebuild and permanent erasure with isolated data first. Never replace a missing key silently, and keep playback plaintext bounded to memory.
 
 ## Evidence
 

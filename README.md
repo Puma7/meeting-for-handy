@@ -51,7 +51,9 @@ Limit a question to up to twelve selected meetings, or ask about one meeting fro
 
 Recording setup offers a synthetic check of audio storage, transcription software and the selected local text model. Prepare a meeting from a local calendar file and explicitly apply its title and a template. Starting capture is a separate action.
 
-From a saved native meeting's details, create an **encrypted copy**. Under **Settings → Data and maintenance**, recover it into a separate profile with its passphrase or the separately displayed recovery key. Store both credentials away from the backup. The active meeting and search index stay readable in their existing storage.
+On Windows, **Settings → Data and maintenance → Encrypt session storage** can create a verified copy of your native profile on an EFS-capable local NTFS drive. Open the copy to use encrypted storage for new sessions and the rebuilt search index. The original profile keeps its existing files and private workspace drafts. [Protected Windows profile](docs/RUST_STORAGE.md#protected-windows-profile)
+
+For a portable backup of one saved native meeting, create an **encrypted copy** from the meeting's details. Under **Settings → Data and maintenance**, recover it into a separate profile with its passphrase or the separately displayed recovery key. Store both credentials away from the backup.
 
 ![Meeting for Handy transcript and local file controls](assets/screenshots/transcript-light.png)
 *Real app components with synthetic demo data. English and German interfaces are included.*

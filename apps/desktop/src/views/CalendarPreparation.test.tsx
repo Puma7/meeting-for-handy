@@ -97,4 +97,30 @@ describe("local calendar preparation", () => {
       },
     ]);
   });
+
+  it("rejects floating local times that are missing or duplicated during clock changes", () => {
+    const calendar = [
+      "BEGIN:VCALENDAR",
+      "BEGIN:VEVENT",
+      "DTSTART:20260329T023000",
+      "SUMMARY:Missing hour",
+      "END:VEVENT",
+      "BEGIN:VEVENT",
+      "DTSTART:20261025T023000",
+      "SUMMARY:Duplicated hour",
+      "END:VEVENT",
+      "BEGIN:VEVENT",
+      "DTSTART:20261025T033000",
+      "SUMMARY:Unambiguous local time",
+      "END:VEVENT",
+      "END:VCALENDAR",
+    ].join("\n");
+    expect(calendarEvents(calendar, "Europe/Berlin")).toEqual([
+      {
+        title: "Unambiguous local time",
+        agenda: "",
+        startsAt: Date.parse("2026-10-25T02:30:00Z"),
+      },
+    ]);
+  });
 });

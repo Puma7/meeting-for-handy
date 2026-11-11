@@ -114,6 +114,9 @@ export const desktopApi: DesktopApi = {
   recoverEncryptedBackup: (credential, kind) =>
     jobInvoke("recover_encrypted_backup", { credential, kind }),
   cancelEncryptedBackup: () => desktopInvoke("cancel_encrypted_backup"),
+  protectedProfileStatus: () => desktopInvoke("protected_profile_status"),
+  createProtectedProfile: () => jobInvoke("create_protected_profile"),
+  openProtectedProfile: () => desktopInvoke("open_protected_profile"),
   checkMeetingSetup: (request) => jobInvoke("check_meeting_setup", { request }),
   rebuildSearchIndex: () => jobInvoke("rebuild_search_index"),
   getLibraryProgress: () => desktopInvoke("get_library_progress"),

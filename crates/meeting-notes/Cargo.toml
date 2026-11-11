@@ -18,6 +18,8 @@ tokio = { version = "=1.54.1", features = ["rt", "time"] }
 tempfile = "=3.23.0"
 fs2 = "=0.4.3"
 zeroize = "=1.8.2"
+icu_normalizer = { version = "=2.1.1", default-features = false, features = ["compiled_data"] }
+icu_properties = { version = "=2.1.2", default-features = false, features = ["compiled_data"] }
 
 [dev-dependencies]
 tempfile = "=3.23.0"

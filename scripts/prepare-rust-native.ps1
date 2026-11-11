@@ -4,7 +4,14 @@ $archive = Join-Path $root '.build/native-download/transcribe-0.4.1-windows.tar.
 $archiveHash = '272EB97795048CCB557C85BB9DD44C9E530E1C928443114C39816A8A5F76269D'
 if (-not (Test-Path -LiteralPath $archive)) {
     New-Item -ItemType Directory -Path (Split-Path $archive -Parent) -Force | Out-Null
-    Invoke-WebRequest -Uri 'https://github.com/handy-computer/transcribe.cpp/releases/download/v0.4.1/transcribe-native-0.4.1-windows-x86_64-cpu-vulkan.tar.gz' -OutFile $archive
+    $download = $archive + '.' + [guid]::NewGuid().ToString('N') + '.partial'
+    try {
+        Invoke-WebRequest -Uri 'https://github.com/handy-computer/transcribe.cpp/releases/download/v0.4.1/transcribe-native-0.4.1-windows-x86_64-cpu-vulkan.tar.gz' -OutFile $download -MaximumRetryCount 2 -RetryIntervalSec 5
+        if ((Get-FileHash -LiteralPath $download -Algorithm SHA256).Hash -ne $archiveHash) { throw 'The downloaded native archive checksum does not match.' }
+        [IO.File]::Move($download, $archive)
+    } finally {
+        if (Test-Path -LiteralPath $download) { Remove-Item -LiteralPath $download -Force }
+    }
 }
 if ((Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash -ne $archiveHash) { throw 'The native archive checksum does not match. Existing programs remain untouched.' }
 $entries = & tar -tzf $archive

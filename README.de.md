@@ -46,7 +46,9 @@ Du kannst die Frage auf bis zu zwölf ausgewählte Meetings begrenzen oder sie i
 
 Die Aufnahme-Einrichtung bietet eine synthetische Funktionsprobe für Audiospeicherung, Transkriptionssoftware und das gewählte lokale Textmodell. Über eine lokale Kalenderdatei kannst du einen Termin zur Vorbereitung wählen und Titel und Vorlage übernehmen. Der Aufnahmestart bleibt eine eigene Handlung.
 
-In den Sitzungsdetails kannst du eine **verschlüsselte Kopie** einer gespeicherten nativen Sitzung anlegen. Unter **Einstellungen → Daten und Wartung** lässt sie sich mit der Passphrase oder dem separat angezeigten Wiederherstellungsschlüssel in ein separates Profil wiederherstellen. Bewahre beide Zugangsdaten getrennt von der Sicherung auf. Die aktive Sitzung und ihr Suchindex bleiben lesbar in ihrer bisherigen Ablage.
+Unter Windows kannst du über **Einstellungen → Daten und Wartung → Sitzungsspeicher verschlüsseln** eine geprüfte Profilkopie auf einem lokalen NTFS-Laufwerk mit EFS erstellen. Wenn du die Kopie öffnest, speichert die App neue Sitzungen und den neu aufgebauten Suchindex verschlüsselt. Die vorhandenen Dateien und privaten Arbeitsbereichsentwürfe bleiben im Originalprofil erhalten. [Geschütztes Windows-Profil](docs/RUST_STORAGE.md#protected-windows-profile)
+
+Eine **verschlüsselte Kopie** einer einzelnen gespeicherten nativen Sitzung erstellst du in den Sitzungsdetails. Unter **Einstellungen → Daten und Wartung** stellst du sie mit der Passphrase oder dem separat angezeigten Wiederherstellungsschlüssel in einem separaten Profil wieder her. Bewahre beide Zugangsdaten getrennt von der Sicherung auf.
 
 ![Transkript und lokale Dateien in Meeting for Handy](assets/screenshots/transcript-light.png)
 *Echte App-Komponenten mit künstlichen Demo-Inhalten. Deutsch und Englisch sind enthalten.*

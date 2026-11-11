@@ -5,6 +5,7 @@ import RetentionPanel from "./RetentionPanel";
 import { useState, type ReactNode } from "react";
 import UpdatePanel from "./UpdatePanel";
 import EncryptedBackup from "./EncryptedBackup";
+import ProtectedProfile from "./ProtectedProfile";
 
 /**
  * Presents read-only program paths and delegates native selection/import to the parent.
@@ -241,6 +242,15 @@ export default function SettingsView({
       </section>
       <section className="settings-group" id="settings-data" tabIndex={-1}>
         <h2>{de ? "Daten und Wartung" : "Data and maintenance"}</h2>
+        {api.protectedProfileStatus && api.createProtectedProfile && (
+          <ProtectedProfile
+            locale={locale}
+            disabled={unavailable}
+            readStatus={api.protectedProfileStatus}
+            create={api.createProtectedProfile}
+            open={api.openProtectedProfile}
+          />
+        )}
         {api.recoverEncryptedBackup && (
           <EncryptedBackup
             locale={locale}

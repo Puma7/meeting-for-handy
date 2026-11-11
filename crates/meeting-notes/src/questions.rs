@@ -1,6 +1,11 @@
 //! Extractive answers to free questions. Only a bounded text DTO crosses the transport.
 use crate::{AnalysisControl, TextClient};
 use anyhow::{ensure, Context, Result};
+use icu_normalizer::{ComposingNormalizer, DecomposingNormalizer};
+use icu_properties::{
+    props::{GeneralCategory, GeneralCategoryGroup, Script},
+    CodePointMapData,
+};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
@@ -35,28 +40,59 @@ pub fn keywords(question: &str) -> Vec<String> {
     const STOP: &[&str] = &[
         "was", "wer", "wen", "wie", "wo", "wann", "warum", "welche", "welcher", "welches", "wurde",
         "wurden", "haben", "hat", "sind", "sein", "ist", "einen", "eine", "einer", "der", "die",
-        "das", "den", "dem", "des", "und", "oder", "für", "bei", "zum", "zur", "über", "aus",
+        "das", "den", "dem", "des", "und", "oder", "fur", "bei", "zum", "zur", "uber", "aus",
         "von", "mit", "auf", "nach", "noch", "uns", "sich", "bitte", "what", "who", "how", "where",
         "when", "why", "which", "were", "was", "will", "would", "does", "did", "has", "have",
         "had", "been", "the", "this", "that", "these", "those", "from", "for", "about", "our",
         "they", "their", "and", "with", "please", "meeting", "meetings",
     ];
     let mut terms = Vec::new();
-    for term in question.split(|c: char| !c.is_alphanumeric()) {
-        let word: String = term
-            .to_lowercase()
-            .chars()
-            .filter(|c| c.is_alphanumeric())
-            .collect();
+    let folded = fold_search_text(question);
+    for word in folded.split(|c: char| !c.is_alphanumeric()) {
         let length = word.chars().count();
-        if (2..=40).contains(&length) && !STOP.contains(&word.as_str()) && !terms.contains(&word) {
-            terms.push(word);
+        if (2..=40).contains(&length)
+            && !STOP.contains(&word)
+            && !terms.iter().any(|term| term == word)
+        {
+            terms.push(word.to_owned());
             if terms.len() == 16 {
                 break;
             }
         }
     }
     terms
+}
+
+/// Match current text with the Latin accent and prefix behavior used by the index.
+pub fn matches_keywords(text: &str, terms: &[String]) -> bool {
+    keyword_score(text, terms) > 0
+}
+
+fn fold_search_text(text: &str) -> String {
+    let categories = CodePointMapData::<GeneralCategory>::new();
+    let scripts = CodePointMapData::<Script>::new();
+    let mut latin = false;
+    let characters = DecomposingNormalizer::new_nfd()
+        .normalize_iter(text.chars().flat_map(char::to_lowercase))
+        .filter(|&character| {
+            if GeneralCategoryGroup::Mark.contains(categories.get(character)) {
+                return !latin;
+            }
+            latin = scripts.get(character) == Script::Latin;
+            true
+        });
+    ComposingNormalizer::new_nfc()
+        .normalize_iter(characters)
+        .collect()
+}
+
+fn keyword_score(text: &str, terms: &[String]) -> usize {
+    let folded = fold_search_text(text);
+    let words = folded.split(|c: char| !c.is_alphanumeric());
+    terms
+        .iter()
+        .filter(|term| words.clone().any(|word| word.starts_with(term.as_str())))
+        .count()
 }
 
 /// Choose a contiguous window from the authoritative section. Overlap keeps
@@ -75,11 +111,7 @@ pub fn excerpt<'a>(text: &'a str, terms: &[String]) -> &'a str {
     let mut best = (0, 0);
     for start in (0..last).step_by(MAX_PASSAGE_CHARS / 2).chain([last]) {
         let slice = &text[offsets[start]..offsets[start + MAX_PASSAGE_CHARS]];
-        let lower = slice.to_lowercase();
-        let score = terms
-            .iter()
-            .filter(|term| lower.contains(term.as_str()))
-            .count();
+        let score = keyword_score(slice, terms);
         if score > best.1 {
             best = (start, score);
         }
@@ -169,6 +201,23 @@ fn checked_quotes(reply: &str, passages: &[Passage]) -> Result<Vec<Quote>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn accent_variants_rank_the_original_sentence_and_preserve_non_latin_words() {
+        let terms = keywords("Wie läuft das Kühlungs-Update für die Kühlung?");
+        assert!(terms.iter().any(|term| term == "kuhlungs"));
+        assert!(!terms.iter().any(|term| term == "fur"));
+        assert_eq!(keywords("Ku\u{308}hlung"), keywords("kuhlung"));
+        assert_eq!(keywords("Μάιος"), vec!["μάιος"]);
+        let sentence = "Das Kühlungssystem wird am Freitag geprüft.";
+        let text = format!("{}{sentence}", "Einleitender Text ohne Beleg. ".repeat(40));
+        assert!(matches_keywords(sentence, &terms));
+        assert!(excerpt(&text, &terms).contains(sentence));
+        assert!(!matches_keywords(
+            "Abkühlung ist ein anderes Thema.",
+            &terms
+        ));
+    }
 
     #[test]
     fn answers_reject_invented_words_and_swapped_sources_as_a_whole() {

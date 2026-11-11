@@ -176,7 +176,11 @@ impl LibraryIndex {
         }
         let db = Connection::open(path)?;
         db.busy_timeout(Duration::from_secs(3))?;
-        db.execute_batch("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;")?;
+        // Query sort tables may contain transcript text. Keep them in memory so
+        // SQLite cannot spill them into the system temp folder outside the profile.
+        db.execute_batch(
+            "PRAGMA temp_store=MEMORY; PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;",
+        )?;
         let version: i64 = db.query_row("PRAGMA user_version", [], |r| r.get(0))?;
         if version != SCHEMA_VERSION {
             Self::upgrade(&db)?;
@@ -614,6 +618,25 @@ mod index_admission_tests {
         atomic::{AtomicBool, Ordering},
         Arc,
     };
+
+    #[test]
+    fn index_connections_keep_query_temporary_storage_in_memory() {
+        let root = tempfile::tempdir().unwrap();
+        let opened = LibraryIndex::open(root.path()).unwrap();
+        let (rebuilt, _) = LibraryIndex::open_for_rebuild(root.path()).unwrap();
+        for index in [opened, rebuilt] {
+            let temporary_storage: i64 = index
+                .db
+                .query_row("PRAGMA temp_store", [], |row| row.get(0))
+                .unwrap();
+            assert_eq!(temporary_storage, 2, "SQLite MEMORY temporary storage");
+            let journal_mode: String = index
+                .db
+                .query_row("PRAGMA journal_mode", [], |row| row.get(0))
+                .unwrap();
+            assert_eq!(journal_mode, "wal");
+        }
+    }
 
     #[test]
     /// Existing caches retain their token; explicit rebuild preserves invalid

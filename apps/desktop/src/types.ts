@@ -4,6 +4,13 @@ import type {
 } from "./workspace/WorkspaceBridge";
 export type Locale = "de" | "en";
 export type BackupCredential = "passphrase" | "recoveryKey";
+
+export type ProtectedProfileStatus = { supported: boolean; active: boolean };
+export type ProtectedProfileReceipt = {
+  path: string;
+  files: number;
+  bytes: number;
+};
 export type Theme = "light" | "dark" | "system";
 export type Track = "system" | "microphone";
 export interface HandyModel {
@@ -575,6 +582,9 @@ export interface DesktopApi {
     kind: BackupCredential,
   ): Promise<string | null>;
   cancelEncryptedBackup?(): Promise<boolean>;
+  protectedProfileStatus?(): Promise<ProtectedProfileStatus>;
+  createProtectedProfile?(): Promise<ProtectedProfileReceipt | null>;
+  openProtectedProfile?(): Promise<boolean | null>;
   checkMeetingSetup?(request: {
     modelId: string;
     text?: Omit<HistoryQuestionRequest, "question" | "scope" | "meetingIds">;
