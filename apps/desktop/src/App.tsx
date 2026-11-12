@@ -2497,6 +2497,17 @@ export default function App({ api = desktopApi }: { api?: DesktopApi }) {
                     }
                   : old,
               );
+              setHistory((items) =>
+                items.map((item) =>
+                  item.id === target.id
+                    ? {
+                        ...item,
+                        title: meta.title ?? item.title,
+                        userMetadata: meta,
+                      }
+                    : item,
+                ),
+              );
               void refreshHistory().catch((e) => setError(errorMessage(e)));
             }}
           />

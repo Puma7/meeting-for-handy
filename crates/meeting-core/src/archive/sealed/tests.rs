@@ -1,55 +1,56 @@
 use super::*;
 
-#[cfg(unix)]
 #[test]
-fn failed_backup_directory_sync_unlinks_only_the_published_file() {
+fn failed_backup_directory_sync_leaves_verified_copy_and_external_files_alone() {
+    let source = tempfile::tempdir().unwrap();
     let directory = tempfile::tempdir().unwrap();
+    let (id, folder) = fixture(source.path());
+    let original = fingerprints(&folder);
+    let passphrase = synthetic_passphrase();
+    let password = passphrase.as_bytes();
+    let cancel = AtomicBool::new(false);
+    let reference = directory.path().join("reference.hmvault");
+    create(source.path(), &id, &reference, password, &cancel).unwrap();
+    let encrypted = fs::read(&reference).unwrap();
     let output = directory.path().join("synthetic.hmvault");
     let keep = directory.path().join("other-copy.hmvault");
     fs::write(&keep, b"existing external copy").unwrap();
-    let mut pending = tempfile::NamedTempFile::new_in(directory.path()).unwrap();
-    pending.write_all(b"synthetic pending copy").unwrap();
-
-    let error = publish_backup(pending, &output, |parent| {
-        assert_eq!(parent, directory.path());
-        assert_eq!(fs::read(&output)?, b"synthetic pending copy");
-        Err("synthetic directory sync failure".into())
-    })
-    .unwrap_err();
-    assert_eq!(error.to_string(), "synthetic directory sync failure");
-    assert!(!output.exists());
-    assert_eq!(fs::read(&keep).unwrap(), b"existing external copy");
-
-    let pending = tempfile::NamedTempFile::new_in(directory.path()).unwrap();
     let moved = directory.path().join("moved-copy.hmvault");
-    let error = publish_backup(pending, &output, |_| {
-        fs::rename(&output, &moved)?;
-        fs::write(&output, b"external replacement")?;
-        Err("synthetic directory sync failure".into())
-    })
-    .unwrap_err()
-    .to_string();
-    assert!(error.contains(&output.display().to_string()));
-    assert!(error.contains("A recovery key was not delivered"));
-    assert_eq!(fs::read(&output).unwrap(), b"external replacement");
-    assert!(moved.is_file());
-}
 
-#[cfg(not(unix))]
-#[test]
-fn failed_backup_sync_reports_a_copy_whose_identity_cannot_be_rechecked() {
-    let directory = tempfile::tempdir().unwrap();
-    let output = directory.path().join("synthetic.hmvault");
-    let mut pending = tempfile::NamedTempFile::new_in(directory.path()).unwrap();
-    pending.write_all(b"synthetic pending copy").unwrap();
-    let error = publish_backup(pending, &output, |_| {
-        Err("synthetic directory sync failure".into())
-    })
-    .unwrap_err()
-    .to_string();
-    assert!(error.contains(&output.display().to_string()));
-    assert!(error.contains("A recovery key was not delivered"));
-    assert_eq!(fs::read(&output).unwrap(), b"synthetic pending copy");
+    for replace in [false, true] {
+        let mut pending = tempfile::NamedTempFile::new_in(directory.path()).unwrap();
+        pending.write_all(&encrypted).unwrap();
+        let error = publish_backup(pending, &output, |parent| {
+            assert_eq!(parent, directory.path());
+            assert_eq!(fs::read(&output)?, encrypted);
+            if replace {
+                fs::rename(&output, &moved)?;
+                fs::write(&output, b"external replacement")?;
+            }
+            Err("synthetic directory sync failure".into())
+        })
+        .unwrap_err()
+        .to_string();
+        assert!(error.contains("synthetic directory sync failure"));
+        assert!(error.contains(&output.display().to_string()));
+        assert!(error.contains("could not confirm the backup's durability"));
+        assert!(error.contains("A recovery key was not delivered"));
+        let copy = if replace { &moved } else { &output };
+        assert_eq!(fs::read(copy).unwrap(), encrypted);
+        assert_eq!(
+            verify(copy, Unlock::Passphrase(password), &cancel)
+                .unwrap()
+                .meeting_id,
+            id
+        );
+        if replace {
+            assert_eq!(fs::read(&output).unwrap(), b"external replacement");
+        } else {
+            fs::remove_file(&output).unwrap();
+        }
+        assert_eq!(fs::read(&keep).unwrap(), b"existing external copy");
+        assert_eq!(fingerprints(&folder), original);
+    }
 }
 
 #[test]

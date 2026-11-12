@@ -299,41 +299,18 @@ fn publish_backup(
     sync: impl FnOnce(&Path) -> Result<()>,
 ) -> Result<()> {
     let directory = output.parent().ok_or("Missing backup directory")?;
-    let published = pending
+    pending
         .persist_noclobber(output)
         .map_err(|error| error.error)?;
-    if let Err(error) = sync(directory) {
-        if let Err(cleanup) = remove_owned_backup(output, &published) {
-            return Err(format!(
-                "{error}\nCould not confirm removal of the unfinished encrypted backup at {} ({cleanup}). If the copy remains, use its passphrase. A recovery key was not delivered. / Die Entfernung der unvollständigen verschlüsselten Sicherung unter {} konnte nicht bestätigt werden ({cleanup}). Falls die Kopie vorhanden ist, nutze ihre Passphrase. Ein Wiederherstellungsschlüssel wurde nicht ausgegeben.",
-                output.display(), output.display(),
-            ).into());
-        }
-        return Err(error);
-    }
-    Ok(())
-}
-
-fn remove_owned_backup(output: &Path, published: &File) -> Result<()> {
-    // Directory synchronization is required on Unix. Compare the current directory
-    // entry with the still-open published file before removing anything.
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::MetadataExt;
-
-        let owned = published.metadata()?;
-        let current = regular(output)?;
-        if (owned.dev(), owned.ino()) != (current.dev(), current.ino()) {
-            return Err("The backup destination changed after publication".into());
-        }
-        fs::remove_file(output)?;
-        sync_directory(output.parent().ok_or("Missing backup directory")?)
-    }
-    #[cfg(not(unix))]
-    {
-        let _ = (output, published);
-        Err("The published backup's identity could not be verified".into())
-    }
+    // The published ciphertext was already authenticated and file-synced. The
+    // destination is user-selected, so any later path-based cleanup could unlink
+    // a different file that has since taken its place.
+    sync(directory).map_err(|error| {
+        format!(
+            "{error}\nThe app could not confirm the backup's durability at {}. If the file is present, verify it with the passphrase before relying on it. A recovery key was not delivered. / Die App konnte die dauerhafte Speicherung der Sicherung unter {} nicht bestätigen. Falls die Datei vorhanden ist, prüfe sie vor der Verwendung mit der Passphrase. Ein Wiederherstellungsschlüssel wurde nicht ausgegeben.",
+            output.display(), output.display(),
+        ).into()
+    })
 }
 
 type BackupPaths = (Vec<(String, PathBuf)>, Vec<String>);

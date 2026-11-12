@@ -603,6 +603,29 @@ it("clears an answer and removes an erased selected meeting even when that meeti
   );
 });
 
+it("keeps explicit meeting selection when a non-VIP choice list refreshes", async () => {
+  const answer = { searchedPassages: 0, citations: [] };
+  const ask = vi.fn().mockResolvedValue(answer);
+  const props = {
+    ask,
+    locale: "en" as const,
+    model: { endpoint: "http://127.0.0.1:1235/v1/", model: "synthetic" },
+    invalidDates: false,
+    initialResult: {
+      question: "When is delivery?",
+      meetingIds: [meeting.id],
+      answer,
+    },
+    onOpen: vi.fn(),
+  };
+  const view = render(<HistoryQuestions {...props} choices={[meeting]} />);
+  view.rerender(<HistoryQuestions {...props} choices={[]} />);
+  await userEvent.click(screen.getByRole("button", { name: "Answer locally" }));
+  expect(ask).toHaveBeenCalledExactlyOnceWith(
+    expect.objectContaining({ meetingIds: [meeting.id] }),
+  );
+});
+
 it("loads verified audio only after a user requests the exact history result", async () => {
   const sourceId = meeting.parts[0].file;
   const getTranscriptAudio = vi

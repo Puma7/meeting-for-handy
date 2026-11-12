@@ -2149,92 +2149,132 @@ describe("workspace navigation (synthetic IPC)", () => {
     expect(Object.values(localStorage).join(" ")).not.toContain(key);
   });
 
-  it("discards the saved VIP-only answer when its cited meeting is unpinned", async () => {
-    localStorage.setItem(
-      "handymeeting.rust.live-notes.v1",
-      JSON.stringify({
-        endpoint: "http://127.0.0.1:1235/v1/",
-        model: "synthetic-text-model",
-      }),
-    );
-    let labelled = {
-      ...meeting,
-      userMetadata: {
-        revision: 0,
-        title: null,
-        pinned: true,
-        audioRemoved: false,
-      },
-    };
-    const api = fakeApi();
-    api.listMeetings = vi.fn(async () => [labelled]);
-    api.getMeeting = vi.fn(async () => labelled);
-    api.searchMeetings = vi.fn();
-    api.editMeetingMetadata = vi.fn(async (_id, revision, _title, pinned) => {
-      labelled = {
-        ...labelled,
+  it.each([false, true])(
+    "discards a VIP-only answer after unpinning (return before save: %s)",
+    async (returnBeforeSave) => {
+      localStorage.setItem(
+        "handymeeting.rust.live-notes.v1",
+        JSON.stringify({
+          endpoint: "http://127.0.0.1:1235/v1/",
+          model: "synthetic-text-model",
+        }),
+      );
+      let labelled = {
+        ...meeting,
         userMetadata: {
-          ...labelled.userMetadata,
-          revision: revision + 1,
-          pinned,
+          revision: 0,
+          title: null,
+          pinned: true,
+          audioRemoved: false,
         },
       };
-      return labelled.userMetadata;
-    });
-    api.askMeetingHistory = vi.fn().mockResolvedValue({
-      searchedPassages: 1,
-      citations: [
-        {
-          meetingId: meeting.id,
-          meetingTitle: meeting.title,
-          sourceId: meeting.parts[0].file,
-          startMs: 0,
-          quote: meeting.parts[0].text,
-        },
-      ],
-    });
-    render(<App api={api} />);
-    await ready();
-    const user = userEvent.setup();
-    await user.click(screen.getByRole("button", { name: "Historie" }));
-    await user.click(
-      screen.getByRole("checkbox", { name: "Nur VIP-Meetings" }),
-    );
-    await user.click(screen.getByText("Meetings befragen"));
-    await user.type(
-      screen.getByLabelText("Frage an deine Meetings"),
-      "Was wurde entschieden?",
-    );
-    await user.click(screen.getByRole("button", { name: "Lokal beantworten" }));
-    await user.click(
-      await screen.findByRole("button", { name: "Originalstelle öffnen" }),
-    );
-    await user.click(
-      await screen.findByRole("button", {
-        name: "VIP · vor Aufräumen geschützt",
-      }),
-    );
-    await waitFor(() =>
-      expect(api.editMeetingMetadata).toHaveBeenCalledWith(
-        meeting.id,
-        0,
-        null,
-        false,
-      ),
-    );
-    await user.click(screen.getByRole("button", { name: "Historie" }));
-    expect(
-      screen.getByRole("checkbox", { name: "Nur VIP-Meetings" }),
-    ).toHaveProperty("checked", true);
-    expect(
-      screen.queryByRole("button", { name: "Originalstelle öffnen" }),
-    ).toBeNull();
-    await user.click(screen.getByText("Meetings befragen"));
-    expect(screen.getByLabelText("Frage an deine Meetings")).toHaveProperty(
-      "value",
-      "",
-    );
-  });
+      const api = fakeApi();
+      api.listMeetings = vi.fn(async () => [labelled]);
+      api.getMeeting = vi.fn(async () => labelled);
+      api.searchMeetings = vi.fn();
+      let finishUnpin = () => {};
+      const saveReady = returnBeforeSave
+        ? new Promise<void>((resolve) => {
+            finishUnpin = resolve;
+          })
+        : Promise.resolve();
+      api.editMeetingMetadata = vi.fn(async (_id, revision, _title, pinned) => {
+        await saveReady;
+        labelled = {
+          ...labelled,
+          userMetadata: {
+            ...labelled.userMetadata,
+            revision: revision + 1,
+            pinned,
+          },
+        };
+        return labelled.userMetadata;
+      });
+      api.askMeetingHistory = vi
+        .fn()
+        .mockResolvedValueOnce({
+          searchedPassages: 1,
+          citations: [
+            {
+              meetingId: meeting.id,
+              meetingTitle: meeting.title,
+              sourceId: meeting.parts[0].file,
+              startMs: 0,
+              quote: meeting.parts[0].text,
+            },
+          ],
+        })
+        .mockResolvedValue({ searchedPassages: 0, citations: [] });
+      render(<App api={api} />);
+      await ready();
+      const user = userEvent.setup();
+      await user.click(screen.getByRole("button", { name: "Historie" }));
+      await user.click(
+        screen.getByRole("checkbox", { name: "Nur VIP-Meetings" }),
+      );
+      await user.click(screen.getByText("Meetings befragen"));
+      await user.click(
+        screen.getByText("Alle Meetings im gewählten Zeitraum und VIP-Filter"),
+      );
+      await user.click(
+        screen.getByRole("checkbox", { name: /Synthetic meeting/ }),
+      );
+      await user.type(
+        screen.getByLabelText("Frage an deine Meetings"),
+        "Was wurde entschieden?",
+      );
+      await user.click(
+        screen.getByRole("button", { name: "Lokal beantworten" }),
+      );
+      await user.click(
+        await screen.findByRole("button", { name: "Originalstelle öffnen" }),
+      );
+      await user.click(
+        await screen.findByRole("button", {
+          name: "VIP · vor Aufräumen geschützt",
+        }),
+      );
+      await waitFor(() =>
+        expect(api.editMeetingMetadata).toHaveBeenCalledWith(
+          meeting.id,
+          0,
+          null,
+          false,
+        ),
+      );
+      await user.click(screen.getByRole("button", { name: "Historie" }));
+      expect(
+        screen.getByRole("checkbox", { name: "Nur VIP-Meetings" }),
+      ).toHaveProperty("checked", true);
+      if (returnBeforeSave) {
+        expect(
+          await screen.findByRole("button", { name: "Originalstelle öffnen" }),
+        ).toBeTruthy();
+        await act(async () => finishUnpin());
+        await waitFor(() =>
+          expect(
+            screen.queryByRole("button", { name: "Originalstelle öffnen" }),
+          ).toBeNull(),
+        );
+        await user.click(
+          screen.getByRole("button", { name: "Lokal beantworten" }),
+        );
+        expect(api.askMeetingHistory).toHaveBeenCalledTimes(2);
+        expect(
+          vi.mocked(api.askMeetingHistory!).mock.lastCall?.[0],
+        ).not.toHaveProperty("meetingIds");
+        return;
+      }
+      expect(
+        screen.queryByRole("button", { name: "Originalstelle öffnen" }),
+      ).toBeNull();
+      await user.click(screen.getByText("Meetings befragen"));
+      expect(screen.getByLabelText("Frage an deine Meetings")).toHaveProperty(
+        "value",
+        "",
+      );
+    },
+  );
 
   it("keeps calendar preparation discoverable beside the closed capture setup", async () => {
     render(<App api={fakeApi(meeting)} />);

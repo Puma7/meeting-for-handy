@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { ArrowRight } from "lucide-react";
 import { errorMessage } from "../api";
 import { clock } from "../domain";
@@ -65,22 +65,35 @@ export default function HistoryQuestions({
   const [error, setError] = useState<string | null>(null);
   const [selectedIds, setSelection] = useState(initialResult?.meetingIds ?? []);
   const [findMeeting, setFindMeeting] = useState("");
-  const selection = selectedIds.filter((id) => !hiddenMeetingIds?.has(id));
+  const vipIds = useMemo(
+    () =>
+      scope?.pinnedOnly && choices
+        ? new Set(
+            choices
+              .filter((choice) => choice.userMetadata?.pinned)
+              .map((choice) => choice.id),
+          )
+        : undefined,
+    [scope?.pinnedOnly, choices],
+  );
+  const outsideScope = useCallback(
+    (id: string) =>
+      Boolean(hiddenMeetingIds?.has(id) || (vipIds && !vipIds.has(id))),
+    [hiddenMeetingIds, vipIds],
+  );
+  const selection = selectedIds.filter((id) => !outsideScope(id));
   const selectionRemoved = selection.length !== selectedIds.length;
   const answerRemoved = Boolean(
-    answer &&
-      historyQuestionUsesMeeting(answer, (id) =>
-        Boolean(hiddenMeetingIds?.has(id)),
-      ),
+    answer && historyQuestionUsesMeeting(answer, outsideScope),
   );
   useEffect(() => {
     if (selectionRemoved)
-      setSelection((ids) => ids.filter((id) => !hiddenMeetingIds?.has(id)));
+      setSelection((ids) => ids.filter((id) => !outsideScope(id)));
     if (answerRemoved) setAnswer(null);
-  }, [selectionRemoved, answerRemoved, hiddenMeetingIds]);
+  }, [selectionRemoved, answerRemoved, outsideScope]);
   const candidates = choices?.filter(
     (meeting) =>
-      !hiddenMeetingIds?.has(meeting.id) &&
+      !outsideScope(meeting.id) &&
       (selection.includes(meeting.id) ||
         meeting.title.toLowerCase().includes(findMeeting.trim().toLowerCase())),
   );
