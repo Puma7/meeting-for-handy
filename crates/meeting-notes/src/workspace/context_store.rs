@@ -217,6 +217,14 @@ pub(crate) fn update(
     folder: &Path,
     incoming: &WorkspaceContext,
 ) -> Result<(WorkspaceContext, WorkspaceState)> {
+    update_checked(folder, incoming, |_, _| Ok(()))
+}
+
+pub(crate) fn update_checked(
+    folder: &Path,
+    incoming: &WorkspaceContext,
+    verify: impl FnOnce(&WorkspaceState, &[Event]) -> Result<()>,
+) -> Result<(WorkspaceContext, WorkspaceState)> {
     incoming.validate_request_budget()?;
     let _guard = lock(folder)?;
     let mut state = store::read(folder)?;
@@ -234,7 +242,9 @@ pub(crate) fn update(
         .revision
         .checked_add(1)
         .ok_or_else(|| anyhow::anyhow!("Zu viele Kontextfassungen."))?;
+    let prior_events = state.events.len();
     state.apply_context(&next)?;
+    verify(&state, &state.events[prior_events..])?;
     let entries = fs::read_dir(folder)?.collect::<std::io::Result<Vec<_>>>()?;
     let reset = !entries.iter().any(|e| {
         e.file_name()

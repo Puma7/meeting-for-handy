@@ -340,7 +340,6 @@ export default function MeetingView({
             </div>
           )}
           <div className="setup-grid">
-            {!recording && !isStopping && calendarPreparation}
             <label className="full">
               {t.title}
               <input
@@ -387,6 +386,7 @@ export default function MeetingView({
             </label>
           </div>
         </details>
+        {!recording && !isStopping && calendarPreparation}
         <AudioSources
           compact={recording && !setupOpen}
           t={t}

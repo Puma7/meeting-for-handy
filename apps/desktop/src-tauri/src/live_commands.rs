@@ -1,8 +1,8 @@
 //! Commands for live notes during a meeting and for the local text model setup.
-use crate::live_notes::{LiveNotesRequest, LiveNotesStatus};
+use crate::live_notes::{CurrentWorkspaceEvidence, LiveNotesRequest, LiveNotesStatus};
 use crate::local_models::{LocalModelSetup, PullProgress};
 use crate::{blocking, AppResult, Service};
-use std::{collections::HashMap, sync::Arc};
+use std::sync::Arc;
 use tauri::State;
 
 /// Resolve only a validated native session; callers keep its publication lease throughout the read.
@@ -86,37 +86,13 @@ fn workspace_export(
     view: &meeting_notes::workspace::WorkspaceState,
     data: &meeting_core::SessionData,
 ) -> serde_json::Value {
-    let current_sources = meeting_notes::live::pending(&[], &crate::live_notes::live_texts(data).0);
-    let current: HashMap<_, _> = current_sources
-        .iter()
-        .map(|source| ((source.key.as_str(), source.chunk), source))
-        .collect();
-    let mut verified = HashMap::new();
+    let mut current = CurrentWorkspaceEvidence::new(view, data);
     let confirmed = view.current_confirmations();
     let entries: Vec<_> = view
         .entities
         .iter()
         .filter(|entry| !view.context_excluded_ids.contains(&entry.id))
-        .filter(|entry| {
-            !entry.evidence.is_empty()
-                && entry.evidence.iter().all(|evidence| {
-                    let source = verified
-                        .entry(evidence.source_id.as_str())
-                        .or_insert_with(|| {
-                            // The saved identifier binds the quote to its original transcript chunk.
-                            // A stale workspace may not yet have marked a recognized revision superseded.
-                            let saved = view.audio_source(&evidence.source_id)?;
-                            let latest = current.get(&(saved.key.as_str(), saved.chunk))?;
-                            (latest.source == saved.source
-                                && latest.start_ms == saved.start_ms
-                                && latest.end_ms == saved.end_ms
-                                && latest.text == saved.text)
-                                .then_some(saved)
-                        });
-                    !evidence.quote.trim().is_empty()
-                        && source.is_some_and(|source| source.text.contains(&evidence.quote))
-                })
-        })
+        .filter(|entry| current.supports(&entry.evidence))
         .map(|entry| {
             let review = if confirmed.contains_key(entry.id.as_str()) {
                 "confirmed"
@@ -287,11 +263,13 @@ pub(crate) async fn get_live_notes(
 ) -> AppResult<LiveNotesStatus> {
     let service = Arc::clone(&service);
     blocking(move || {
-        service.live_notes.status_with_preference(
-            &service,
-            &meeting_id,
-            prefer_workspace.unwrap_or(false),
-        )
+        if prefer_workspace.unwrap_or(false) {
+            service.live_notes.workspace_status(&service, &meeting_id)
+        } else {
+            service
+                .live_notes
+                .status_with_preference(&service, &meeting_id, false)
+        }
     })
     .await
 }

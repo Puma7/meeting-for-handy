@@ -335,7 +335,7 @@ export default function HistorySearch({
         <label className="search-filter-check">
           <input
             type="checkbox"
-            checked={evidenceOnly}
+            checked={transcriptOnly}
             disabled={!hasQuery}
             onChange={(e) => updateSearch({ transcriptOnly: e.target.checked })}
           />

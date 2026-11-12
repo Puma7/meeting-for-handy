@@ -1,11 +1,13 @@
 //! Live notes worker: reads only the confirmed transcript that the UI also reads and sends text
 //! to the chosen model. It never holds the recording transition, a capture handle or audio.
 use crate::{valid_legacy_id, validate_id, AppResult, Service};
-use meeting_core::SessionData;
+use meeting_core::{AudioPart, SessionData};
 use meeting_notes::live::{self, LiveRunner, LiveText, LiveView, Trigger};
+use meeting_notes::workspace::WorkspaceState;
 use meeting_notes::AnalysisControl;
 use serde::{Deserialize, Serialize};
 use std::{
+    collections::HashMap,
     sync::{
         atomic::{AtomicBool, AtomicU64, Ordering},
         Arc, Mutex,
@@ -56,6 +58,8 @@ pub(crate) struct LiveNotesRequest {
 #[serde(rename_all = "camelCase")]
 pub(crate) struct LiveNotesStatus {
     workspace_context: Option<meeting_notes::workspace::WorkspaceContext>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    confirmable_workspace_entries: Option<Vec<String>>,
     response_bytes: u64,
     response_idle_ms: u64,
     update_elapsed_ms: u64,
@@ -135,6 +139,7 @@ impl Job {
         });
         LiveNotesStatus {
             workspace_context: input_context,
+            confirmable_workspace_entries: None,
             response_bytes: self.control.response_bytes(),
             response_idle_ms: self.control.response_idle_ms(),
             update_elapsed_ms: if shared.status == "updating" {
@@ -166,6 +171,7 @@ fn off(meeting_id: &str, view: Option<LiveView>, error: Option<String>) -> LiveN
         workspace_context: view
             .as_ref()
             .and_then(|v| v.workspace.as_ref().map(|w| w.context.clone())),
+        confirmable_workspace_entries: None,
         response_bytes: 0,
         response_idle_ms: 0,
         update_elapsed_ms: 0,
@@ -270,6 +276,61 @@ pub(crate) fn live_texts(data: &SessionData) -> (Vec<LiveText>, bool) {
         .collect();
     let active = ["recording", "streaming", "catching-up"].contains(&data.status.as_str());
     (texts, !active)
+}
+
+/// Check saved workspace evidence against the exact current transcript chunk and track.
+pub(super) struct CurrentWorkspaceEvidence<'a> {
+    workspace: &'a WorkspaceState,
+    parts: HashMap<&'a str, Option<&'a AudioPart>>,
+    verified: HashMap<&'a str, Option<&'a live::LiveSource>>,
+}
+
+impl<'a> CurrentWorkspaceEvidence<'a> {
+    pub(super) fn new(workspace: &'a WorkspaceState, data: &'a SessionData) -> Self {
+        let mut parts = HashMap::with_capacity(data.parts.len());
+        for part in &data.parts {
+            parts
+                .entry(part.file.as_str())
+                .and_modify(|part| *part = None)
+                .or_insert(Some(part));
+        }
+        Self {
+            workspace,
+            parts,
+            verified: HashMap::new(),
+        }
+    }
+
+    pub(super) fn supports(&mut self, evidence: &'a [meeting_notes::Evidence]) -> bool {
+        !evidence.is_empty()
+            && evidence.iter().all(|evidence| {
+                if evidence.quote.trim().is_empty() {
+                    return false;
+                }
+                self.verified
+                    .entry(evidence.source_id.as_str())
+                    .or_insert_with(|| {
+                        let saved = self.workspace.audio_source(&evidence.source_id)?;
+                        let part = self.parts.get(saved.key.as_str()).copied().flatten()?;
+                        let rate = u64::from(meeting_core::SAMPLE_RATE);
+                        (part.status == "complete"
+                            && part.source == saved.source
+                            && part.start_sample.saturating_mul(1000) / rate == saved.start_ms
+                            && part
+                                .start_sample
+                                .saturating_add(part.sample_count)
+                                .saturating_mul(1000)
+                                / rate
+                                == saved.end_ms
+                            && part
+                                .text
+                                .as_deref()
+                                .is_some_and(|text| saved.matches_transcript(text)))
+                        .then_some(saved)
+                    })
+                    .is_some_and(|source| source.text.contains(&evidence.quote))
+            })
+    }
 }
 
 /// One meeting state as seen by the live worker.
@@ -475,6 +536,49 @@ impl LiveNotes {
         self.status_with_preference(service, meeting_id, false)
     }
 
+    /// Give the renderer the IDs it can confirm without sending another transcript.
+    pub(super) fn workspace_status(
+        &self,
+        service: &Service,
+        meeting_id: &str,
+    ) -> AppResult<LiveNotesStatus> {
+        let mut status = self.status_with_preference(service, meeting_id, true)?;
+        let Some(workspace) = status
+            .view
+            .as_ref()
+            .and_then(|view| view.workspace.as_ref())
+        else {
+            return Ok(status);
+        };
+        let mut entries = Vec::new();
+        if workspace
+            .entities
+            .iter()
+            .any(|entry| !entry.evidence.is_empty())
+        {
+            if let Ok(_publication) = meeting_core::archive::source_publication_lease(&service.root)
+            {
+                if let Ok(snapshot) = service.live_snapshot(meeting_id, None) {
+                    if snapshot.data.id == meeting_id {
+                        let mut current = CurrentWorkspaceEvidence::new(workspace, &snapshot.data);
+                        entries.extend(
+                            workspace
+                                .entities
+                                .iter()
+                                .filter(|entry| {
+                                    !workspace.context_excluded_ids.contains(&entry.id)
+                                        && current.supports(&entry.evidence)
+                                })
+                                .map(|entry| entry.id.clone()),
+                        );
+                    }
+                }
+            }
+        }
+        status.confirmable_workspace_entries = Some(entries);
+        Ok(status)
+    }
+
     /// Expose current job controls together with the requested saved analysis view without changing job ownership.
     pub(crate) fn status_with_preference(
         &self,
@@ -587,7 +691,30 @@ impl LiveNotes {
         {
             return Ok(false);
         }
-        let (next, projected) = match meeting_notes::workspace::update_context(&folder, &context) {
+        let update = meeting_notes::workspace::update_context_checked(
+            &folder,
+            &context,
+            |workspace, events| {
+                let mut confirmations = events
+                    .iter()
+                    .filter(|event| event.human && event.status == "confirmed")
+                    .peekable();
+                if confirmations.peek().is_some() {
+                    const NEEDS_SOURCE: &str = "Zum Bestätigen wird ein aktueller Originalbeleg benötigt. / Confirmation requires current original evidence.";
+                    let snapshot = service
+                        .live_snapshot(meeting_id, None)
+                        .map_err(|_| anyhow::anyhow!(NEEDS_SOURCE))?;
+                    anyhow::ensure!(snapshot.data.id == meeting_id, NEEDS_SOURCE);
+                    let mut current = CurrentWorkspaceEvidence::new(workspace, &snapshot.data);
+                    anyhow::ensure!(
+                        confirmations.all(|event| current.supports(&event.evidence)),
+                        NEEDS_SOURCE
+                    );
+                }
+                Ok(())
+            },
+        );
+        let (next, projected) = match update {
             Ok(value) => value,
             Err(error) => {
                 if let (Some(current), Ok(saved)) = (
@@ -1617,6 +1744,146 @@ mod tests {
         drop(service);
         remove_fixture_root(root);
     }
+    #[test]
+    fn native_confirmation_rejects_changed_transcript_before_workspace_refresh() {
+        use meeting_core::{PcmWriter, SessionStore, TranscriptCheckpoint, SAMPLE_RATE};
+        use meeting_notes::workspace::{read_state, Override};
+        use sha2::{Digest, Sha256};
+
+        let fixture = crate::test_profile::TestProfile::new().unwrap();
+        let root = fixture.path();
+        let service = Arc::new(Service::new(root.to_owned()).unwrap());
+        let store =
+            SessionStore::create(&root.join("sessions"), "Synthetic", "test", "system", None)
+                .unwrap();
+        let mut audio = PcmWriter::new(store.clone(), "system").unwrap();
+        audio.append(&vec![1000; SAMPLE_RATE as usize]).unwrap();
+        audio.finish().unwrap();
+        drop(audio);
+        let snapshot = store.snapshot().unwrap();
+        let part = &snapshot.parts[0];
+        let write_text = |text: &str, revision_after_restart| {
+            store
+                .append_transcript(TranscriptCheckpoint {
+                    sequence: 0,
+                    at: String::new(),
+                    file: part.file.clone(),
+                    model_id: "test".into(),
+                    full: text.into(),
+                    committed: text.into(),
+                    tentative: String::new(),
+                    processed_samples: part.confirmed_sample_count,
+                    final_text: true,
+                    revision_after_restart,
+                })
+                .unwrap();
+        };
+        let original = "We selected the blue room.";
+        write_text(original, false);
+        let source = live::pending(&[], &live_texts(&store.snapshot().unwrap()).0).remove(0);
+        let hash = Sha256::digest(format!("{}\0{}", source.id, source.text));
+        let proof = meeting_notes::Source {
+            id: format!("s_{}", &format!("{hash:x}")[..16]),
+            ..source.as_source()
+        };
+        let meeting_id = &snapshot.id;
+        let runner = LiveRunner::start(
+            &live_root(&service, meeting_id),
+            meeting_id,
+            meeting_notes::Connection {
+                endpoint: "http://127.0.0.1:9/v1/".into(),
+                model: "synthetic".into(),
+                mode: "local".into(),
+                cloud_consent: false,
+                api_key: String::new(),
+            },
+            "en",
+        )
+        .unwrap()
+        .with_workspace(Default::default())
+        .unwrap();
+        let folder = runner.workspace_folder().unwrap();
+        let run_id = runner.run().id.clone();
+        let entities: Vec<_> = ["e_first", "e_second"].into_iter().map(|id| serde_json::json!({
+            "id":id,"revision":1,"kind":"decision","text":original,"status":"recorded","attention":"normal","owner":null,"due":null,
+            "evidence":[{"sourceId":proof.id,"quote":original}],"humanLocked":false,
+        })).collect();
+        let saved = serde_json::json!({
+            "schema":meeting_notes::workspace::PROMPT_VERSION,"revision":1,"updatedAt":null,"context":*runner.workspace_context().unwrap().lock().unwrap(),
+            "entities":entities,"events":[],"overviewRefs":[],"originals":[proof],"processed":[source],
+        });
+        std::fs::write(
+            folder.join("revision-00000001.json"),
+            serde_json::to_vec(&saved).unwrap(),
+        )
+        .unwrap();
+        drop(runner);
+        let admission = service
+            .reserve_operation(crate::operations::Kind::Recording)
+            .unwrap();
+        let (finish, wait) = std::sync::mpsc::channel();
+        let worker = thread::spawn(move || {
+            let _ = wait.recv();
+        });
+        service.lock().unwrap().active = Some(crate::Active {
+            _operation: Some(admission),
+            owner: None,
+            store: store.clone(),
+            capture: None,
+            stop: Arc::new(AtomicBool::new(false)),
+            workers: vec![crate::asr::RecognitionWorker {
+                source: "system".into(),
+                handle: worker,
+            }],
+        });
+        let confirm = |id: &str| {
+            let mut context = read_state(&folder).unwrap().context;
+            context.overrides.push(Override {
+                id: id.into(),
+                expected_revision: 1,
+                status: "confirmed".into(),
+                saved: false,
+            });
+            service
+                .live_notes
+                .set_workspace_context(&service, meeting_id, &run_id, context)
+        };
+        assert!(confirm("e_first").unwrap());
+        assert_eq!(
+            service
+                .live_notes
+                .workspace_status(&service, meeting_id)
+                .unwrap()
+                .confirmable_workspace_entries,
+            Some(vec!["e_first".into(), "e_second".into()])
+        );
+        write_text("We selected the red room.", true);
+        assert_eq!(
+            service
+                .live_notes
+                .workspace_status(&service, meeting_id)
+                .unwrap()
+                .confirmable_workspace_entries,
+            Some(vec![])
+        );
+        let rejected = confirm("e_second");
+        let saved = read_state(&folder).unwrap();
+        let owned = service.lock().unwrap().active.take().unwrap();
+        finish.send(()).unwrap();
+        for worker in owned.workers {
+            worker.handle.join().unwrap();
+        }
+
+        assert!(
+            rejected.is_err(),
+            "The second confirmation used superseded transcript text"
+        );
+        assert!(saved.current_confirmations().contains_key("e_first"));
+        assert!(!saved.current_confirmations().contains_key("e_second"));
+        assert_eq!(saved.context.overrides.len(), 1);
+        assert!(saved.superseded_sources.is_empty());
+    }
+
     #[test]
     fn terminal_status_never_reports_waiting_for_transcript() {
         let shared = Arc::new(Mutex::new(Shared {

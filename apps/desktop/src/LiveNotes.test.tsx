@@ -552,6 +552,25 @@ it("does not show a stopped summary as waiting for recognition", async () => {
   expect(screen.queryByText(/Wartet auf Spracherkennung/)).toBeNull();
 });
 
+it("shows memory deferral without a next-update estimate in the classic panel", async () => {
+  setup({
+    startLiveNotes: vi.fn(),
+    getLiveNotes: vi.fn().mockResolvedValue(
+      status({
+        status: "waiting",
+        running: true,
+        waitingForMemory: true,
+        pendingChars: 400,
+        nextUpdateInMs: 90_000,
+      }),
+    ),
+  });
+  expect(
+    await screen.findByText("Wartet auf freien Arbeitsspeicher"),
+  ).toBeTruthy();
+  expect(screen.queryByText(/nächste Aktualisierung in ca/)).toBeNull();
+});
+
 it("does not auto-start after an explicit stop or without a model", async () => {
   const start = vi.fn();
   setup(

@@ -134,17 +134,17 @@ fn check(service: &Service, request: SetupProbeRequest) -> AppResult<SetupProbeR
     check_cancellation(control)?;
     let (audio_roundtrip, transcription_worker) = result?;
     let text_answer = text.map(|(endpoint, model, api_key, use_saved_key)| {
-        check_cancellation(control)
-            .and_then(|()| {
-                crate::history_questions::local_client(
-                    service,
+        service
+            .model_sessions
+            .run_temporary_question(control, move |models, control| {
+                let client = crate::history_questions::local_client(
+                    models,
                     endpoint,
                     model,
                     api_key,
                     use_saved_key,
-                )
-            })
-            .and_then(|client| {
+                    control,
+                )?;
                 let passage = meeting_notes::questions::Passage {
                     id: PROBE_SOURCE,
                     meeting: "Synthetic setup".into(),

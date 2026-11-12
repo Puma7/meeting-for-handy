@@ -2070,6 +2070,11 @@ describe("workspace navigation (synthetic IPC)", () => {
       finish = resolve;
     });
     api.createEncryptedBackup = vi.fn(() => pending);
+    let finishCancel!: (accepted: boolean) => void;
+    const cancelling = new Promise<boolean>((resolve) => {
+      finishCancel = resolve;
+    });
+    api.cancelEncryptedBackup = vi.fn(() => cancelling);
     const key = "af".repeat(32);
     const file = "synthetic-a.hmvault";
     render(<App api={api} />);
@@ -2103,6 +2108,25 @@ describe("workspace navigation (synthetic IPC)", () => {
       "synthetic passphrase",
     );
     await openDetail(other.title);
+    expect(screen.queryByText("Vorgang läuft …")).toBeNull();
+    await openDetail(meeting.title);
+    expect(screen.getByText("Vorgang läuft …")).toBeTruthy();
+    expect(
+      screen
+        .getByRole("button", { name: "Verschlüsselte Kopie erstellen" })
+        .matches(":disabled"),
+    ).toBe(true);
+    await userEvent.click(screen.getByRole("button", { name: "Abbrechen" }));
+    expect(api.cancelEncryptedBackup).toHaveBeenCalledOnce();
+    await openDetail(other.title);
+    await openDetail(meeting.title);
+    expect(screen.getByText("Abbruch angefordert …")).toBeTruthy();
+    await act(async () => finishCancel(false));
+    expect(screen.getByRole("button", { name: "Abbrechen" })).toHaveProperty(
+      "disabled",
+      false,
+    );
+    await openDetail(other.title);
     await act(async () =>
       finish({
         file,
@@ -2123,6 +2147,111 @@ describe("workspace navigation (synthetic IPC)", () => {
     expect(screen.queryByDisplayValue(key)).toBeNull();
     expect(screen.getByText(file)).toBeTruthy();
     expect(Object.values(localStorage).join(" ")).not.toContain(key);
+  });
+
+  it("discards the saved VIP-only answer when its cited meeting is unpinned", async () => {
+    localStorage.setItem(
+      "handymeeting.rust.live-notes.v1",
+      JSON.stringify({
+        endpoint: "http://127.0.0.1:1235/v1/",
+        model: "synthetic-text-model",
+      }),
+    );
+    let labelled = {
+      ...meeting,
+      userMetadata: {
+        revision: 0,
+        title: null,
+        pinned: true,
+        audioRemoved: false,
+      },
+    };
+    const api = fakeApi();
+    api.listMeetings = vi.fn(async () => [labelled]);
+    api.getMeeting = vi.fn(async () => labelled);
+    api.searchMeetings = vi.fn();
+    api.editMeetingMetadata = vi.fn(async (_id, revision, _title, pinned) => {
+      labelled = {
+        ...labelled,
+        userMetadata: {
+          ...labelled.userMetadata,
+          revision: revision + 1,
+          pinned,
+        },
+      };
+      return labelled.userMetadata;
+    });
+    api.askMeetingHistory = vi.fn().mockResolvedValue({
+      searchedPassages: 1,
+      citations: [
+        {
+          meetingId: meeting.id,
+          meetingTitle: meeting.title,
+          sourceId: meeting.parts[0].file,
+          startMs: 0,
+          quote: meeting.parts[0].text,
+        },
+      ],
+    });
+    render(<App api={api} />);
+    await ready();
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "Historie" }));
+    await user.click(
+      screen.getByRole("checkbox", { name: "Nur VIP-Meetings" }),
+    );
+    await user.click(screen.getByText("Meetings befragen"));
+    await user.type(
+      screen.getByLabelText("Frage an deine Meetings"),
+      "Was wurde entschieden?",
+    );
+    await user.click(screen.getByRole("button", { name: "Lokal beantworten" }));
+    await user.click(
+      await screen.findByRole("button", { name: "Originalstelle öffnen" }),
+    );
+    await user.click(
+      await screen.findByRole("button", {
+        name: "VIP · vor Aufräumen geschützt",
+      }),
+    );
+    await waitFor(() =>
+      expect(api.editMeetingMetadata).toHaveBeenCalledWith(
+        meeting.id,
+        0,
+        null,
+        false,
+      ),
+    );
+    await user.click(screen.getByRole("button", { name: "Historie" }));
+    expect(
+      screen.getByRole("checkbox", { name: "Nur VIP-Meetings" }),
+    ).toHaveProperty("checked", true);
+    expect(
+      screen.queryByRole("button", { name: "Originalstelle öffnen" }),
+    ).toBeNull();
+    await user.click(screen.getByText("Meetings befragen"));
+    expect(screen.getByLabelText("Frage an deine Meetings")).toHaveProperty(
+      "value",
+      "",
+    );
+  });
+
+  it("keeps calendar preparation discoverable beside the closed capture setup", async () => {
+    render(<App api={fakeApi(meeting)} />);
+    await ready();
+    const setup = document.querySelector<HTMLDetailsElement>(
+      "details.setup-details",
+    )!;
+    if (setup.open) await userEvent.click(setup.querySelector("summary")!);
+    expect(setup.open).toBe(false);
+    const calendar = await screen.findByText(
+      "Meeting aus Kalenderdatei vorbereiten",
+      { selector: "summary" },
+    );
+    expect(calendar.closest(".setup-details")).toBeNull();
+    await userEvent.click(calendar);
+    expect(screen.getByLabelText("Kalenderdatei (.ics)")).toBeTruthy();
+    expect(setup.open).toBe(false);
   });
 
   it("opens the verified original and keeps the answer when returning to check other citations", async () => {

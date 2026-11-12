@@ -154,6 +154,7 @@ pub(super) fn calendar_task_matches(title: &str, quote: &str) -> bool {
         assertion_words, assignment_text, finite_subject_before, present_assignment_quote,
     };
     const PARTICLES: &[&str] = &["ab", "an", "auf", "ein", "mit", "vor", "zu", "fertig"];
+    const SHORT_STEMS: &[&str] = &["bau", "geb", "heb", "hol", "leg", "seh"];
 
     let quote = assignment_text(quote);
     let lower = quote.to_lowercase();
@@ -187,16 +188,29 @@ pub(super) fn calendar_task_matches(title: &str, quote: &str) -> bool {
         .filter(|word| german && PARTICLES.contains(word));
     let predicate = before.iter().enumerate().position(|(index, word)| {
         if german {
-            let stem = action.strip_suffix("en").and_then(|stem| match particle {
-                Some(particle) => stem.strip_prefix(particle),
-                None => Some(stem),
-            });
+            let stem = action
+                .strip_suffix("en")
+                .or_else(|| {
+                    action
+                        .strip_suffix('n')
+                        .filter(|stem| stem.ends_with("er") || stem.ends_with("el"))
+                })
+                .and_then(|stem| match particle {
+                    Some(particle) => stem.strip_prefix(particle),
+                    None => Some(stem),
+                });
             stem.is_some_and(|stem| {
-                (stem.chars().count() >= 4 || stem == "hol")
+                let first_person = before[..index].contains(&"ich");
+                (stem.chars().count() >= 4 || SHORT_STEMS.contains(&stem))
                     && (word.strip_suffix('t') == Some(stem)
-                        || (before[..index].contains(&"ich")
-                            && word.strip_suffix('e') == Some(stem))
-                        || word.strip_suffix("en") == Some(stem))
+                        || (first_person
+                            && (word.strip_suffix('e') == Some(stem)
+                                || stem
+                                    .strip_suffix("el")
+                                    .is_some_and(|base| word.strip_suffix("le") == Some(base))))
+                        || word.strip_suffix("en") == Some(stem)
+                        || ((stem.ends_with("er") || stem.ends_with("el"))
+                            && word.strip_suffix('n') == Some(stem)))
                     && finite_subject_before(&before, &original, 0, index)
             })
         } else {
@@ -226,6 +240,16 @@ pub(super) fn calendar_task_matches(title: &str, quote: &str) -> bool {
                         auxiliary + 1 < trailing.len()
                             && finite_subject_before(trailing_lower, trailing, index, auxiliary)
                     }))
+            // A second simple-present clause may use an action outside the
+            // shared assignment vocabulary. This is only a deadline guard.
+            || (!german
+                && fragment.len() >= 3
+                && trailing_lower[index + 1]
+                    .strip_suffix('s')
+                    .is_some_and(|stem| stem.chars().count() >= 3)
+                && ["the", "a", "an", "our", "your", "their", "this", "that"]
+                    .contains(&trailing_lower[index + 2])
+                && finite_subject_before(trailing_lower, trailing, index, index + 1))
             || (german
                 && fragment.len() >= 3
                 && trailing_lower[index + 1]
@@ -275,6 +299,31 @@ fn calendar_task_deadline_requires_its_own_action_and_object() {
             "Send the guide",
             "I will send the guide Jane will review the guide by September 23rd 2026.",
             false,
+        ),
+        (
+            "Send the guide",
+            "I will send the guide Jane sends the invoice by September 23rd 2026.",
+            false,
+        ),
+        (
+            "Send the guide",
+            "I will send the guide Jane reviews the invoice by September 23rd 2026.",
+            false,
+        ),
+        (
+            "Unterlagen liefern",
+            "Ich liefere die Unterlagen bis zum 23. September.",
+            true,
+        ),
+        (
+            "Unterlagen sammeln",
+            "Ich sammle die Unterlagen bis zum 23. September.",
+            true,
+        ),
+        (
+            "Unterlagen geben",
+            "Ich gebe die Unterlagen bis zum 23. September.",
+            true,
         ),
     ] {
         assert_eq!(

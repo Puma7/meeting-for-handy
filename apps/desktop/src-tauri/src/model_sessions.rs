@@ -2,11 +2,15 @@
 use crate::AppResult;
 use meeting_notes::{
     residency::{LocalModelPool, LocalProvider, ModelLease},
-    Connection,
+    AnalysisControl, Connection,
 };
 use std::{
     collections::HashMap,
-    sync::{Arc, Mutex, Weak},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        mpsc, Arc, Mutex, Weak,
+    },
+    time::Duration,
 };
 
 #[derive(Clone, PartialEq, Eq, Hash)]
@@ -22,9 +26,23 @@ struct Work {
 struct Inner {
     pool: LocalModelPool,
     work: Mutex<HashMap<Owner, Arc<Work>>>,
+    temporary_question: AtomicBool,
 }
 #[derive(Clone, Default)]
 pub(crate) struct Models(Arc<Inner>);
+
+struct TemporaryQuestion {
+    models: Models,
+}
+
+impl Drop for TemporaryQuestion {
+    fn drop(&mut self) {
+        self.models
+            .0
+            .temporary_question
+            .store(false, Ordering::Release);
+    }
+}
 #[derive(Clone)]
 pub(crate) struct ModelWork {
     inner: Arc<Inner>,
@@ -32,6 +50,50 @@ pub(crate) struct ModelWork {
     expected: Weak<Work>,
 }
 impl Models {
+    /// Own one optional question until its provider finishes. A cancelled caller
+    /// releases recording admission while the worker reconciles an admitted load
+    /// and releases its exact model lease. Later questions cannot queue behind it.
+    pub(crate) fn run_temporary_question<T: Send + 'static>(
+        &self,
+        control: &AnalysisControl,
+        run: impl FnOnce(&Models, &AnalysisControl) -> AppResult<T> + Send + 'static,
+    ) -> AppResult<T> {
+        const STOPPED: &str = "The optional model check was cancelled. / Die optionale Modellabfrage wurde abgebrochen.";
+        const UNAVAILABLE: &str = "The optional model worker is unavailable. / Die optionale Modellabfrage ist nicht verfügbar.";
+        control.check().map_err(|_| STOPPED)?;
+        self.0
+            .temporary_question
+            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+            .map_err(|_| "A previous model question is still finishing. Try again shortly. / Eine frühere Modellabfrage wird noch abgeschlossen. Bitte gleich erneut versuchen.")?;
+        let permit = TemporaryQuestion {
+            models: self.clone(),
+        };
+        let worker_control = control.clone();
+        let (send, receive) = mpsc::sync_channel(1);
+        std::thread::Builder::new()
+            .name("temporary-model-question".into())
+            .spawn(move || {
+                let result = worker_control
+                    .check()
+                    .map_err(|_| STOPPED.into())
+                    .and_then(|()| run(&permit.models, &worker_control));
+                drop(permit);
+                let _ = send.send(result);
+            })
+            .map_err(|_| UNAVAILABLE)?;
+        loop {
+            control.check().map_err(|_| STOPPED)?;
+            match receive.recv_timeout(Duration::from_millis(25)) {
+                Ok(result) => {
+                    control.check().map_err(|_| STOPPED)?;
+                    return result;
+                }
+                Err(mpsc::RecvTimeoutError::Timeout) => {}
+                Err(mpsc::RecvTimeoutError::Disconnected) => return Err(UNAVAILABLE.into()),
+            }
+        }
+    }
+
     /// Share provider ownership with other work and release it when a transient
     /// read-only query ends. No resumable owner entry is created.
     pub(crate) fn temporary_lease(
@@ -151,6 +213,12 @@ impl ModelWork {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::{
+        io::{BufRead, BufReader, Read, Write},
+        net::{TcpListener, TcpStream},
+        thread,
+        time::Instant,
+    };
     /// Builds a synthetic non-listening loopback route; coordinator tests make no network requests.
     fn connection(model: &str) -> Connection {
         Connection {
@@ -243,5 +311,171 @@ mod tests {
         assert!(weak.upgrade().is_some());
         drop(inflight);
         assert!(weak.upgrade().is_none());
+    }
+
+    fn native_request(listener: &TcpListener) -> (TcpStream, String, serde_json::Value) {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let mut stream = loop {
+            match listener.accept() {
+                Ok((stream, _)) => break stream,
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                    assert!(Instant::now() < deadline, "synthetic model request missing");
+                    thread::sleep(Duration::from_millis(5));
+                }
+                Err(error) => panic!("{error}"),
+            }
+        };
+        stream.set_nonblocking(false).unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_secs(3)))
+            .unwrap();
+        let mut reader = BufReader::new(&mut stream);
+        let mut start = String::new();
+        reader.read_line(&mut start).unwrap();
+        let route = start.split_whitespace().nth(1).unwrap().to_owned();
+        let mut length = 0;
+        loop {
+            let mut header = String::new();
+            assert!(reader.read_line(&mut header).unwrap() > 0);
+            if header == "\r\n" {
+                break;
+            }
+            if let Some((name, value)) = header.split_once(':') {
+                if name.eq_ignore_ascii_case("content-length") {
+                    length = value.trim().parse().unwrap();
+                }
+            }
+        }
+        assert!(length < 8192);
+        let mut body = vec![0; length];
+        reader.read_exact(&mut body).unwrap();
+        (
+            stream,
+            route,
+            if body.is_empty() {
+                serde_json::Value::Null
+            } else {
+                serde_json::from_slice(&body).unwrap()
+            },
+        )
+    }
+
+    fn native_reply(mut stream: TcpStream, value: serde_json::Value) {
+        let body = value.to_string();
+        write!(
+            stream,
+            "HTTP/1.1 200 Synthetic\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+            body.len()
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn cancelled_optional_question_releases_recording_before_the_native_load_returns() {
+        use crate::operations::{Gate, Kind};
+        use meeting_notes::{questions, TextClient};
+        use serde_json::json;
+
+        for kind in [Kind::HistoryQuestion, Kind::SetupProbe] {
+            let models = Models::default();
+            let gate = Gate::default();
+            let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+            listener.set_nonblocking(true).unwrap();
+            let mut connection = connection("synthetic");
+            connection.endpoint = format!("http://{}/v1/", listener.local_addr().unwrap());
+            let (loading, entered) = mpsc::channel();
+            let (release, allow_reply) = mpsc::channel();
+            let provider = thread::spawn(move || {
+                let (stream, route, _) = native_request(&listener);
+                assert_eq!(route, "/api/v1/models");
+                native_reply(
+                    stream,
+                    json!({"models":[
+                        {"type":"llm", "key":"synthetic", "loaded_instances":[]},
+                        {"type":"llm", "key":"unrelated", "loaded_instances":[{"id":"foreign"}]}
+                    ]}),
+                );
+                let (stream, route, body) = native_request(&listener);
+                assert_eq!(route, "/api/v1/models/load");
+                assert_eq!(body, json!({"model":"synthetic"}));
+                loading.send(()).unwrap();
+                allow_reply.recv_timeout(Duration::from_secs(5)).unwrap();
+                native_reply(
+                    stream,
+                    json!({"instance_id":"owned", "status":"loaded", "type":"llm"}),
+                );
+                let (stream, route, body) = native_request(&listener);
+                assert_eq!(route, "/api/v1/models/unload");
+                assert_eq!(body, json!({"instance_id":"owned"}));
+                native_reply(stream, body);
+            });
+
+            let operation = gate.try_acquire(kind).unwrap();
+            let foreground = models.clone();
+            let (completed, result) = mpsc::channel();
+            let caller = thread::spawn(move || {
+                let control = operation
+                    .history_control()
+                    .or_else(|| operation.setup_control())
+                    .unwrap();
+                let answer = foreground.run_temporary_question(control, move |models, control| {
+                    let lease = models.temporary_lease(&connection, LocalProvider::LmStudio)?;
+                    let client = TextClient::new(&connection)
+                        .and_then(|client| client.with_residency(lease))
+                        .map_err(|error| error.to_string())?;
+                    questions::answer_with_control(
+                        &client,
+                        "Which day was confirmed?",
+                        &[questions::Passage {
+                            id: 1,
+                            meeting: "Synthetic".into(),
+                            text: "Wednesday was confirmed.".into(),
+                        }],
+                        control,
+                    )
+                    .map_err(|error| error.to_string())
+                });
+                drop(operation);
+                completed.send(answer).unwrap();
+            });
+            entered.recv_timeout(Duration::from_secs(5)).unwrap();
+            let recording = if kind == Kind::SetupProbe {
+                gate.acquire_recording().unwrap()
+            } else {
+                assert!(gate.try_acquire(Kind::Recording).is_err());
+                assert!(result
+                    .recv_timeout(Duration::from_secs(2))
+                    .unwrap()
+                    .unwrap_err()
+                    .contains("cancelled"));
+                gate.try_acquire(Kind::Recording).unwrap()
+            };
+            if kind == Kind::SetupProbe {
+                assert!(result
+                    .recv_timeout(Duration::from_secs(2))
+                    .unwrap()
+                    .unwrap_err()
+                    .contains("cancelled"));
+            }
+            let next = models.run_temporary_question(
+                &AnalysisControl::default(),
+                |_, _| -> AppResult<()> {
+                    panic!("an optional request must not queue behind the admitted load")
+                },
+            );
+            assert!(next.unwrap_err().contains("still finishing"));
+            drop(recording);
+            release.send(()).unwrap();
+            caller.join().unwrap();
+            provider.join().unwrap();
+            let deadline = Instant::now() + Duration::from_secs(3);
+            while models.0.temporary_question.load(Ordering::Acquire) {
+                assert!(Instant::now() < deadline);
+                thread::sleep(Duration::from_millis(5));
+            }
+            assert!(models
+                .run_temporary_question(&AnalysisControl::default(), |_, _| Ok(()))
+                .is_ok());
+        }
     }
 }

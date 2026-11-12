@@ -1088,6 +1088,47 @@ it("sends explicit content confirmation for the shown revision and exports the a
   expect(exportResults).toHaveBeenCalledExactlyOnceWith("run-current");
 });
 
+it("hides confirmation offers and badges for evidence the native transcript no longer supports", async () => {
+  const f = fixture();
+  const workspace = f.status.view.workspace;
+  const item = Object.assign(workspace.entities[0], {
+    kind: "decision",
+    status: "recorded",
+    humanLocked: true,
+  });
+  workspace.entities.push({
+    ...item,
+    id: "e_unconfirmed_stale_decision",
+    text: "Another decision citing the old text.",
+    humanLocked: false,
+  });
+  Object.assign(workspace, {
+    supersededSources: [],
+    events: [
+      {
+        id: "h_confirmed_before_revision",
+        entityId: item.id,
+        revision: item.revision,
+        human: true,
+        status: "confirmed",
+        text: item.text,
+        evidence: item.evidence,
+      },
+    ],
+  });
+  Object.assign(f.status, { confirmableWorkspaceEntries: [] });
+  render(
+    <LiveWorkspace adapter={f.adapter} meeting={f.meeting} onBack={() => {}} />,
+  );
+  fireEvent.click(await screen.findByRole("tab", { name: "Details" }));
+  await screen.findByText(item.text);
+  await screen.findByText("Another decision citing the old text.");
+  expect(screen.queryByText("Inhalt bestätigt")).toBeNull();
+  expect(
+    screen.queryByRole("button", { name: "Inhalt bestätigen" }),
+  ).toBeNull();
+});
+
 it.each([
   [9, true],
   [10, false],

@@ -269,6 +269,7 @@ impl ModelLease {
                         false
                     };
                     if policy_changed || runner_changed || state.refresh_failed {
+                        control.check()?;
                         if let Some(Loaded::Ollama {
                             context_length: current,
                             ..
@@ -287,7 +288,7 @@ impl ModelLease {
             if ollama_keep_alive(&state).is_some_and(|seconds| seconds > 0) {
                 self.ensure_refresher()?;
             }
-            return Ok(());
+            return control.check();
         }
         let _preparation = control.begin_model_preparation();
         let client = &state.client;
@@ -322,6 +323,7 @@ impl ModelLease {
                         }
                     }
                 };
+                control.check()?;
                 let response = client.model_request(
                     "api/generate",
                     Some(&ollama_reservation(
@@ -388,12 +390,13 @@ impl ModelLease {
                         model["size_bytes"].as_u64().unwrap_or(0),
                     )?;
                 }
-                state.lm_load_uncertain = true;
                 let mut load = json!({"model":key});
                 if let Some(length) = context_length {
                     load["context_length"] = length.into();
                     load["eval_batch_size"] = 128.into();
                 }
+                control.check()?;
+                state.lm_load_uncertain = true;
                 let response = state.client.model_request(
                     "api/v1/models/load",
                     Some(&load),

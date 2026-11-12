@@ -88,10 +88,11 @@ fn complete_startup(
 
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 pub(super) fn read_passphrase(input: impl BufRead, managed: bool) -> AppResult<Zeroizing<String>> {
+    const MAX_BYTES: usize = 1024;
     let mut passphrase = Zeroizing::new(String::new());
-    let mut limited = input.take(1025);
     if managed {
-        limited
+        input
+            .take((MAX_BYTES + 1) as u64)
             .read_line(&mut passphrase)
             .map_err(|_| START_FAILED)?;
         if !passphrase.ends_with('\n') {
@@ -99,9 +100,24 @@ pub(super) fn read_passphrase(input: impl BufRead, managed: bool) -> AppResult<Z
         }
         passphrase.pop();
     } else {
-        limited
+        // Read one byte beyond the largest CRLF-framed input so it cannot be truncated
+        // into a valid passphrase while leaving trailing bytes undiscovered.
+        input
+            .take((MAX_BYTES + 3) as u64)
             .read_to_string(&mut passphrase)
             .map_err(|_| START_FAILED)?;
+        if passphrase.ends_with('\n') {
+            passphrase.pop();
+            if passphrase.ends_with('\r') {
+                passphrase.pop();
+            }
+        }
+        if passphrase.is_empty()
+            || passphrase.len() > MAX_BYTES
+            || passphrase.contains(['\0', '\r', '\n'])
+        {
+            return Err(START_FAILED.into());
+        }
     }
     Ok(passphrase)
 }
@@ -152,6 +168,45 @@ mod tests {
                 .as_str(),
             "direct passphrase"
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn direct_passphrase_accepts_at_most_one_trailing_line_ending() {
+        for input in [
+            b" exact spaces ".as_slice(),
+            b" exact spaces \n",
+            b" exact spaces \r\n",
+        ] {
+            assert_eq!(
+                read_passphrase(Cursor::new(input), false).unwrap().as_str(),
+                " exact spaces "
+            );
+        }
+        for input in [
+            b"".as_slice(),
+            b"\n",
+            b"abc\n\n",
+            b"abc\r",
+            b"abc\r\n\n",
+            b"abc\rdef\n",
+            b"abc\nnext",
+            b"abc\0def",
+            b"\xff\n",
+        ] {
+            assert!(read_passphrase(Cursor::new(input), false).is_err());
+        }
+        let max = "ü".repeat(512);
+        for delimiter in ["", "\n", "\r\n"] {
+            assert_eq!(
+                read_passphrase(Cursor::new(format!("{max}{delimiter}")), false)
+                    .unwrap()
+                    .as_str(),
+                max
+            );
+            assert!(read_passphrase(Cursor::new(format!("{max}x{delimiter}")), false).is_err());
+        }
+        assert!(read_passphrase(Cursor::new(format!("{max}\r\ntrailing bytes")), false).is_err());
     }
 
     #[test]

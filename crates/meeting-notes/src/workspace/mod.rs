@@ -1192,10 +1192,19 @@ pub fn update_context(
     folder: &Path,
     context: &WorkspaceContext,
 ) -> Result<(WorkspaceContext, WorkspaceState)> {
+    update_context_checked(folder, context, |_, _| Ok(()))
+}
+
+/// Validate newly created human events against current external evidence before publishing the context.
+pub fn update_context_checked(
+    folder: &Path,
+    context: &WorkspaceContext,
+    verify: impl FnOnce(&WorkspaceState, &[Event]) -> Result<()>,
+) -> Result<(WorkspaceContext, WorkspaceState)> {
     let state = store::read(folder)?;
     ensure!(state.prompt_version() == PROMPT_VERSION,
         "Diese Auswertung verwendet ältere Prompts und bleibt unverändert lesbar. Eine neue lokale Auswertung starten, um mit der aktuellen Fassung weiterzuarbeiten.");
-    context_store::update(folder, context)
+    context_store::update_checked(folder, context, verify)
 }
 
 /// Keep the last processed revision independently for each transcript key and chunk.

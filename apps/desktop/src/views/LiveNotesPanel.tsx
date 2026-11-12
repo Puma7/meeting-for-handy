@@ -467,6 +467,10 @@ export default function LiveNotesPanel({
       return de
         ? "Wartet auf Spracherkennung · Aufnahme und Transkript haben Vorrang"
         : "Waiting for recognition · recording and transcription take priority";
+    if (status?.running && status.waitingForMemory)
+      return de
+        ? "Wartet auf freien Arbeitsspeicher"
+        : "Waiting for available memory";
     switch (status?.status) {
       case "starting":
         return de ? "Auswertung startet" : "Starting analysis";

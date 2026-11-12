@@ -1,5 +1,5 @@
 //! Resolve indexed locations to current original text and map model citations back locally.
-use crate::{blocking, meeting_files, AppResult, Service};
+use crate::{blocking, meeting_files, model_sessions::Models, AppResult, Service};
 use meeting_core::library::{SearchHit, SearchScope};
 use meeting_notes::{
     questions::{self, Passage, DEFAULT_PASSAGES, MAX_PASSAGES, MAX_QUESTION_CHARS},
@@ -81,8 +81,10 @@ fn ask(service: &Service, request: HistoryQuestion) -> AppResult<HistoryAnswer> 
         .ok_or("History question controls are unavailable")?;
     // Prevent erasure until the model call and publication of the answer finish,
     // without holding the recording transition or any recording handle.
-    let _source = meeting_core::archive::source_publication_lease(&service.root)
-        .map_err(|_| "Meeting data is being erased. / Meetingdaten werden gerade gelöscht.")?;
+    let source = Arc::new(
+        meeting_core::archive::source_publication_lease(&service.root)
+            .map_err(|_| "Meeting data is being erased. / Meetingdaten werden gerade gelöscht.")?,
+    );
     let terms = questions::keywords(question);
     let hits = if let Some(index) = service.library_jobs.completed_history_index(&service.root) {
         index
@@ -115,35 +117,47 @@ fn ask(service: &Service, request: HistoryQuestion) -> AppResult<HistoryAnswer> 
     if service.lock()?.active.is_some() {
         return Err(crate::operations::RECORDING_PRIORITY.into());
     }
-    let client = local_client(
-        service,
-        request.endpoint,
-        request.model,
-        key,
-        request.use_saved_key,
-    )?;
     let (passages, locations): (Vec<_>, Vec<_>) = located
         .into_iter()
         .map(|entry| {
+            let title = entry.passage.meeting.clone();
             (
                 entry.passage,
-                (entry.meeting_id, entry.source_id, entry.start_ms),
+                (entry.meeting_id, entry.source_id, entry.start_ms, title),
             )
         })
         .unzip();
-    let result = questions::answer_with_control(&client, question, &passages, control);
+    let question = question.to_owned();
+    let worker_source = Arc::clone(&source);
+    let result = service
+        .model_sessions
+        .run_temporary_question(control, move |models, control| {
+            // Recording admission may end during cancellation. Retain the source
+            // publication lease while the copied excerpts are still in the worker.
+            let _source = worker_source;
+            let client = local_client(
+                models,
+                request.endpoint,
+                request.model,
+                key,
+                request.use_saved_key,
+                control,
+            )?;
+            questions::answer_with_control(&client, &question, &passages, control)
+                .map_err(|_| ANSWER_ERROR.into())
+        });
     if control.is_cancelled() {
         return Err(crate::operations::RECORDING_PRIORITY.into());
     }
-    let quotes = result.map_err(|_| ANSWER_ERROR)?;
+    let quotes = result?;
     let citations = quotes
         .into_iter()
         .map(|item| {
             let index = item.source as usize - 1;
-            let (meeting_id, source_id, start_ms) = &locations[index];
+            let (meeting_id, source_id, start_ms, title) = &locations[index];
             Citation {
                 meeting_id: meeting_id.clone(),
-                meeting_title: passages[index].meeting.clone(),
+                meeting_title: title.clone(),
                 source_id: source_id.clone(),
                 start_ms: *start_ms,
                 quote: item.quote,
@@ -151,18 +165,22 @@ fn ask(service: &Service, request: HistoryQuestion) -> AppResult<HistoryAnswer> 
         })
         .collect();
     Ok(HistoryAnswer {
-        searched_passages: passages.len(),
+        searched_passages: locations.len(),
         citations,
     })
 }
 
 pub(crate) fn local_client(
-    service: &Service,
+    models: &Models,
     endpoint: String,
     model: String,
     key: Zeroizing<String>,
     use_saved_key: bool,
+    control: &AnalysisControl,
 ) -> AppResult<TextClient> {
+    control
+        .check()
+        .map_err(|_| crate::operations::RECORDING_PRIORITY)?;
     let key = if use_saved_key {
         if !key.is_empty() {
             return Err("Choose either the saved key or a temporary key. / Wähle entweder den gespeicherten oder einen vorübergehenden Schlüssel.".into());
@@ -180,19 +198,18 @@ pub(crate) fn local_client(
     };
     connection.api_key = key.to_string();
     let client = TextClient::new(&connection);
-    let lease = if client.is_ok() {
+    let lease = if client.is_ok() && !control.is_cancelled() {
         crate::local_models::provider_for_endpoint(&connection.endpoint)
-            .map(|provider| {
-                service
-                    .model_sessions
-                    .temporary_lease(&connection, provider)
-            })
+            .map(|provider| models.temporary_lease(&connection, provider))
             .transpose()
     } else {
         Ok(None)
     };
     use zeroize::Zeroize;
     connection.api_key.zeroize();
+    control
+        .check()
+        .map_err(|_| crate::operations::RECORDING_PRIORITY)?;
     let mut client = client.map_err(|_| {
         "Check the local model and its address. / Prüfe das lokale Modell und seine Adresse."
     })?;

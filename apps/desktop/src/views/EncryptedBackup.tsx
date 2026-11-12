@@ -23,18 +23,22 @@ export default function EncryptedBackup({
   receipt?: {
     result: BackupResult | null;
     setResult: (next: BackupResult) => void;
+    busy: boolean;
+    cancelling: boolean;
   };
 }) {
   const de = locale === "de";
   const passphrase = useRef<HTMLInputElement>(null);
   const repeated = useRef<HTMLInputElement>(null);
   const started = useRef(false);
-  const [busy, setBusy] = useState(false);
-  const [cancelling, setCancelling] = useState(false);
+  const [localBusy, setBusy] = useState(false);
+  const [localCancelling, setCancelling] = useState(false);
   const [kind, setKind] = useState<BackupCredential>("passphrase");
   const [error, setError] = useState("");
   const [localResult, setLocalResult] = useState<BackupResult | null>(null);
   const result = receipt ? receipt.result : localResult;
+  const busy = receipt?.busy ?? localBusy;
+  const cancelling = receipt?.cancelling ?? localCancelling;
   const setResult = receipt?.setResult ?? setLocalResult;
   const action = restore
     ? de
@@ -168,7 +172,8 @@ export default function EncryptedBackup({
               disabled={cancelling}
               onClick={async () => {
                 try {
-                  if (await cancel()) setCancelling(started.current);
+                  if ((await cancel()) && !receipt)
+                    setCancelling(started.current);
                 } catch (failure) {
                   setError(errorMessage(failure));
                 }

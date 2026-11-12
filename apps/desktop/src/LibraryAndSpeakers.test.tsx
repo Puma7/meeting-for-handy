@@ -519,6 +519,40 @@ it("discards an in-flight answer when the transcript-only scope changes", async 
   expect(await screen.findByText(/contain no supported answer/)).toBeTruthy();
 });
 
+it("shows a retained transcript-only filter while the search field is empty", async () => {
+  const search = vi
+    .fn()
+    .mockResolvedValue({ items: [], total: 0, offset: 0, limit: 25 });
+  render(
+    <HistorySearch
+      api={{ searchMeetings: search } as unknown as DesktopApi}
+      locale="en"
+      nativeMeetings={[]}
+      onOpen={vi.fn()}
+      initialState={{ ...initialHistorySearch, query: "report" }}
+    />,
+  );
+  const input = screen.getByRole("searchbox");
+  const filter = screen.getByRole("checkbox", {
+    name: "Transcript matches only",
+  });
+  await userEvent.click(filter);
+  fireEvent.change(input, { target: { value: "" } });
+  expect(filter).toHaveProperty("disabled", true);
+  expect(filter).toHaveProperty("checked", true);
+  fireEvent.change(input, { target: { value: "delivery" } });
+  expect(filter).toHaveProperty("disabled", false);
+  expect(filter).toHaveProperty("checked", true);
+  await waitFor(() =>
+    expect(search).toHaveBeenLastCalledWith(
+      "delivery",
+      0,
+      25,
+      expect.objectContaining({ transcriptOnly: true }),
+    ),
+  );
+});
+
 it("clears an answer and removes an erased selected meeting even when that meeting was not cited", async () => {
   const other = { ...meeting, id: "uncited", title: "Uncited meeting" };
   const hidden = new Set<string>();

@@ -288,6 +288,13 @@ function WorkspaceContents({
   const pendingResultExport = useRef(null);
   const entities = workspace?.entities || [],
     originals = workspace?.originals || [];
+  const confirmableEntries = useMemo(
+    () =>
+      status?.confirmableWorkspaceEntries
+        ? new Set(status.confirmableWorkspaceEntries)
+        : null,
+    [status?.confirmableWorkspaceEntries],
+  );
   const currentSourceIds = useMemo(() => {
     const superseded = new Set(workspace?.supersededSources);
     return new Set(
@@ -539,6 +546,12 @@ function WorkspaceContents({
   }
   /** Append a human status override using the entity's current stable revision. */
   async function override(item, value) {
+    if (
+      value === "confirmed" &&
+      confirmableEntries &&
+      !confirmableEntries.has(item.id)
+    )
+      return;
     if (!context.current) {
       setError(
         t("Für diese Änderung zuerst den gespeicherten Meetingstand öffnen."),
@@ -592,6 +605,7 @@ function WorkspaceContents({
   const ctx = {
     transcriptNewestFirst,
     setTranscriptNewestFirst,
+    confirmableEntries,
     _mutate: mutate,
     changeTopics,
     state,
@@ -1644,6 +1658,13 @@ function LivePanel({
   );
   if (panel === "impulses") items = items.slice(0, impulseLimit);
   const visibleEntries = new Map(items.map((item) => [item.id, item]));
+  const hasCurrentEvidence = (item) =>
+    item.evidence?.length > 0 &&
+    (!ctx.confirmableEntries || ctx.confirmableEntries.has(item.id)) &&
+    !workspace?.contextExcludedIds?.includes(item.id) &&
+    item.evidence.every(
+      (e) => !workspace?.supersededSources?.includes(e.sourceId),
+    );
   const confirmed = new Set();
   for (const event of workspace?.events || []) {
     const item = visibleEntries.get(event.entityId);
@@ -1652,14 +1673,12 @@ function LivePanel({
       !event.human ||
       event.status !== "confirmed" ||
       event.text !== item.text ||
-      !item.evidence?.length ||
+      !hasCurrentEvidence(item) ||
       event.evidence?.length !== item.evidence.length ||
-      workspace?.contextExcludedIds?.includes(item.id) ||
       !item.evidence.every(
         (e, index) =>
           e.sourceId === event.evidence[index].sourceId &&
-          e.quote === event.evidence[index].quote &&
-          !workspace?.supersededSources?.includes(e.sourceId),
+          e.quote === event.evidence[index].quote,
       )
     )
       continue;
@@ -2045,24 +2064,18 @@ function LivePanel({
                       </small>
                     )}
                     {quote(item)}
-                    {item.evidence?.length > 0 &&
-                      item.evidence.every(
-                        (e) =>
-                          !workspace?.supersededSources?.includes(e.sourceId),
-                      ) &&
-                      !workspace?.contextExcludedIds?.includes(item.id) &&
-                      !confirmed.has(item.id) && (
-                        <button
-                          type="button"
-                          className="subtle-button"
-                          onClick={() => override(item, "confirmed")}
-                        >
-                          <Check size={14} aria-hidden="true" />
-                          {language === "de"
-                            ? "Inhalt bestätigen"
-                            : "Confirm content"}
-                        </button>
-                      )}
+                    {hasCurrentEvidence(item) && !confirmed.has(item.id) && (
+                      <button
+                        type="button"
+                        className="subtle-button"
+                        onClick={() => override(item, "confirmed")}
+                      >
+                        <Check size={14} aria-hidden="true" />
+                        {language === "de"
+                          ? "Inhalt bestätigen"
+                          : "Confirm content"}
+                      </button>
+                    )}
                     {panel === "impulses" && (
                       <div className="impulse-actions">
                         <button

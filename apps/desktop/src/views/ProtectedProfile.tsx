@@ -86,6 +86,7 @@ export default function ProtectedProfile({
   const [expanded, setExpanded] = useState(false);
   const [status, setStatus] = useState<ProtectedProfileStatus | null>(null);
   const [statusError, setStatusError] = useState("");
+  const [statusRetry, setStatusRetry] = useState(0);
   const [receipt, setReceipt] = useState<ProtectedProfileReceipt | null>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState<ProfileAction | null>(null);
@@ -137,7 +138,7 @@ export default function ProtectedProfile({
       observedCopy.current = false;
       clearTimeout(timer);
     };
-  }, [expanded, readStatus]);
+  }, [expanded, readStatus, statusRetry]);
 
   async function run(action: ProfileAction, secret?: string) {
     if (disabled || running.current || observedCopy.current) return;
@@ -214,7 +215,16 @@ export default function ProtectedProfile({
         {de ? "Sitzungsspeicher verschlüsseln" : "Encrypt session storage"}
       </summary>
       {statusError ? (
-        <p role="alert">{statusError}</p>
+        <>
+          <p role="alert">{statusError}</p>
+          <button
+            type="button"
+            className="secondary"
+            onClick={() => setStatusRetry((count) => count + 1)}
+          >
+            {de ? "Speicher erneut prüfen" : "Check storage again"}
+          </button>
+        </>
       ) : status === null ? (
         expanded && (
           <p role="status">{de ? "Speicher prüfen …" : "Checking storage …"}</p>

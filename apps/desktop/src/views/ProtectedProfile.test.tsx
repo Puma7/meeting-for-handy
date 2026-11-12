@@ -12,6 +12,32 @@ import type {
 } from "../types";
 import ProtectedProfile from "./ProtectedProfile";
 
+it("retries an initial status failure without closing the settings section", async () => {
+  const readStatus = vi
+    .fn()
+    .mockRejectedValueOnce(new Error("Synthetic status unavailable"))
+    .mockResolvedValueOnce({
+      supported: true,
+      active: false,
+      provider: "windowsEfs",
+    });
+  render(
+    <ProtectedProfile locale="en" readStatus={readStatus} create={vi.fn()} />,
+  );
+  const user = userEvent.setup();
+  await user.click(screen.getByText("Encrypt session storage"));
+  expect(await screen.findByRole("alert")).toHaveProperty(
+    "textContent",
+    "Synthetic status unavailable",
+  );
+  await user.click(screen.getByRole("button", { name: "Check storage again" }));
+  expect(
+    await screen.findByRole("button", { name: "Create encrypted profile" }),
+  ).toBeTruthy();
+  expect(readStatus).toHaveBeenCalledTimes(2);
+  expect(screen.queryByRole("alert")).toBeNull();
+});
+
 it("copies and opens an encrypted profile only after explicit actions", async () => {
   const readStatus = vi.fn().mockResolvedValue({
     supported: true,

@@ -1,5 +1,57 @@
 use super::*;
 
+#[cfg(unix)]
+#[test]
+fn failed_backup_directory_sync_unlinks_only_the_published_file() {
+    let directory = tempfile::tempdir().unwrap();
+    let output = directory.path().join("synthetic.hmvault");
+    let keep = directory.path().join("other-copy.hmvault");
+    fs::write(&keep, b"existing external copy").unwrap();
+    let mut pending = tempfile::NamedTempFile::new_in(directory.path()).unwrap();
+    pending.write_all(b"synthetic pending copy").unwrap();
+
+    let error = publish_backup(pending, &output, |parent| {
+        assert_eq!(parent, directory.path());
+        assert_eq!(fs::read(&output)?, b"synthetic pending copy");
+        Err("synthetic directory sync failure".into())
+    })
+    .unwrap_err();
+    assert_eq!(error.to_string(), "synthetic directory sync failure");
+    assert!(!output.exists());
+    assert_eq!(fs::read(&keep).unwrap(), b"existing external copy");
+
+    let pending = tempfile::NamedTempFile::new_in(directory.path()).unwrap();
+    let moved = directory.path().join("moved-copy.hmvault");
+    let error = publish_backup(pending, &output, |_| {
+        fs::rename(&output, &moved)?;
+        fs::write(&output, b"external replacement")?;
+        Err("synthetic directory sync failure".into())
+    })
+    .unwrap_err()
+    .to_string();
+    assert!(error.contains(&output.display().to_string()));
+    assert!(error.contains("A recovery key was not delivered"));
+    assert_eq!(fs::read(&output).unwrap(), b"external replacement");
+    assert!(moved.is_file());
+}
+
+#[cfg(not(unix))]
+#[test]
+fn failed_backup_sync_reports_a_copy_whose_identity_cannot_be_rechecked() {
+    let directory = tempfile::tempdir().unwrap();
+    let output = directory.path().join("synthetic.hmvault");
+    let mut pending = tempfile::NamedTempFile::new_in(directory.path()).unwrap();
+    pending.write_all(b"synthetic pending copy").unwrap();
+    let error = publish_backup(pending, &output, |_| {
+        Err("synthetic directory sync failure".into())
+    })
+    .unwrap_err()
+    .to_string();
+    assert!(error.contains(&output.display().to_string()));
+    assert!(error.contains("A recovery key was not delivered"));
+    assert_eq!(fs::read(&output).unwrap(), b"synthetic pending copy");
+}
+
 #[test]
 fn publication_sync_failure_removes_only_the_owned_recovery() {
     for fail_on_parent in [false, true] {

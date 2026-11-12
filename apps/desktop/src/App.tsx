@@ -229,6 +229,12 @@ export default function App({ api = desktopApi }: { api?: DesktopApi }) {
   const [backupReceipts, setBackupReceipts] = useState<
     ReadonlyMap<string, BackupResult>
   >(() => new Map());
+  const backupOperation = useRef<{
+    meetingId: string;
+    cancelling: boolean;
+  } | null>(null);
+  const [backupActivity, setBackupActivity] =
+    useState<typeof backupOperation.current>(null);
   const [page, setPage] = useState<Page>("meeting"),
     [app, setApp] = useState<AppState | null>(null),
     [connected, setConnected] = useState(false),
@@ -937,6 +943,19 @@ export default function App({ api = desktopApi }: { api?: DesktopApi }) {
     },
     [updateDeviceLosses],
   );
+  const invalidateVipQuestion = useCallback(
+    (outsideScope: (id: string) => boolean) => {
+      const previous = historyQuestionReturn.current;
+      if (
+        historySearchState.current.pinnedOnly &&
+        previous &&
+        historyQuestionUsesMeeting(previous, outsideScope)
+      ) {
+        historyQuestionReturn.current = undefined;
+      }
+    },
+    [],
+  );
   /**
    * Reloads the backend meeting summaries without changing the currently selected meeting
    * or opening its source files.
@@ -945,14 +964,19 @@ export default function App({ api = desktopApi }: { api?: DesktopApi }) {
     const epoch = erasureEpoch.current;
     try {
       const items = await api.listMeetings();
-      if (epoch === erasureEpoch.current)
+      if (epoch === erasureEpoch.current) {
+        invalidateVipQuestion(
+          (id) =>
+            !items.some((item) => item.id === id && item.userMetadata?.pinned),
+        );
         setHistory(
           items.filter((item) => !erasureBlocked.current.has(item.id)),
         );
+      }
     } catch (failure) {
       if (epoch === erasureEpoch.current) throw failure;
     }
-  }, [api]);
+  }, [api, invalidateVipQuestion]);
   useEffect(() => {
     /**
      * Refreshes history after the local index-update event and reports refresh failures
@@ -1309,6 +1333,45 @@ export default function App({ api = desktopApi }: { api?: DesktopApi }) {
       setError(errorMessage(failure));
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function runMeetingBackup(meetingId: string, passphrase: string) {
+    if (backupOperation.current) throw new Error(t.busy);
+    const operation = { meetingId, cancelling: false };
+    backupOperation.current = operation;
+    setBackupActivity({ ...operation });
+    try {
+      const result = await api.createEncryptedBackup!(meetingId, passphrase);
+      if (!result) return null;
+      if (result.summary.meetingId !== meetingId)
+        throw new Error(t.wrongMeeting);
+      return { file: result.file, recoveryKey: result.recoveryKey };
+    } finally {
+      backupOperation.current = null;
+      setBackupActivity(null);
+    }
+  }
+
+  async function cancelMeetingBackup(meetingId: string) {
+    const operation = backupOperation.current;
+    if (
+      operation?.meetingId !== meetingId ||
+      operation.cancelling ||
+      !api.cancelEncryptedBackup
+    )
+      return false;
+    operation.cancelling = true;
+    setBackupActivity({ ...operation });
+    let accepted = false;
+    try {
+      accepted = await api.cancelEncryptedBackup();
+      return accepted;
+    } finally {
+      if (!accepted && backupOperation.current === operation) {
+        operation.cancelling = false;
+        setBackupActivity({ ...operation });
+      }
     }
   }
   /** Own only the fields displayed by confirmation, never a full runtime Meeting. */
@@ -2415,6 +2478,7 @@ export default function App({ api = desktopApi }: { api?: DesktopApi }) {
             locale={locale}
             onChanged={(meta) => {
               const target = (page === "meeting" ? liveMeeting : meeting)!;
+              if (!meta.pinned) invalidateVipQuestion((id) => id === target.id);
               setMeeting((old) =>
                 old?.id === target.id
                   ? {
@@ -2777,23 +2841,21 @@ export default function App({ api = desktopApi }: { api?: DesktopApi }) {
                 <EncryptedBackup
                   key={meeting.id}
                   locale={locale}
-                  disabled={busy || recording || catchingUp}
-                  run={async (passphrase) => {
-                    const result = await api.createEncryptedBackup!(
-                      meeting.id,
-                      passphrase,
-                    );
-                    if (!result) return null;
-                    if (result.summary.meetingId !== meeting.id)
-                      throw new Error(t.wrongMeeting);
-                    return {
-                      file: result.file,
-                      recoveryKey: result.recoveryKey,
-                    };
-                  }}
-                  cancel={api.cancelEncryptedBackup}
+                  disabled={
+                    busy || recording || catchingUp || Boolean(backupActivity)
+                  }
+                  run={(passphrase) => runMeetingBackup(meeting.id, passphrase)}
+                  cancel={
+                    api.cancelEncryptedBackup
+                      ? () => cancelMeetingBackup(meeting.id)
+                      : undefined
+                  }
                   receipt={{
                     result: backupReceipts.get(meeting.id) ?? null,
+                    busy: backupActivity?.meetingId === meeting.id,
+                    cancelling:
+                      backupActivity?.meetingId === meeting.id &&
+                      backupActivity.cancelling,
                     setResult: (result) =>
                       setBackupReceipts((current) =>
                         new Map(current).set(meeting.id, result),

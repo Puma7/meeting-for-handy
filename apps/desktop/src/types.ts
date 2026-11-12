@@ -377,6 +377,8 @@ export interface LiveView {
   damagedRuns: number;
 }
 export interface LiveNotesStatus {
+  /** Workspace entries whose literal evidence matches the current transcript. */
+  confirmableWorkspaceEntries?: string[];
   preparingModel?: boolean;
   updateElapsedMs?: number;
   responseBytes?: number;
