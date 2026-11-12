@@ -69,10 +69,10 @@ pacat --playback --raw --format=s16le --rate=16000 --channels=1 --latency-msec=5
 players+=($!)
 pacat --playback --raw --format=s16le --rate=16000 --channels=1 --latency-msec=50 --device=handymeeting_ci_microphone_feed "$output/microphone-tone.raw" &
 players+=($!)
-# Warm the owned playback streams before recording. Capture readiness can precede
-# actual PCM, so request nine seconds within the unchanged8–10s receipt bounds.
+# Warm the owned playback streams before recording. Budget startup and recording
+# together, so time spent waiting for readiness cannot extend the probe's stop target.
 # The verifier still requires eight seconds of actual tone after any declared
 # startup prefix; no gap is reclassified as complete and no limit is relaxed.
 sleep 3
-"$example" "$output/capture" 9
-python3 "$(dirname "$0")/check-linux-audio-result.py" "$output/capture" "$output/checks.json"
+"$example" --virtual-audio-probe "$output/capture"
+python3 "$(dirname "$0")/check-linux-audio-result.py" "$output/capture" "$output/checks.json" --require-virtual-label

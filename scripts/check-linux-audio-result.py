@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Fail closed on unexpected virtual-capture failures; retain known startup gaps."""
+import argparse
 import hashlib
 from itertools import pairwise
 import json
@@ -7,7 +8,6 @@ import math
 from pathlib import Path
 import re
 import struct
-import sys
 import wave
 
 TIMING = "Portable audio track ranges use approximate receipt timing, not exact device or word timestamps."
@@ -64,9 +64,14 @@ def verify_tone(samples, frequency, tolerance, declared_startup, source, startup
     """Check every overlapping window; failures expose only its source and numeric signal evidence."""
     leading_zeros = next((i for i, sample in enumerate(samples) if sample), len(samples))
     start = leading_zeros if declared_startup else 0
-    # The capture is8–10seconds including its estimated startup padding. Even a
+    # The capture is 8–10 seconds including its estimated startup padding. Even a
     # declared gap must leave eight seconds of tone, allowing its first phase-zero sample.
-    require(start <= len(samples) - 8 * 16000 + 1, "Declared startup silence leaves less than eight seconds of tone")
+    if start > len(samples) - 8 * 16000 + 1:
+        raise ValueError("Declared startup silence leaves less than eight seconds of tone: " + json.dumps({
+            "source": source, "startupSamples": start, "availableToneSamples": len(samples) - start,
+            "requiredToneSamples": 8 * 16000, "trackSamples": len(samples), "sampleRate": 16000,
+            **(startup or {}),
+        }, sort_keys=True))
     size = 4000
     offsets = list(range(start, len(samples) - size + 1, size // 2))
     if not offsets or offsets[-1] != len(samples) - size:
@@ -104,9 +109,13 @@ def verify_tone(samples, frequency, tolerance, declared_startup, source, startup
             "phaseZeroAllowanceSamples": allowance}
 
 
-def verify(root):
+def verify(root, *, require_virtual_label=False):
     """Verify complete distinct PCM tracks while retaining explicit startup-gap limits."""
     result = json.loads((root / "result.json").read_text(encoding="utf-8"))
+    if require_virtual_label:
+        plan = json.loads((root / "plan.json").read_text(encoding="utf-8"))
+        require(plan.get("realHardware") is False and result.get("realHardware") is False,
+                "The current virtual probe plan and result must both identify synthetic audio")
     checkpoints = sorted((root / "checkpoints").glob("checkpoint-*.json"))
     require(checkpoints, "No final checkpoint")
     session = json.loads(checkpoints[-1].read_text(encoding="utf-8"))
@@ -134,7 +143,8 @@ def verify(root):
             require((audio.getnchannels(), audio.getframerate(), audio.getsampwidth(), audio.getcomptype())
                     == (1, 16000, 2, "NONE"), "Unexpected PCM format")
             count = audio.getnframes()
-            require(8 * 16000 <= count <= 10 * 16000, "Eight-second capture was truncated or overran")
+            require(8 * 16000 <= count <= 10 * 16000,
+                    f"Eight-second capture was truncated or overran: {source} saved {count} samples at 16000 Hz")
             data = audio.readframes(count)
         require(len(data) == count * 2 and part["confirmedSampleCount"] == count
                 and part["sampleCount"] == count
@@ -153,7 +163,12 @@ def verify(root):
 
 
 if __name__ == "__main__":
-    receipt = verify(Path(sys.argv[1]))
-    with Path(sys.argv[2]).open("x", encoding="utf-8") as output:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("root", type=Path)
+    parser.add_argument("receipt", type=Path)
+    parser.add_argument("--require-virtual-label", action="store_true")
+    args = parser.parse_args()
+    receipt = verify(args.root, require_virtual_label=args.require_virtual_label)
+    with args.receipt.open("x", encoding="utf-8") as output:
         json.dump(receipt, output, indent=2)
     print(json.dumps(receipt, indent=2))
