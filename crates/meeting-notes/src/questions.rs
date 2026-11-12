@@ -8,6 +8,7 @@ use icu_properties::{
 };
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+use std::ops::Range;
 
 pub const MAX_QUESTION_CHARS: usize = 400;
 pub const DEFAULT_PASSAGES: usize = 8;
@@ -103,14 +104,7 @@ pub fn excerpt<'a>(text: &'a str, terms: &[String]) -> &'a str {
     if text.chars().take(MAX_PASSAGE_CHARS + 1).count() <= MAX_PASSAGE_CHARS {
         return text;
     }
-    let mut offset = 0;
-    let bounds: Vec<_> = crate::workspace::evidence_sentences(text)
-        .map(|sentence| {
-            let start = offset + text[offset..].find(sentence).expect("original sentence");
-            offset = start + sentence.len();
-            start..offset
-        })
-        .collect();
+    let bounds: Vec<_> = sentence_ranges(text).collect();
     let mut best = ("", 0);
     for (index, start) in bounds.iter().enumerate() {
         let mut length = 0;
@@ -131,6 +125,15 @@ pub fn excerpt<'a>(text: &'a str, terms: &[String]) -> &'a str {
         }
     }
     best.0
+}
+
+fn sentence_ranges(text: &str) -> impl Iterator<Item = Range<usize>> + '_ {
+    let mut offset = 0;
+    crate::workspace::evidence_sentences(text).map(move |sentence| {
+        let start = offset + text[offset..].find(sentence).expect("original sentence");
+        offset = start + sentence.len();
+        start..offset
+    })
 }
 
 pub fn answer(client: &TextClient, question: &str, passages: &[Passage]) -> Result<Vec<Quote>> {
@@ -200,24 +203,33 @@ fn checked_quotes(reply: &str, passages: &[Passage]) -> Result<Vec<Quote>> {
             .find(|p| p.id == item.source)
             .context("Answer cites an unknown source.")?;
         ensure!(
-            (8..=360).contains(&item.quote.chars().count()) && passage.text.contains(&item.quote),
+            (8..=360).contains(&item.quote.chars().count()),
             "Answer contains an unverified quote."
         );
-        // Include surrounding qualifiers even when the model selects only the
-        // central phrase of a sentence. Multi-sentence verbatim quotes stay intact.
-        let expanded = {
-            let mut sentences = crate::workspace::evidence_sentences(&passage.text)
-                .filter(|sentence| sentence.contains(&item.quote));
-            let full = sentences.next();
-            ensure!(
-                sentences.all(|other| Some(other) == full),
-                "Answer quote is ambiguous."
-            );
-            full
-        };
-        if let Some(full) = expanded {
-            item.quote = full.to_owned();
-        }
+        // Expand both ends of a literal selection, including selections spanning a
+        // sentence boundary. Reject identical fragments with different surroundings.
+        let bounds: Vec<_> = sentence_ranges(&passage.text).collect();
+        let mut expanded = passage
+            .text
+            .match_indices(&item.quote)
+            .filter_map(|(start, quote)| {
+                let end = start + quote.len();
+                let mut sentences = bounds
+                    .iter()
+                    .skip_while(|sentence| sentence.end <= start)
+                    .take_while(|sentence| sentence.start < end);
+                let first = sentences.next()?;
+                let last = sentences.last().unwrap_or(first);
+                Some(&passage.text[first.start..last.end])
+            });
+        let full = expanded
+            .next()
+            .context("Answer contains an unverified quote.")?;
+        ensure!(
+            expanded.all(|other| other == full),
+            "Answer quote is ambiguous."
+        );
+        item.quote = full.to_owned();
         if !checked.contains(&item) {
             checked.push(item);
         }
@@ -306,6 +318,27 @@ mod tests {
             "while waiting for approval, ".repeat(30)
         );
         assert_eq!(excerpt(&too_long, &terms), "");
+    }
+
+    #[test]
+    fn quote_spanning_sentences_includes_negation_and_qualification() {
+        let passage = Passage {
+            id: 1,
+            meeting: "Synthetic".into(),
+            text: "No promises were made. Delivery on Friday was only proposed.".into(),
+        };
+        let reply = r#"{"matches":[{"source":1,"quote":"were made. Delivery on Friday"}]}"#;
+        let quotes = checked_quotes(reply, std::slice::from_ref(&passage)).unwrap();
+        assert_eq!(quotes[0].quote, passage.text);
+
+        let ambiguous = Passage {
+            text: format!(
+                "{} Firm promises were made. Delivery on Friday was agreed.",
+                passage.text
+            ),
+            ..passage
+        };
+        assert!(checked_quotes(reply, &[ambiguous]).is_err());
     }
 
     #[test]
