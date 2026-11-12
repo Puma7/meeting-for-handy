@@ -219,7 +219,7 @@ pub(super) fn present_assignment_quote(quote: &str) -> bool {
 }
 
 /// Temporary screening tokens never change the literal source or its quote.
-fn assertion_words(text: &str) -> Vec<&str> {
+pub(super) fn assertion_words(text: &str) -> Vec<&str> {
     text.split(|c: char| !c.is_alphabetic() && c != '\'')
         .flat_map(|token| match token {
             "i've" => vec!["i", "have"],
@@ -450,7 +450,7 @@ fn unasserted_auxiliary_before(words: &[&str], start: usize, predicate: usize) -
     })
 }
 
-fn finite_subject_before(
+pub(super) fn finite_subject_before(
     words: &[&str],
     original: &[&str],
     start: usize,

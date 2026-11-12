@@ -7,6 +7,11 @@ use tauri::{AppHandle, State};
 use tauri_plugin_dialog::DialogExt;
 use zeroize::Zeroizing;
 
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+mod startup;
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+pub(super) use startup::{acknowledge_window, managed_startup, report_failure};
+
 #[derive(Serialize)]
 pub(crate) struct Status {
     supported: bool,
@@ -107,43 +112,20 @@ fn launch(path: PathBuf, passphrase: Option<Zeroizing<String>>) -> AppResult<()>
     command.arg("--protected-profile").arg(&path);
     #[cfg(any(target_os = "linux", target_os = "macos"))]
     {
-        use std::{io::Write, process::Stdio};
-        let passphrase = required_passphrase(passphrase.as_ref())?;
-        let mut child = command
-            .arg("--password-stdin")
-            .stdin(Stdio::piped())
-            .spawn()
-            .map_err(|_| START_FAILED)?;
-        let written = child
-            .stdin
-            .take()
-            .ok_or(START_FAILED)?
-            .write_all(passphrase.as_bytes());
-        if written.is_err() {
-            let _ = child.wait();
-            return Err(START_FAILED.into());
-        }
-        std::thread::spawn(move || {
-            let _ = child.wait();
-        });
+        startup::launch(command, required_passphrase(passphrase.as_ref())?)
     }
     #[cfg(not(any(target_os = "linux", target_os = "macos")))]
     {
         drop(passphrase);
         storage::verify(&path).map_err(|error| error.to_string())?;
         command.spawn().map_err(|_| START_FAILED)?;
+        Ok(())
     }
-    Ok(())
 }
 
 #[cfg(any(target_os = "linux", target_os = "macos"))]
-pub(crate) fn unlock(path: &std::path::Path) -> AppResult<storage::MountedVolume> {
-    use std::io::Read;
-    let mut passphrase = Zeroizing::new(String::new());
-    std::io::stdin()
-        .take(1025)
-        .read_to_string(&mut passphrase)
-        .map_err(|_| "The passphrase could not be read.")?;
+pub(crate) fn unlock(path: &std::path::Path, managed: bool) -> AppResult<storage::MountedVolume> {
+    let passphrase = startup::read_passphrase(std::io::stdin().lock(), managed)?;
     storage::open_volume(path, &passphrase).map_err(|error| error.to_string())
 }
 
@@ -157,7 +139,9 @@ pub(crate) fn launch_path(args: &[OsString]) -> AppResult<Option<PathBuf>> {
     }
     match args {
         #[cfg(any(target_os = "linux", target_os = "macos"))]
-        [_, path, flag] if flag == "--password-stdin" && std::path::Path::new(path).is_absolute() => Ok(Some(PathBuf::from(path))),
+        [_, path, flag, rest @ ..] if flag == "--password-stdin"
+            && (rest.is_empty() || matches!(rest, [ack] if ack == startup::FLAG))
+            && std::path::Path::new(path).is_absolute() => Ok(Some(PathBuf::from(path))),
         #[cfg(not(any(target_os = "linux", target_os = "macos")))]
         [_, path] if std::path::Path::new(path).is_absolute() => Ok(Some(PathBuf::from(path))),
         _ => Err("Open the encrypted profile from Settings or specify its absolute path and the required unlock method. / Verschlüsseltes Profil über die Einstellungen öffnen oder den absoluten Pfad samt Entsperrmethode angeben.".into()),
@@ -176,7 +160,19 @@ mod tests {
         if cfg!(any(target_os = "linux", target_os = "macos")) {
             args.push(OsString::from("--password-stdin"));
         }
-        assert_eq!(launch_path(&args).unwrap(), Some(absolute));
+        assert_eq!(
+            launch_path(&args).unwrap().as_deref(),
+            Some(absolute.as_path())
+        );
+        #[cfg(any(target_os = "linux", target_os = "macos"))]
+        {
+            assert!(!managed_startup(&args));
+            args.push(startup::FLAG.into());
+            assert!(managed_startup(&args));
+            assert_eq!(launch_path(&args).unwrap(), Some(absolute));
+            args.push("unexpected".into());
+            assert!(launch_path(&args).is_err());
+        }
         assert!(launch_path(std::slice::from_ref(&flag)).is_err());
         assert!(launch_path(&[flag, OsString::from("relative")]).is_err());
         assert_eq!(

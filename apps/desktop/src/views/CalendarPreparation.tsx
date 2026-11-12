@@ -90,7 +90,6 @@ export function calendarEvents(
         });
       }
       event = null;
-      if (result.length >= 500) break;
     } else if (event && name === "BEGIN") {
       alarmDepth++;
     } else if (event && name === "END" && alarmDepth) {

@@ -54,7 +54,7 @@ it("copies and opens an encrypted profile only after explicit actions", async ()
   expect(await screen.findByText(/Close this window/)).toBeTruthy();
 });
 
-it("keeps the previous profile when the folder picker is canceled or copying fails", async () => {
+it("clears the previous copy receipt when a new copy is canceled or fails", async () => {
   const readStatus = vi.fn().mockResolvedValue({
     supported: true,
     active: false,
@@ -62,7 +62,9 @@ it("keeps the previous profile when the folder picker is canceled or copying fai
   });
   const create = vi
     .fn()
+    .mockResolvedValueOnce({ path: "synthetic/first", files: 4, bytes: 2048 })
     .mockResolvedValueOnce(null)
+    .mockResolvedValueOnce({ path: "synthetic/second", files: 2, bytes: 1024 })
     .mockRejectedValueOnce("An encrypted target could not be verified.");
   const open = vi.fn();
   render(
@@ -79,12 +81,18 @@ it("keeps the previous profile when the folder picker is canceled or copying fai
     name: "Create encrypted profile",
   });
   await user.click(copy);
+  expect(await screen.findByText("synthetic/first")).toBeTruthy();
+  await user.click(copy);
   expect(screen.queryByText(/Encrypted profile verified/)).toBeNull();
+  expect(screen.queryByText("synthetic/first")).toBeNull();
+  await user.click(copy);
+  expect(await screen.findByText("synthetic/second")).toBeTruthy();
   await user.click(copy);
   expect((await screen.findByRole("alert")).textContent).toBe(
     "An encrypted target could not be verified.",
   );
   expect(screen.queryByText(/Encrypted profile verified/)).toBeNull();
+  expect(screen.queryByText("synthetic/second")).toBeNull();
   expect(open).not.toHaveBeenCalled();
 });
 

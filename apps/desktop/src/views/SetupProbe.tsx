@@ -54,8 +54,8 @@ export default function SetupProbe({
       </button>
       <p>
         {de
-          ? "Prüft mit erzeugtem Audio die Speicherung und Transkriptionssoftware sowie mit Testtext das gewählte lokale Textmodell. Aufnahmegeräte werden dabei nicht geöffnet."
-          : "Checks audio storage and transcription software with generated audio, plus the selected local text model with sample text. It does not open recording devices."}
+          ? "Ein Testton prüft Audiospeicherung und Transkriptionssoftware. Testtext prüft das gewählte lokale Textmodell. Die Erkennung von Wörtern und die Aufnahmegeräte brauchen separate Prüfungen."
+          : "A test tone checks audio storage and the transcription software. Sample text checks the selected local text model. Word recognition and recording devices need separate tests."}
       </p>
       <div role="status">
         {running &&
@@ -67,8 +67,10 @@ export default function SetupProbe({
               {verdict(result.audioRoundtrip)}
             </li>
             <li>
-              {de ? "Transkriptionssoftware" : "Transcription software"} ·{" "}
-              {verdict(result.recognition)}
+              {de
+                ? "Transkriptionssoftware (Testton)"
+                : "Transcription software (test tone)"}{" "}
+              · {verdict(result.transcriptionWorker)}
             </li>
             <li>
               {de ? "Lokale Textauswertung" : "Local text analysis"} ·{" "}

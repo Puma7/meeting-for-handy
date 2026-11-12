@@ -396,6 +396,70 @@ it("runs history questions explicitly with the local scope and opens the quoted 
   );
 });
 
+it("discards an in-flight answer when the transcript-only scope changes", async () => {
+  const citation = {
+    meetingId: meeting.id,
+    meetingTitle: "Synthetic meeting",
+    sourceId: meeting.parts[0].file,
+    startMs: 0,
+    quote: "Old-scope reply",
+  };
+  const oldResult = { searchedPassages: 1, citations: [citation] };
+  let finishOld!: (result: typeof oldResult) => void;
+  const pending = new Promise<typeof oldResult>((resolve) => {
+    finishOld = resolve;
+  });
+  const ask = vi
+    .fn()
+    .mockReturnValueOnce(pending)
+    .mockResolvedValueOnce({ searchedPassages: 0, citations: [] });
+  render(
+    <HistorySearch
+      api={{ askMeetingHistory: ask } as unknown as DesktopApi}
+      locale="en"
+      onOpen={vi.fn()}
+      onOpenCitation={vi.fn()}
+      historyModel={{
+        endpoint: "http://127.0.0.1:1235/v1/",
+        model: "synthetic",
+      }}
+    />,
+  );
+  await userEvent.type(screen.getByRole("searchbox"), "delivery");
+  await userEvent.click(screen.getByText("Ask your meetings"));
+  const question = "When is delivery?";
+  await userEvent.type(
+    screen.getByLabelText("Question for your meetings"),
+    question,
+  );
+  await userEvent.click(screen.getByRole("button", { name: "Answer locally" }));
+  expect(ask).toHaveBeenCalledWith(
+    expect.objectContaining({ question, scope: undefined }),
+  );
+
+  await userEvent.click(
+    screen.getByRole("checkbox", { name: "Transcript matches only" }),
+  );
+  await act(async () => {
+    finishOld(oldResult);
+    await pending;
+  });
+  expect(screen.queryByText(citation.quote)).toBeNull();
+  await userEvent.click(screen.getByText("Ask your meetings"));
+  await userEvent.type(
+    screen.getByLabelText("Question for your meetings"),
+    question,
+  );
+  await userEvent.click(screen.getByRole("button", { name: "Answer locally" }));
+  expect(ask).toHaveBeenLastCalledWith(
+    expect.objectContaining({
+      question,
+      scope: expect.objectContaining({ transcriptOnly: true }),
+    }),
+  );
+  expect(await screen.findByText(/contain no supported answer/)).toBeTruthy();
+});
+
 it("loads verified audio only after a user requests the exact history result", async () => {
   const sourceId = meeting.parts[0].file;
   const getTranscriptAudio = vi
@@ -408,7 +472,7 @@ it("loads verified audio only after a user requests the exact history result", a
         sourceId,
         excerpt: "Read the report",
         startMs: 0,
-        endMs: 30_000,
+        endMs: 75_000,
       },
     ],
     total: 1,
@@ -424,6 +488,9 @@ it("loads verified audio only after a user requests the exact history result", a
   );
   await userEvent.type(screen.getByRole("searchbox"), "report");
   await screen.findByText("Read the report");
+  expect(
+    screen.getByText(/Audio preview plays the first 30 seconds of the section/),
+  ).toBeTruthy();
   expect(getTranscriptAudio).not.toHaveBeenCalled();
   await userEvent.click(
     screen.getByRole("button", { name: "Load audio preview" }),

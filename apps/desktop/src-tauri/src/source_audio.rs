@@ -1,10 +1,11 @@
 //! Bounded local audition of an already confirmed recording section.
 use crate::{meeting_files, AppResult, Service};
-use std::sync::Arc;
+use std::{fs::File, path::Path, sync::Arc};
 
 const PREVIEW_SECONDS: usize = 30;
 const UNAVAILABLE: &str =
     "Bestätigter Ton ist lokal nicht verfügbar. / Confirmed audio is unavailable locally.";
+const BUSY: &str = "Sitzung wird bearbeitet. / Session storage is busy.";
 
 #[tauri::command]
 pub(crate) async fn get_transcript_audio(
@@ -14,24 +15,40 @@ pub(crate) async fn get_transcript_audio(
 ) -> AppResult<tauri::ipc::Response> {
     let service = Arc::clone(service.inner());
     crate::blocking(move || {
-        let _lease = meeting_core::archive::source_publication_lease(&service.root)
-            .map_err(|_| "Sitzung wird bearbeitet. / Session storage is busy.")?;
-        let folder = meeting_files::session_folder(&service.root, &id)?;
-        let data = service.data(&id)?;
-        let mut candidates = data.parts.iter().filter(|part| part.file == source_id);
-        let part = candidates
-            .next()
-            .filter(|part| {
-                part.status == "complete"
-                    && part.text.as_ref().is_some_and(|t| !t.trim().is_empty())
-            })
-            .ok_or(UNAVAILABLE)?;
-        if data.id != id || candidates.next().is_some() {
-            return Err(UNAVAILABLE.into());
-        }
-        read_preview(&folder, &data.parts, part, 0).map(tauri::ipc::Response::new)
+        transcript_audio(&service, &id, &source_id).map(tauri::ipc::Response::new)
     })
     .await
+}
+
+fn transcript_audio(service: &Service, id: &str, source_id: &str) -> AppResult<Vec<u8>> {
+    let _leases = preview_leases(&service.root, id)?;
+    let folder = meeting_files::session_folder(&service.root, id)?;
+    let data = service.data(id)?;
+    let mut candidates = data.parts.iter().filter(|part| part.file == source_id);
+    let part = candidates
+        .next()
+        .filter(|part| {
+            part.status == "complete" && part.text.as_ref().is_some_and(|t| !t.trim().is_empty())
+        })
+        .ok_or(UNAVAILABLE)?;
+    if data.id != id || data.read_only || candidates.next().is_some() {
+        return Err(UNAVAILABLE.into());
+    }
+    read_preview(&folder, &data.parts, part, 0)
+}
+
+fn preview_leases(root: &Path, id: &str) -> AppResult<(File, File)> {
+    // Acquire the archive/metadata lock before the publication lock, as erasure does.
+    let metadata_lease = meeting_core::archive::source_mutation_lease(root).map_err(|_| BUSY)?;
+    let publication_lease =
+        meeting_core::archive::source_publication_lease(root).map_err(|_| BUSY)?;
+    if meeting_core::metadata::read(root, id)
+        .map_err(|_| UNAVAILABLE)?
+        .audio_removed
+    {
+        return Err(UNAVAILABLE.into());
+    }
+    Ok((metadata_lease, publication_lease))
 }
 
 #[tauri::command]
@@ -44,8 +61,7 @@ pub(crate) async fn get_source_audio(
 ) -> AppResult<tauri::ipc::Response> {
     let service = Arc::clone(service.inner());
     tauri::async_runtime::spawn_blocking(move || {
-        let _lease = meeting_core::archive::source_publication_lease(&service.root)
-            .map_err(|_| "Sitzung wird bearbeitet. / Session storage is busy.")?;
+        let _leases = preview_leases(&service.root, &id)?;
         let folder = meeting_files::session_folder(&service.root, &id)?;
         let workspace = service
             .live_notes
@@ -56,6 +72,9 @@ pub(crate) async fn get_source_audio(
             .ok_or(UNAVAILABLE)?;
         let source = workspace.audio_source(&source_id).ok_or(UNAVAILABLE)?;
         let snapshot = service.data(&id)?;
+        if snapshot.id != id || snapshot.read_only {
+            return Err(UNAVAILABLE.into());
+        }
         let (part, offset_ms) = source_audio_part(&snapshot.parts, source).ok_or(UNAVAILABLE)?;
         read_preview(&folder, &snapshot.parts, part, offset_ms).map(tauri::ipc::Response::new)
     })
@@ -167,6 +186,21 @@ fn encode_preview(pcm: &[f32]) -> Vec<u8> {
 mod tests {
     use super::*;
 
+    struct Owned(std::path::PathBuf);
+    impl Owned {
+        fn new() -> Self {
+            let path = std::env::temp_dir()
+                .join(format!("hm-audio-preview-{}", meeting_notes::new_job_id()));
+            std::fs::create_dir(&path).unwrap();
+            Self(path)
+        }
+    }
+    impl Drop for Owned {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
     #[test]
     fn only_current_exact_chunk_on_its_owned_track_can_resolve() {
         let source = meeting_notes::live::LiveSource {
@@ -211,17 +245,59 @@ mod tests {
     }
 
     #[test]
+    fn history_preview_refuses_removed_audio_even_when_verified_pcm_is_present() {
+        let root = Owned::new();
+        let service = Service::new(root.0.clone()).unwrap();
+        let store = meeting_core::SessionStore::create(
+            &root.0.join("sessions"),
+            "Synthetic",
+            "test",
+            "system",
+            None,
+        )
+        .unwrap();
+        let mut writer = meeting_core::PcmWriter::new(store.clone(), "system").unwrap();
+        writer.append(&[1_000; 100]).unwrap();
+        writer.finish().unwrap();
+        drop(writer);
+        let data = store.snapshot().unwrap();
+        let part = &data.parts[0];
+        store
+            .append_transcript(meeting_core::TranscriptCheckpoint {
+                sequence: 0,
+                at: String::new(),
+                file: part.file.clone(),
+                model_id: "test".into(),
+                full: "Synthetic transcript.".into(),
+                committed: "Synthetic transcript.".into(),
+                tentative: String::new(),
+                processed_samples: part.confirmed_sample_count,
+                final_text: true,
+                revision_after_restart: false,
+            })
+            .unwrap();
+        let audio = store.folder().join("audio").join(&part.file);
+        let retained = std::fs::read(&audio).unwrap();
+        drop(store);
+        assert!(transcript_audio(&service, &data.id, &part.file).is_ok());
+
+        let labels = root.0.join("user-metadata");
+        std::fs::create_dir_all(&labels).unwrap();
+        std::fs::write(
+            labels.join(format!("{}.json", data.id)),
+            br#"{"revision":1,"title":null,"pinned":false,"audioRemoved":true}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            transcript_audio(&service, &data.id, &part.file).unwrap_err(),
+            UNAVAILABLE
+        );
+        assert_eq!(std::fs::read(audio).unwrap(), retained);
+    }
+
+    #[test]
     fn verified_preview_crosses_only_contiguous_sections_on_the_same_track() {
-        let root =
-            std::env::temp_dir().join(format!("hm-joined-preview-{}", meeting_notes::new_job_id()));
-        std::fs::create_dir(&root).unwrap();
-        struct Owned(std::path::PathBuf);
-        impl Drop for Owned {
-            fn drop(&mut self) {
-                let _ = std::fs::remove_dir_all(&self.0);
-            }
-        }
-        let root = Owned(root);
+        let root = Owned::new();
         let store =
             meeting_core::SessionStore::create(&root.0, "Synthetic", "test", "system", Some("mic"))
                 .unwrap();

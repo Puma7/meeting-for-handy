@@ -17,6 +17,7 @@ mod volume;
 pub use volume::{migrate_volume, open_volume, MountedVolume};
 
 const MARKER: &str = "protected-profile.v1";
+const VAULT_MARKER: &str = "protected-volume.v1";
 const DIRECTORY_PREFIX: &str = "HandyMeeting-Protected-";
 const MARKER_CONTENT: &[u8] = b"HandyMeeting Windows EFS profile v1\n";
 const PROFILE_DATA: &[&str] = &[
@@ -77,7 +78,8 @@ pub fn needs_verification(root: &Path) -> Result<bool> {
     {
         return Ok(true);
     }
-    storage::exists_no_link(&root.join(MARKER))
+    Ok(storage::exists_no_link(&root.join(MARKER))?
+        || storage::exists_no_link(&root.join(VAULT_MARKER))?)
 }
 
 /// Check a marked profile before the application or its webview writes to it.

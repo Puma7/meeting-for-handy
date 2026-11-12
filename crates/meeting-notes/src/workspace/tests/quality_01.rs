@@ -54,6 +54,12 @@ fn omitted_calendar_due_is_saved_from_the_literal_task_witness() {
         ),
         (
             "de",
+            "Ich bringe die Unterlagen bis zum 24. September mit.",
+            "Unterlagen mitbringen",
+            Some("24. September"),
+        ),
+        (
+            "de",
             "Mara besorgt die Getränke bis zum fünfundzwanzigsten neunten.",
             "Getränke besorgen",
             Some("fünfundzwanzigsten neunten"),

@@ -4,7 +4,7 @@
 | --- | --- |
 | Processing status | Separate capture, recognition, and local analysis status with actionable errors. |
 | Resource scheduling | Capture and recognition take priority. Local analysis can wait for available system RAM, and slow updates back off under memory pressure. GPU memory scheduling and low-memory device validation remain open. |
-| Setup check | An explicit synthetic check exercises audio storage and recognition, with an optional local text-model check. Microphone permissions and hardware are outside this check. |
+| Setup check | An explicit test tone checks audio storage and the transcription worker's processing protocol. The optional local text-model check uses sample text. Word recognition, microphone permissions and hardware require separate tests. |
 | Meeting overview | Compact current and historical views preserve access to the complete stored results. |
 | Result provenance | The UI and JSON export distinguish an AI draft, a manual status change, and confirmation of a specific result revision. Confirmation requires current original evidence. |
 | Original audio | Workspace citations and history search can open the verified recording on the correct track. The preview may join adjacent verified chunks and is capped at 30 seconds. Extended playback across chunks remains open. |
@@ -15,7 +15,7 @@
 | Diagnostics | An opt-in local preview contains allowlisted technical fields and can be copied manually. |
 | Delivery | Source and synthetic checks cover the development build. Tests of the final installer, update, and signing remain separate release gates. |
 
-The model reference used Gemma 4 12B QAT through LM Studio on Windows with synthetic meetings. It exercised a cross-meeting comparison, a selected-meeting scope and an unsupported question that required abstention. The synthetic setup check also exercised Nemotron Streaming through Handy 0.10.0 on CPU. These checks do not establish physical capture or long-session reliability.
+The model reference used Gemma 4 12B QAT through LM Studio on Windows with synthetic meetings. It exercised a cross-meeting comparison, a selected-meeting scope and an unsupported question that required abstention. The test-tone setup check exercised the Nemotron Streaming worker protocol through Handy 0.10.0 on CPU. Physical capture and long-session reliability require separate tests.
 
 The Windows development candidate before protected profiles passed 640 Rust tests and 500 UI tests, a production frontend build, Rust formatting, Clippy with warnings treated as errors, `verify.ps1`, and eight native executable checks in an isolated profile. The regular Rust suite excluded four explicitly invoked diagnostics and fixtures. The earlier local model reference applies to the history question path. No fresh model run was recorded for the backup and UI follow-up.
 

@@ -168,6 +168,16 @@ fn source_changes_during_copy_prevent_publication() {
     assert_eq!(fs::read(late).unwrap(), b"a concurrently added user file");
 }
 
+#[test]
+fn renamed_encrypted_copy_requires_verified_launch() {
+    let root = tempfile::tempdir().unwrap();
+    let renamed = root.path().join("restored-vault");
+    fs::create_dir(&renamed).unwrap();
+    assert!(!needs_verification(&renamed).unwrap());
+    fs::write(renamed.join(VAULT_MARKER), b"encrypted vault marker").unwrap();
+    assert!(needs_verification(&renamed).unwrap());
+}
+
 #[cfg(windows)]
 #[test]
 #[ignore = "Requires an isolated EFS-capable Windows test account and directory"]
@@ -230,6 +240,20 @@ fn native_volume_migrates_and_recovers_from_a_detached_ciphertext_copy() {
     drop(reindex(source.path(), &id));
     let original_index = fs::read(source.path().join("library-index/library.sqlite3")).unwrap();
     let before = inventory(source.path()).unwrap();
+    let active = SessionStore::open(&source.path().join("sessions").join(&id)).unwrap();
+    assert!(migrate_volume(source.path(), vaults.path(), &password).is_err());
+    assert!(fs::read_dir(vaults.path()).unwrap().next().is_none());
+    drop(active);
+    let unexpected = source.path().join("templates");
+    fs::write(&unexpected, b"owned synthetic file in place of directory").unwrap();
+    assert!(migrate_volume(source.path(), vaults.path(), &password).is_err());
+    assert!(fs::read_dir(vaults.path()).unwrap().next().is_none());
+    assert_eq!(
+        fs::read(&unexpected).unwrap(),
+        b"owned synthetic file in place of directory"
+    );
+    fs::remove_file(unexpected).unwrap();
+    assert_eq!(before, inventory(source.path()).unwrap());
     let receipt = migrate_volume(source.path(), vaults.path(), &password).unwrap();
     assert!(receipt.files > 0 && receipt.bytes > 0);
     assert_eq!(before, inventory(source.path()).unwrap());
@@ -259,6 +283,7 @@ fn native_volume_migrates_and_recovers_from_a_detached_ciphertext_copy() {
 
     let copied = copies.path().join("restored-vault");
     copy_ciphertext(&receipt.path, &copied);
+    assert!(needs_verification(&copied).unwrap());
     let recovered = open_volume(&copied, &password).unwrap();
     assert_eq!(after, inventory(recovered.root()).unwrap());
     assert_eq!(

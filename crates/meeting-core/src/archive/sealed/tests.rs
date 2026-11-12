@@ -1,5 +1,64 @@
 use super::*;
 
+#[test]
+fn publication_sync_failure_removes_only_the_owned_recovery() {
+    for fail_on_parent in [false, true] {
+        let staging = tempfile::tempdir().unwrap();
+        let directory = tempfile::tempdir().unwrap();
+        let unrelated = directory.path().join("keep.txt");
+        fs::write(&unrelated, b"unrelated destination bytes").unwrap();
+        let profile = staging.path().join("profile");
+        fs::create_dir(&profile).unwrap();
+        fs::write(profile.join("synthetic-audio"), b"generated audio").unwrap();
+        let error = publish_recovery(&profile, directory.path(), |path| {
+            if (path == directory.path()) == fail_on_parent {
+                Err("synthetic publication sync failure".into())
+            } else {
+                Ok(())
+            }
+        })
+        .unwrap_err();
+        assert_eq!(error.to_string(), "synthetic publication sync failure");
+        assert_eq!(
+            fs::read(&unrelated).unwrap(),
+            b"unrelated destination bytes"
+        );
+        assert_eq!(fs::read_dir(directory.path()).unwrap().count(), 1);
+    }
+}
+
+#[cfg(windows)]
+#[test]
+fn blocked_publication_cleanup_reports_where_the_plaintext_remains() {
+    use std::{cell::RefCell, os::windows::fs::OpenOptionsExt};
+
+    let staging = tempfile::tempdir().unwrap();
+    let directory = tempfile::tempdir().unwrap();
+    let profile = staging.path().join("profile");
+    fs::create_dir(&profile).unwrap();
+    fs::write(profile.join("synthetic-audio"), b"generated audio").unwrap();
+    let held = RefCell::new(None);
+    let error = publish_recovery(&profile, directory.path(), |path| {
+        let published = path.join("profile");
+        let file = OpenOptions::new()
+            .read(true)
+            .share_mode(0)
+            .open(published.join("synthetic-audio"))?;
+        *held.borrow_mut() = Some((published, file));
+        Err("synthetic publication sync failure".into())
+    })
+    .unwrap_err()
+    .to_string();
+    let (published, file) = held.into_inner().unwrap();
+    assert!(error.contains("Could not remove the unfinished recovery"));
+    assert!(error.contains(&published.display().to_string()));
+    drop(file);
+    assert_eq!(
+        fs::read(published.join("synthetic-audio")).unwrap(),
+        b"generated audio"
+    );
+}
+
 const TITLE: &str = "SYNTHETIC_PRIVATE_BACKUP_TITLE";
 
 fn synthetic_passphrase() -> Zeroizing<String> {
@@ -180,6 +239,29 @@ fn backup_and_recovery_preserve_every_source_byte_in_an_independent_profile() {
             .total,
         1
     );
+}
+
+#[test]
+fn backup_coexists_with_another_publisher_and_keeps_erasure_excluded() {
+    let source = tempfile::tempdir().unwrap();
+    let destination = tempfile::tempdir().unwrap();
+    let (id, folder) = fixture(source.path());
+    let before = fingerprints(&folder);
+    let passphrase = synthetic_passphrase();
+    let stop = AtomicBool::new(false);
+    let backup = destination.path().join("parallel-publication.hmvault");
+    let publisher = source_publication_lease(source.path()).unwrap();
+
+    let (summary, _) = create(source.path(), &id, &backup, passphrase.as_bytes(), &stop).unwrap();
+    assert_eq!(summary.meeting_id, id);
+    assert_eq!(fingerprints(&folder), before);
+    drop(publisher);
+
+    let erasure = publication_lease(source.path(), true).unwrap();
+    let second = destination.path().join("blocked-by-erasure.hmvault");
+    assert!(create(source.path(), &id, &second, passphrase.as_bytes(), &stop).is_err());
+    assert!(!second.exists());
+    drop(erasure);
 }
 
 #[test]

@@ -370,9 +370,29 @@ export default function App({ api = desktopApi }: { api?: DesktopApi }) {
     ),
     [textModel, setTextModel] = useState(savedLive.model ?? ""),
     [manualTextModel, setManualTextModel] = useState(false),
-    [apiKey, setApiKey] = useState(""),
-    [savedKeyScope, setSavedKeyScope] = useState<string | null>(null),
     [mode, setProcessingMode] = useState<"local" | "cloud">("local");
+  const [
+    { apiKey, savedKeyScope, revision: credentialRevision },
+    setCredentials,
+  ] = useState({
+    apiKey: "",
+    savedKeyScope: null as string | null,
+    revision: 0,
+  });
+  const setApiKey = useCallback((apiKey: string) => {
+    setCredentials((current) =>
+      current.apiKey === apiKey
+        ? current
+        : { ...current, apiKey, revision: current.revision + 1 },
+    );
+  }, []);
+  const setSavedKeyScope = useCallback((savedKeyScope: string | null) => {
+    setCredentials((current) =>
+      current.savedKeyScope === savedKeyScope
+        ? current
+        : { ...current, savedKeyScope, revision: current.revision + 1 },
+    );
+  }, []);
   const connectionDrafts = useRef({
     local: {
       endpoint: savedLive.endpoint ?? "http://127.0.0.1:1234/v1/",
@@ -401,7 +421,7 @@ export default function App({ api = desktopApi }: { api?: DesktopApi }) {
       setSavedKeyScope(null);
       setProcessingMode(next);
     },
-    [mode, endpoint, textModel, manualTextModel],
+    [mode, endpoint, textModel, manualTextModel, setApiKey, setSavedKeyScope],
   );
   const credentialScope = JSON.stringify([mode, endpoint.trim()]);
   const useSavedKey = savedKeyScope === credentialScope;
@@ -411,7 +431,7 @@ export default function App({ api = desktopApi }: { api?: DesktopApi }) {
    */
   const setUseSavedKey = useCallback(
     (value: boolean) => setSavedKeyScope(value ? credentialScope : null),
-    [credentialScope],
+    [credentialScope, setSavedKeyScope],
   );
   const [analyses, setAnalyses] = useState<AnalysisResult[]>([]),
     [resultId, setResultId] = useState(""),
@@ -2699,7 +2719,13 @@ export default function App({ api = desktopApi }: { api?: DesktopApi }) {
                             ? "found"
                             : "missing",
               check: () => void localTextModels.refresh(),
-              probeKey: JSON.stringify([modelId, mode, endpoint, textModel]),
+              probeKey: JSON.stringify([
+                modelId,
+                mode,
+                endpoint,
+                textModel,
+                credentialRevision,
+              ]),
               probe: api.checkMeetingSetup
                 ? () =>
                     api.checkMeetingSetup!({

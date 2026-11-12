@@ -120,6 +120,16 @@ pub fn excerpt<'a>(text: &'a str, terms: &[String]) -> &'a str {
 }
 
 pub fn answer(client: &TextClient, question: &str, passages: &[Passage]) -> Result<Vec<Quote>> {
+    answer_with_control(client, question, passages, &AnalysisControl::default())
+}
+
+pub fn answer_with_control(
+    client: &TextClient,
+    question: &str,
+    passages: &[Passage],
+    control: &AnalysisControl,
+) -> Result<Vec<Quote>> {
+    control.check()?;
     // This feature has no cloud mode, including when used outside the desktop.
     ensure!(
         client.is_local(),
@@ -157,7 +167,7 @@ pub fn answer(client: &TextClient, question: &str, passages: &[Passage]) -> Resu
         "meeting_history_answer",
         schema,
         1200,
-        &AnalysisControl::default(),
+        control,
     )?;
     checked_quotes(&reply, passages)
 }

@@ -391,7 +391,7 @@ impl LibraryIndex {
             .take(20)
             .map(|word| format!("\"{}\"*", word.replace('"', "\"\"")))
             .collect::<Vec<_>>();
-        let expression = match_expression(&terms);
+        let expression = match_expression(&terms, scope.transcript_only);
         // Count and page must see the same index while another connection refreshes it.
         let snapshot = self
             .db
@@ -473,8 +473,8 @@ impl LibraryIndex {
         })
     }
 
-    /// Rank candidate locations for a question. The index is a locator; callers
-    /// must retrieve authoritative text before sending passages to a model.
+    /// Rank native candidate locations for a question. The index is a locator;
+    /// callers must retrieve authoritative text before sending passages to a model.
     pub fn question_candidates(
         &self,
         keywords: &[String],
@@ -496,17 +496,32 @@ impl LibraryIndex {
         }
         let expression = keywords
             .iter()
-            .map(|word| format!("{{body context}} : \"{word}\"*"))
+            .map(|word| format!("body : \"{word}\"*"))
             .collect::<Vec<_>>()
             .join(" OR ");
+        // Rank each meeting's first candidate before another meeting's repeats.
+        // Keep transcript content out of the temporary ranking rows.
         let mut statement = self.db.prepare(&format!(
-            "SELECT m.id,m.title,m.started,m.duration,m.status,m.model,m.pinned,m.audio_removed,m.revision,
+            "WITH matches AS MATERIALIZED (
+                SELECT s.rowid AS section_row, m.id, m.started,
+                       bm25(transcript_search, 0, 0, 0, 0, 0, 4, 0) AS relevance
+                FROM transcript_search s JOIN meetings m ON m.id=s.meeting_id
+                WHERE {MEETING_SCOPE} AND s.source_id <> '' AND transcript_search MATCH ?4
+                AND length(m.id) = 32 AND length(CAST(m.id AS BLOB)) = 32
+                AND m.id NOT GLOB '*[^0-9A-Fa-f]*'
+                AND (?5 = '[]' OR m.id IN (SELECT value FROM json_each(?5)))
+             ), candidates AS (
+                SELECT *, row_number() OVER (PARTITION BY id ORDER BY relevance, section_row) AS position
+                FROM matches
+                ORDER BY position, relevance, started DESC, id, section_row
+                LIMIT 48
+             )
+             SELECT m.id,m.title,m.started,m.duration,m.status,m.model,m.pinned,m.audio_removed,m.revision,
              s.source_id,s.start_ms,s.end_ms,''
-             FROM transcript_search s JOIN meetings m ON m.id=s.meeting_id
-             WHERE {MEETING_SCOPE} AND s.source_id <> '' AND transcript_search MATCH ?4
-             AND (?5 = '[]' OR m.id IN (SELECT value FROM json_each(?5)))
-             ORDER BY bm25(transcript_search, 0, 0, 0, 0, 0, 4, 1), m.started DESC, m.id, s.rowid
-             LIMIT 48"
+             FROM candidates c
+             JOIN meetings m ON m.id=c.id
+             JOIN transcript_search s ON s.rowid=c.section_row
+             ORDER BY c.position, c.relevance, c.started DESC, c.id, c.section_row"
         ))?;
         let rows = statement
             .query_map(
@@ -537,11 +552,10 @@ impl LibraryIndex {
         result
     }
 }
-/// Every term must occur in the row. A meeting row matches when all terms are in its title.
-/// A section row matches when all terms are in its text or meeting title and at least one is
-/// in its text, so a title word plus a transcript word finds that section, while a title-only
-/// query still yields the single meeting-level hit instead of one hit per section.
-fn match_expression(terms: &[String]) -> String {
+/// Every term must occur in the row. Transcript-only searches require each term in the text.
+/// Otherwise a title word plus a transcript word finds that section, while a title-only query
+/// yields the single meeting-level hit.
+fn match_expression(terms: &[String], transcript_only: bool) -> String {
     if terms.is_empty() {
         return String::new();
     }
@@ -552,6 +566,9 @@ fn match_expression(terms: &[String]) -> String {
             .collect::<Vec<_>>()
             .join(operator)
     };
+    if transcript_only {
+        return join("body", " AND ");
+    }
     format!(
         "({}) OR (({}) AND ({}))",
         join("title", " AND "),
@@ -959,6 +976,95 @@ mod tests {
         assert!(index.search("Anna", 0, 101).is_err());
         // Standalone punctuation such as a dash must not empty the whole AND query.
         assert_eq!(index.search("Prüfbericht – /", 0, 20).unwrap().total, 1);
+    }
+
+    #[test]
+    fn question_candidates_exclude_legacy_entries_before_the_ranked_row_limit() {
+        let root = tempfile::tempdir().unwrap();
+        let mut index = LibraryIndex::open(root.path()).unwrap();
+        let native = data("ABCDEF0123456789ABCDEF0123456789");
+        index
+            .upsert(&native, &Default::default(), "synthetic-native")
+            .unwrap();
+        for sequence in 0..48 {
+            let mut legacy = data(&format!("legacy-{sequence:016x}"));
+            legacy.started_at = "2026-10-29T06:00:00Z".into();
+            index
+                .upsert(&legacy, &Default::default(), "synthetic-legacy")
+                .unwrap();
+        }
+        assert_eq!(index.search("Prüfbericht", 0, 25).unwrap().total, 49);
+        let hits = index
+            .question_candidates(&["Prüfbericht".into()], &Default::default(), &[])
+            .unwrap();
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].id, native.id);
+    }
+
+    #[test]
+    fn question_candidates_reserve_space_for_other_meetings() {
+        let root = tempfile::tempdir().unwrap();
+        let mut index = LibraryIndex::open(root.path()).unwrap();
+        let mut repeated = data("0123456789abcdef0123456789abcdef");
+        let template = repeated.parts.pop().unwrap();
+        for position in 0..60 {
+            let mut part = template.clone();
+            part.file = format!("system-{position}.wav");
+            part.text = Some("Prüfbericht Prüfbericht Prüfbericht".into());
+            repeated.parts.push(part);
+        }
+        let other = data("1123456789abcdef0123456789abcdef");
+        for meeting in [&repeated, &other] {
+            index
+                .upsert(meeting, &Default::default(), "fixture")
+                .unwrap();
+        }
+        let hits = index
+            .question_candidates(&["Prüfbericht".into()], &Default::default(), &[])
+            .unwrap();
+        assert_eq!(hits.len(), 48);
+        assert_eq!(hits[0].id, repeated.id);
+        assert_eq!(hits[1].id, other.id);
+    }
+
+    #[test]
+    fn transcript_only_search_and_question_evidence_require_transcript_text() {
+        let root = tempfile::tempdir().unwrap();
+        let mut index = LibraryIndex::open(root.path()).unwrap();
+        let mut meeting = data("0123456789abcdef0123456789abcdef");
+        meeting.title = "Projektname".into();
+        index
+            .upsert(&meeting, &Default::default(), "fixture")
+            .unwrap();
+        assert_eq!(
+            index
+                .search("Projektname Prüfbericht", 0, 25)
+                .unwrap()
+                .total,
+            1
+        );
+        let scope = SearchScope {
+            transcript_only: true,
+            ..Default::default()
+        };
+        assert_eq!(
+            index
+                .search_scoped("Projektname Prüfbericht", 0, 25, &scope)
+                .unwrap()
+                .total,
+            0
+        );
+        assert_eq!(
+            index
+                .search_scoped("Prüfbericht", 0, 25, &scope)
+                .unwrap()
+                .total,
+            1
+        );
+        assert!(index
+            .question_candidates(&["Projektname".into()], &scope, &[])
+            .unwrap()
+            .is_empty());
     }
 
     #[test]

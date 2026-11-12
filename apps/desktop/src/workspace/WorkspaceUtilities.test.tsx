@@ -1,10 +1,14 @@
+import { useState } from "react";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { expect, it, vi } from "vitest";
 import type { LiveNotesStatus } from "../types";
 import AnalysisDiagnostics, {
   analysisDiagnostics,
 } from "./AnalysisDiagnostics";
-import MeetingQuestions, { meetingAnswers } from "./MeetingQuestions";
+import MeetingQuestions, {
+  initialMeetingQuestionLookup,
+  meetingAnswers,
+} from "./MeetingQuestions";
 import type { WorkspaceState } from "./WorkspaceBridge";
 import { workspaceStatusText } from "./shell/liveWorkspace.mjs";
 
@@ -144,13 +148,19 @@ function workspace(): WorkspaceState {
 it("keeps completed tasks out of the open list and refuses altered or superseded evidence", () => {
   const current = workspace();
   const openSource = vi.fn();
-  render(
-    <MeetingQuestions
-      workspace={current}
-      locale="de"
-      openSource={openSource}
-    />,
-  );
+  function Lookup() {
+    const [lookup, setLookup] = useState(initialMeetingQuestionLookup);
+    return (
+      <MeetingQuestions
+        workspace={current}
+        locale="de"
+        openSource={openSource}
+        lookup={lookup}
+        onLookupChange={setLookup}
+      />
+    );
+  }
+  render(<Lookup />);
   expect(screen.getByRole("status").textContent).toMatch(
     /keinen belegten Treffer/,
   );

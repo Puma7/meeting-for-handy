@@ -1,7 +1,14 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import CalendarPreparation, { calendarEvents } from "./CalendarPreparation";
+
+function eventStamp(time: number) {
+  return new Date(time)
+    .toISOString()
+    .replace(/[-:]/g, "")
+    .replace(/\.\d+Z$/, "Z");
+}
 
 describe("local calendar preparation", () => {
   it("reads one-off events, folded literal text and UTC without accepting cancelled or invalid dates", () => {
@@ -27,10 +34,7 @@ describe("local calendar preparation", () => {
   });
 
   it("applies preparation only after the user chooses it, leaving the agenda local until copied", async () => {
-    const stamp = new Date(Date.now() + 60_000)
-      .toISOString()
-      .replace(/[-:]/g, "")
-      .replace(/\.\d+Z$/, "Z");
+    const stamp = eventStamp(Date.now() + 60_000);
     const file = new File([], "event.ics", { type: "text/calendar" });
     Object.defineProperty(file, "text", {
       value: vi
@@ -74,6 +78,47 @@ describe("local calendar preparation", () => {
       screen.getByRole("button", { name: "Agenda kopieren" }),
     );
     expect(onCopyAgenda).toHaveBeenCalledWith("<b>Agenda</b>");
+  });
+
+  it("offers upcoming events in time order even after 500 past events in the file", async () => {
+    const now = Date.now();
+    const event = (time: number, title: string) =>
+      `BEGIN:VEVENT\nDTSTART:${eventStamp(time)}\nSUMMARY:${title}\nEND:VEVENT`;
+    const calendar = [
+      "BEGIN:VCALENDAR",
+      ...Array.from({ length: 500 }, (_, index) =>
+        event(now - 86_400_000 - index * 60_000, `Past ${index}`),
+      ),
+      event(now + 120_000, "Later appointment"),
+      event(now + 60_000, "Next appointment"),
+      "END:VCALENDAR",
+    ].join("\n");
+    const file = new File([calendar], "history.ics", { type: "text/calendar" });
+    Object.defineProperty(file, "text", {
+      value: vi.fn().mockResolvedValue(calendar),
+    });
+    render(
+      <CalendarPreparation
+        locale="en"
+        onTitle={vi.fn()}
+        onTemplate={vi.fn()}
+        onCopyAgenda={vi.fn()}
+        templates={[]}
+      />,
+    );
+    await userEvent.click(
+      screen.getByText("Prepare a meeting from a calendar file"),
+    );
+    fireEvent.change(screen.getByLabelText("Calendar file (.ics)"), {
+      target: { files: [file] },
+    });
+    const choices = within(await screen.findByLabelText("Calendar event"));
+    expect(
+      choices.getAllByRole("option").map((option) => option.textContent),
+    ).toEqual([
+      expect.stringContaining("Next appointment"),
+      expect.stringContaining("Later appointment"),
+    ]);
   });
 
   it("resolves a known time zone and rejects an ambiguous clock change", () => {

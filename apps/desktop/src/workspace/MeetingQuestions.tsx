@@ -1,15 +1,21 @@
-import { useState } from "react";
 import type { Locale } from "../types";
 import type { WorkspaceState } from "./WorkspaceBridge";
 
 const RESULT_LIMIT = 12;
 type Filter = "open" | "completed" | "decisions" | "questions" | "sources";
+type Lookup = { filter: Filter; query: string; visible: number };
+export const initialMeetingQuestionLookup: Lookup = {
+  filter: "open",
+  query: "",
+  visible: RESULT_LIMIT,
+};
 
 /** Return current saved entries and exact quotes only. This never calls a provider. */
 export function meetingAnswers(
   workspace: WorkspaceState | undefined,
   filter: Filter,
   query: string,
+  visible = RESULT_LIMIT,
 ) {
   const excluded = new Set(workspace?.contextExcludedIds);
   const superseded = new Set(workspace?.supersededSources);
@@ -47,22 +53,25 @@ export function meetingAnswers(
             ),
           }))
           .filter((item) => item.evidence.length > 0);
-  return { total: results.length, items: results.slice(0, RESULT_LIMIT) };
+  return { total: results.length, items: results.slice(0, visible) };
 }
 
 export default function MeetingQuestions({
   workspace,
   locale,
   openSource,
+  lookup,
+  onLookupChange,
 }: {
   workspace?: WorkspaceState;
   locale: Locale;
   openSource: (id: string) => void;
+  lookup: Lookup;
+  onLookupChange: (lookup: Lookup) => void;
 }) {
   const de = locale === "de";
-  const [filter, setFilter] = useState<Filter>("open");
-  const [query, setQuery] = useState("");
-  const { items, total } = meetingAnswers(workspace, filter, query);
+  const { filter, query, visible } = lookup;
+  const { items, total } = meetingAnswers(workspace, filter, query, visible);
   const choices: Record<Filter, string> = {
     open: de ? "Offene Aufgaben" : "Open tasks",
     completed: de ? "Erledigte Aufgaben" : "Completed tasks",
@@ -81,7 +90,13 @@ export default function MeetingQuestions({
         {de ? "Was möchtest du finden?" : "What do you want to find?"}
         <select
           value={filter}
-          onChange={(event) => setFilter(event.target.value as Filter)}
+          onChange={(event) =>
+            onLookupChange({
+              ...lookup,
+              filter: event.target.value as Filter,
+              visible: RESULT_LIMIT,
+            })
+          }
         >
           {Object.entries(choices).map(([id, label]) => (
             <option key={id} value={id}>
@@ -96,7 +111,13 @@ export default function MeetingQuestions({
           <input
             value={query}
             maxLength={160}
-            onChange={(event) => setQuery(event.target.value)}
+            onChange={(event) =>
+              onLookupChange({
+                ...lookup,
+                query: event.target.value,
+                visible: RESULT_LIMIT,
+              })
+            }
           />
         </label>
       )}
@@ -124,6 +145,17 @@ export default function MeetingQuestions({
               </li>
             ))}
           </ul>
+          {items.length < total && (
+            <button
+              type="button"
+              className="text-button"
+              onClick={() =>
+                onLookupChange({ ...lookup, visible: visible + RESULT_LIMIT })
+              }
+            >
+              {de ? "Weitere Treffer anzeigen" : "Show more results"}
+            </button>
+          )}
         </>
       ) : (
         <p role="status">

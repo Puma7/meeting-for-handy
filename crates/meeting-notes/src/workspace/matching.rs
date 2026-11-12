@@ -147,39 +147,128 @@ pub(super) fn task_title_matches(title: &str, quote: &str) -> bool {
     task_object_matches(title, "", quote)
 }
 
-/// Match a German infinitive against a finite assignment, retaining the particle
-/// of a separable verb and the same concrete object.
+/// Require one named or pronominal assignment, with the action and its object
+/// together before the deadline. A related title alone is insufficient.
 pub(super) fn calendar_task_matches(title: &str, quote: &str) -> bool {
-    if task_title_matches(title, quote) {
-        return true;
+    use super::assertions::{
+        assertion_words, assignment_text, finite_subject_before, present_assignment_quote,
+    };
+    const PARTICLES: &[&str] = &["ab", "an", "auf", "ein", "mit", "vor", "zu", "fertig"];
+
+    let quote = assignment_text(quote);
+    let lower = quote.to_lowercase();
+    let german = lower.contains(" bis ");
+    let marker = if german { " bis " } else { " by " };
+    let Some((prefix, _)) = lower.rsplit_once(marker) else {
+        return false;
+    };
+    if prefix.contains([',', '.', '!', '?', ';', ':', '\n', '\r']) {
+        return false;
     }
     let title = title.to_lowercase();
-    let Some((object, action)) = title.rsplit_once(' ') else {
+    let title_parts = if german {
+        title.rsplit_once(' ')
+    } else {
+        title
+            .split_once(' ')
+            .map(|(action, object)| (object, action))
+    };
+    let Some((object, action)) = title_parts else {
         return false;
     };
-    let Some(infinitive_stem) = action.strip_suffix("en") else {
-        return false;
-    };
-    if !super::assertions::present_assignment_quote(super::assertions::assignment_text(quote))
-        || !task_title_matches(object, quote)
-    {
+    let before = assertion_words(prefix);
+    let original = assertion_words(quote);
+    if before.len() > original.len() {
         return false;
     }
-    let quote = quote.to_lowercase();
-    let words: Vec<_> = quote
-        .split(|character: char| !character.is_alphabetic())
-        .filter(|word| !word.is_empty())
-        .collect();
-    let particle = words.last().copied().unwrap_or_default();
-    words
-        .iter()
-        .filter_map(|word| word.strip_suffix('t'))
-        .any(|finite| {
-            finite.chars().count() >= 4
-                && (infinitive_stem == finite
-                    || (["ab", "an", "auf", "ein", "mit", "vor", "zu"].contains(&particle)
-                        && infinitive_stem.strip_prefix(particle) == Some(finite)))
-        })
+    let particle = assertion_words(&lower)
+        .last()
+        .copied()
+        .filter(|word| german && PARTICLES.contains(word));
+    let predicate = before.iter().enumerate().position(|(index, word)| {
+        if german {
+            let stem = action.strip_suffix("en").and_then(|stem| match particle {
+                Some(particle) => stem.strip_prefix(particle),
+                None => Some(stem),
+            });
+            stem.is_some_and(|stem| {
+                (stem.chars().count() >= 4 || stem == "hol")
+                    && (word.strip_suffix('t') == Some(stem)
+                        || (before[..index].contains(&"ich")
+                            && word.strip_suffix('e') == Some(stem))
+                        || word.strip_suffix("en") == Some(stem))
+                    && finite_subject_before(&before, &original, 0, index)
+            })
+        } else {
+            *word == action
+                && index.checked_sub(1).is_some_and(|auxiliary| {
+                    before[auxiliary] == "will"
+                        && finite_subject_before(&before, &original, 0, auxiliary)
+                })
+        }
+    });
+    let Some(predicate) = predicate else {
+        return false;
+    };
+    // The transcript may omit commas. Do not combine the object of a second
+    // named/pronominal assignment with the first verb.
+    let trailing = &original[predicate + 1..before.len()];
+    let trailing_lower = &before[predicate + 1..];
+    let another_assignment = (0..trailing.len().saturating_sub(1)).any(|index| {
+        let fragment = &trailing[index..trailing.len().min(index + 4)];
+        present_assignment_quote(&fragment.join(" "))
+            || (german
+                && fragment.len() >= 3
+                && trailing_lower[index + 1]
+                    .strip_suffix('t')
+                    .is_some_and(|stem| stem.chars().count() >= 3)
+                && ["den", "die", "das", "dem", "einen", "eine", "ein"]
+                    .contains(&trailing_lower[index + 2])
+                && finite_subject_before(trailing_lower, trailing, index, index + 1))
+    });
+    !another_assignment && task_title_matches(object, &trailing.join(" "))
+}
+
+#[test]
+fn calendar_task_deadline_requires_its_own_action_and_object() {
+    for (title, quote, expected) in [
+        (
+            "Report schreiben",
+            "Jana prüft den Report bis zum 23. September.",
+            false,
+        ),
+        (
+            "Unterlagen mitbringen",
+            "Ich bringe die Unterlagen bis zum 24. September mit.",
+            true,
+        ),
+        (
+            "Unterlagen bringen",
+            "Jana bringt die Geräte, Mara holt die Unterlagen bis zum 23. September ab.",
+            false,
+        ),
+        (
+            "Unterlagen bringen",
+            "Jana bringt die Geräte Mara prüft die Unterlagen bis zum 23. September.",
+            false,
+        ),
+        (
+            "Send the guide",
+            "I will review the guide by September 23rd 2026.",
+            false,
+        ),
+        (
+            "Review the guide",
+            "I will review the guide by September 23rd 2026.",
+            true,
+        ),
+    ] {
+        assert_eq!(
+            calendar_task_matches(title, quote),
+            expected,
+            "{title}: {quote}"
+        );
+    }
 }
 
 fn task_object_matches(title: &str, owner: &str, quote: &str) -> bool {

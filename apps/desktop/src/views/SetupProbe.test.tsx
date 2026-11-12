@@ -4,15 +4,16 @@ import { expect, it, vi } from "vitest";
 import SetupProbe from "./SetupProbe";
 
 it("reports the three synthetic setup stages only after explicit start", async () => {
-  const run = vi
-    .fn()
-    .mockResolvedValue({
-      audioRoundtrip: true,
-      recognition: false,
-      textAnswer: null,
-    });
+  const run = vi.fn().mockResolvedValue({
+    audioRoundtrip: true,
+    transcriptionWorker: true,
+    textAnswer: null,
+  });
   render(<SetupProbe run={run} disabled={false} locale="de" />);
   expect(run).not.toHaveBeenCalled();
+  expect(
+    screen.getByText(/Die Erkennung von Wörtern.*separate Prüfungen/),
+  ).toBeTruthy();
   await userEvent.click(
     screen.getByRole("button", { name: "Synthetische Funktionsprobe starten" }),
   );
@@ -20,7 +21,7 @@ it("reports the three synthetic setup stages only after explicit start", async (
   expect(run).toHaveBeenCalledTimes(1);
   expect(status.textContent).toContain("Audiospeicherung · bestanden");
   expect(status.textContent).toContain(
-    "Transkriptionssoftware · bitte Einrichtung prüfen",
+    "Transkriptionssoftware (Testton) · bestanden",
   );
   expect(status.textContent).toContain("Lokale Textauswertung · übersprungen");
 });

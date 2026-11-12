@@ -418,6 +418,7 @@ enum WorkerKind {
 
 /// Exercise the same file and worker protocol on generated samples in a private
 /// scratch directory, with no capture handle and no user session or recording.
+/// The input is a test tone, so an empty transcript is a valid worker response.
 pub(crate) fn setup_signal_probe(
     root: &Path,
     model: &handy_bridge::HandyModel,
@@ -483,7 +484,7 @@ pub(crate) fn setup_signal_probe(
     )
     .map_err(|error| error.to_string())?;
     let batch = model.ready_for_batch();
-    let inference = (|| -> Result<(), String> {
+    let worker_check = (|| -> Result<(), String> {
         let mut worker = Worker::start(
             &resolved.path,
             backend,
@@ -512,7 +513,7 @@ pub(crate) fn setup_signal_probe(
         }
         Ok(())
     })();
-    Ok((true, inference.is_ok()))
+    Ok((true, worker_check.is_ok()))
 }
 
 /// Preserve process-loss classification across the startup handshake without

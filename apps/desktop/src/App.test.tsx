@@ -9,6 +9,7 @@ import {
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import App from "./App";
+import * as MeetingView from "./views/MeetingView";
 import { testServices } from "./test-services";
 import { defaultTemplate, renderTranscript, validateLibrary } from "./domain";
 import { de, en } from "./i18n";
@@ -452,6 +453,47 @@ async function ready() {
   );
 }
 beforeEach(() => localStorage.clear());
+
+it.each(["session", "saved"] as const)(
+  "changes the setup probe identity for the %s credential choice without exposing the key",
+  async (choice) => {
+    const api = fakeApi();
+    api.credentialStatus = vi.fn().mockResolvedValue({
+      state: "stored",
+      provider: "synthetic",
+      message: null,
+    });
+    api.checkMeetingSetup = vi.fn();
+    const view = vi.spyOn(MeetingView, "default");
+    const probeKey = () => view.mock.lastCall?.[0].textModelCheck?.probeKey;
+    const syntheticKey = "synthetic-session-secret";
+    try {
+      render(<App api={api} />);
+      await screen.findByRole("button", { name: de.settings });
+      const first = probeKey();
+      expect(first).toBeTruthy();
+      await userEvent.click(screen.getByRole("button", { name: de.settings }));
+      await userEvent.click(screen.getByText(de.apiKey));
+      const saved = await screen.findByRole("checkbox", {
+        name: de.useSavedKey,
+      });
+      if (choice === "saved") await userEvent.click(saved);
+      else {
+        await userEvent.type(
+          screen.getByLabelText(de.sessionKey),
+          syntheticKey,
+        );
+      }
+      await userEvent.click(screen.getByRole("button", { name: de.meeting }));
+      const latest = probeKey();
+      expect(latest).toBeTruthy();
+      expect(latest).not.toBe(first);
+      expect(latest).not.toContain(syntheticKey);
+    } finally {
+      view.mockRestore();
+    }
+  },
+);
 
 it.each(
   (["de", "en"] as const).flatMap((locale) =>

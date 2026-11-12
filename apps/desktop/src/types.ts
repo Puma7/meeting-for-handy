@@ -600,7 +600,7 @@ export interface DesktopApi {
     text?: Omit<HistoryQuestionRequest, "question" | "scope" | "meetingIds">;
   }): Promise<{
     audioRoundtrip: boolean;
-    recognition: boolean;
+    transcriptionWorker: boolean;
     textAnswer: boolean | null;
   }>;
   rebuildSearchIndex?(): Promise<string>;

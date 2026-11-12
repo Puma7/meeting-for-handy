@@ -18,7 +18,11 @@ mod notes_commands;
 mod notes_service;
 mod operations;
 mod path_selection;
+#[cfg(any(target_os = "macos", test))]
+mod protected_menu;
 mod protected_profile;
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+mod protected_shutdown;
 mod retention_commands;
 mod sealed_commands;
 mod session_service;
@@ -181,6 +185,8 @@ struct Service {
     _profile_lease: Mutex<Option<fs::File>>,
     #[cfg(any(target_os = "linux", target_os = "macos"))]
     protected_volume: Mutex<Option<meeting_core::archive::protected_profile::MountedVolume>>,
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    protected_shutdown: Mutex<protected_shutdown::Shutdown>,
 }
 impl Service {
     /// The fast meter poll never waits behind a long application-state operation,
@@ -267,31 +273,14 @@ impl Service {
             _profile_lease: Mutex::new(None),
             #[cfg(any(target_os = "linux", target_os = "macos"))]
             protected_volume: Mutex::new(None),
+            #[cfg(any(target_os = "linux", target_os = "macos"))]
+            protected_shutdown: Mutex::new(protected_shutdown::Shutdown::default()),
         })
     }
     fn lock(&self) -> AppResult<MutexGuard<'_, Inner>> {
         self.inner.lock().map_err(|_| {
             "Der Anwendungszustand ist gesperrt. Gesicherte Sitzungen bleiben erhalten.".into()
         })
-    }
-    #[cfg(any(target_os = "linux", target_os = "macos"))]
-    fn close_protected_volume(&self) -> AppResult<()> {
-        let _admission = self.reserve_operation(operations::Kind::Maintenance)?;
-        if let Some(volume) = self
-            .protected_volume
-            .lock()
-            .map_err(|_| "Protected profile state is unavailable")?
-            .take()
-        {
-            drop(
-                self._profile_lease
-                    .lock()
-                    .map_err(|_| "Protected profile state is unavailable")?
-                    .take(),
-            );
-            volume.unmount().map_err(|error| error.to_string())?;
-        }
-        Ok(())
     }
     /// Try the recording transition mutex without waiting; contention returns a busy error.
     /// Waits a bounded time for a transition that is known to be ending (a cancelled
@@ -1143,13 +1132,12 @@ async fn blocking<T: Send + 'static>(
         })?
 }
 
-fn desktop_service() -> AppResult<Service> {
+fn desktop_service(args: &[std::ffi::OsString]) -> AppResult<Service> {
     use meeting_core::archive::protected_profile as storage;
-    let args: Vec<_> = std::env::args_os().skip(1).collect();
-    let selected = protected_profile::launch_path(&args)?;
+    let selected = protected_profile::launch_path(args)?;
     #[cfg(any(target_os = "linux", target_os = "macos"))]
     if let Some(path) = &selected {
-        let volume = protected_profile::unlock(path)?;
+        let volume = protected_profile::unlock(path, protected_profile::managed_startup(args))?;
         let root = volume.root().to_owned();
         let lease = storage::reserve_runtime(&root).map_err(|error| error.to_string())?;
         let mut service = Service::new(root)?;
@@ -1196,7 +1184,15 @@ fn desktop_service() -> AppResult<Service> {
 /// remain separate from capture and window-close guards.
 pub fn run() {
     use tauri_plugin_dialog::DialogExt;
-    let prepared = desktop_service().map(Arc::new);
+    let args: Vec<_> = std::env::args_os().skip(1).collect();
+    let prepared = desktop_service(&args).map(Arc::new);
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    let managed_startup = protected_profile::managed_startup(&args);
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    if managed_startup && prepared.is_err() {
+        protected_profile::report_failure();
+        return;
+    }
     #[cfg(any(target_os = "linux", target_os = "macos"))]
     let protected_service = prepared
         .as_ref()
@@ -1213,6 +1209,12 @@ pub fn run() {
         }
     }
     let mut builder = tauri::Builder::default().plugin(tauri_plugin_dialog::init());
+    #[cfg(target_os = "macos")]
+    if protected_service.is_some() {
+        builder = builder
+            .menu(protected_menu::build)
+            .on_menu_event(protected_menu::on_event);
+    }
     if let Ok(service) = &prepared {
         builder = builder.manage(Arc::clone(service));
     }
@@ -1236,8 +1238,20 @@ pub fn run() {
             });
             if window.is_err() {
                 let handle = app.handle().clone();
+                #[cfg(any(target_os = "linux", target_os = "macos"))]
+                if managed_startup {
+                    protected_profile::report_failure();
+                    handle.exit(1);
+                    return Ok(());
+                }
                 app.dialog().message("Die geschützte Oberfläche konnte nicht gestartet werden. Bitte den Ordner und die Browser-Komponente prüfen. / The protected window could not start. Check the folder and the system webview.")
                     .title("Meeting for Handy").show(move |_| handle.exit(1));
+                return Ok(());
+            }
+            #[cfg(any(target_os = "linux", target_os = "macos"))]
+            if managed_startup && !protected_profile::acknowledge_window() {
+                // The parent timed out or closed. Exit through normal protected teardown.
+                app.handle().exit(1);
                 return Ok(());
             }
         }
@@ -1249,15 +1263,17 @@ pub fn run() {
     .on_window_event(handle_window_event);
     #[cfg(any(target_os = "linux", target_os = "macos"))]
     if let Some(service) = protected_service {
+        let shutdown_service = Arc::clone(&service);
         let exit_code = builder
             .build(context)
             .expect("HandyMeeting konnte nicht gestartet werden.")
-            .run_return(|_, _| {});
-        // Tauri's normal run exits the process without dropping the mounted-volume guard.
-        // Wait until the window and WebView have closed their files before a normal detach.
-        if let Err(error) = service.close_protected_volume() {
-            eprintln!("{error}");
+            .run_return(move |app, event| {
+                protected_shutdown::on_run_event(&shutdown_service, app, event);
+            });
+        if protected_shutdown::leaving_mounted(&service) {
+            std::process::exit(exit_code);
         }
+        drop(service);
         if exit_code != 0 {
             std::process::exit(exit_code);
         }
@@ -1289,7 +1305,7 @@ fn handle_window_event(window: &tauri::Window, event: &tauri::WindowEvent) {
     #[cfg(any(target_os = "linux", target_os = "macos"))]
     if !blocked && service.protected_profile {
         use tauri_plugin_dialog::DialogExt;
-        let Err(error) = service.reserve_operation(operations::Kind::Maintenance) else {
+        let Err(error) = protected_shutdown::prepare(&service) else {
             return;
         };
         api.prevent_close();

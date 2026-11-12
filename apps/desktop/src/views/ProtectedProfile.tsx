@@ -123,6 +123,7 @@ export default function ProtectedProfile({
     setBusy(action);
     setError("");
     setOpened(false);
+    if (action === "copy") setReceipt(null);
     try {
       if (action === "copy") {
         const result = await (secret === undefined ? create() : create(secret));

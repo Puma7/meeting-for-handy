@@ -147,6 +147,7 @@ export default function HistorySearch({
     from,
     through,
     pinnedOnly,
+    evidenceOnly,
     historyModel?.endpoint,
     historyModel?.model,
   ]);
@@ -388,6 +389,14 @@ export default function HistorySearch({
                       ` · ${trackName("system", locale)}`}
                     {/(?:^|[/\\])microphone-/.test(item.sourceId) &&
                       ` · ${trackName("microphone", locale)}`}
+                    {api.getTranscriptAudio &&
+                      !item.audioRemoved &&
+                      item.startMs !== null &&
+                      item.endMs !== null &&
+                      item.endMs - item.startMs > 30_000 &&
+                      (de
+                        ? " · Die Audiovorschau spielt die ersten 30 Sekunden des Abschnitts."
+                        : " · Audio preview plays the first 30 seconds of the section.")}
                   </small>
                 )}
               </div>

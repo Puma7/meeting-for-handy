@@ -1088,6 +1088,141 @@ it("sends explicit content confirmation for the shown revision and exports the a
   expect(exportResults).toHaveBeenCalledExactlyOnceWith("run-current");
 });
 
+it("shows further grounded tasks and keeps the visible results after reading a quote", async () => {
+  const f = fixture();
+  const workspace = f.status.view.workspace;
+  workspace.entities = Array.from({ length: 13 }, (_, index) => ({
+    ...workspace.entities[0],
+    id: `task-${index + 1}`,
+    kind: "task",
+    text: `Synthetische Aufgabe ${index + 1}`,
+  }));
+  render(
+    <LiveWorkspace adapter={f.adapter} meeting={f.meeting} onBack={() => {}} />,
+  );
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Meeting befragen" }),
+  );
+  const lookup = () =>
+    within(screen.getByRole("dialog", { name: "Meeting befragen" }));
+  expect(await lookup().findByText("12 von 13 Treffern")).toBeTruthy();
+  expect(lookup().queryByText("Synthetische Aufgabe 13")).toBeNull();
+  fireEvent.click(
+    lookup().getByRole("button", { name: "Weitere Treffer anzeigen" }),
+  );
+  expect(lookup().getByText("13 von 13 Treffern")).toBeTruthy();
+  expect(lookup().getByText("Synthetische Aufgabe 13")).toBeTruthy();
+  fireEvent.click(
+    lookup()
+      .getAllByRole("button", { name: /Die Freigabe bleibt noch offen/ })
+      .at(-1)!,
+  );
+  const source = screen.getByRole("dialog", { name: "Originalbeleg" });
+  fireEvent.click(
+    within(source).getByRole("button", { name: "Dialog schließen" }),
+  );
+  expect(lookup().getByText("Synthetische Aufgabe 13")).toBeTruthy();
+});
+
+it("preserves the lookup category and typed query after closing a quote", async () => {
+  const f = fixture();
+  render(
+    <LiveWorkspace adapter={f.adapter} meeting={f.meeting} onBack={() => {}} />,
+  );
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Meeting befragen" }),
+  );
+  const lookup = () =>
+    within(screen.getByRole("dialog", { name: "Meeting befragen" }));
+  fireEvent.change(lookup().getByRole("combobox"), {
+    target: { value: "sources" },
+  });
+  fireEvent.change(lookup().getByRole("textbox"), {
+    target: { value: "Freigabe" },
+  });
+  fireEvent.click(
+    await lookup().findByRole("button", {
+      name: /Die Freigabe bleibt noch offen/,
+    }),
+  );
+  const source = screen.getByRole("dialog", { name: "Originalbeleg" });
+  expect(
+    within(source).getByText("Die Freigabe bleibt noch offen."),
+  ).toBeTruthy();
+  fireEvent.click(
+    within(source).getByRole("button", { name: "Dialog schließen" }),
+  );
+  expect((lookup().getByRole("combobox") as HTMLSelectElement).value).toBe(
+    "sources",
+  );
+  expect((lookup().getByRole("textbox") as HTMLInputElement).value).toBe(
+    "Freigabe",
+  );
+  expect(
+    lookup().getByRole("button", { name: /Die Freigabe bleibt noch offen/ }),
+  ).toBeTruthy();
+});
+
+it("clears a completed export notice only after the observed result revision changes", async () => {
+  const f = fixture();
+  const exportResults = vi.fn().mockResolvedValue("exports/results-old.json");
+  const polling = controlWorkspacePolling();
+  try {
+    render(
+      <LiveWorkspace
+        adapter={{ ...f.adapter, exportResults }}
+        meeting={f.meeting}
+        onBack={() => {}}
+      />,
+    );
+    fireEvent.click(
+      await screen.findByRole("button", {
+        name: "Ergebnisse als JSON speichern",
+      }),
+    );
+    expect(await screen.findByText(/exports\/results-old\.json/)).toBeTruthy();
+    await polling.advance(2000);
+    expect(screen.getByText(/exports\/results-old\.json/)).toBeTruthy();
+    f.status.view.workspace.revision++;
+    await polling.advance(2000);
+    expect(screen.queryByText(/exports\/results-old\.json/)).toBeNull();
+  } finally {
+    polling.restore();
+  }
+});
+
+it("ignores a delayed export notice after a human-edit revision changes in the same run", async () => {
+  const f = fixture();
+  let finishExport!: (path: string) => void;
+  const pendingExport = new Promise<string>((resolve) => {
+    finishExport = resolve;
+  });
+  const exportResults = vi.fn().mockReturnValue(pendingExport);
+  const polling = controlWorkspacePolling();
+  try {
+    render(
+      <LiveWorkspace
+        adapter={{ ...f.adapter, exportResults }}
+        meeting={f.meeting}
+        onBack={() => {}}
+      />,
+    );
+    const save = (await screen.findByRole("button", {
+      name: "Ergebnisse als JSON speichern",
+    })) as HTMLButtonElement;
+    fireEvent.click(save);
+    expect(save.disabled).toBe(true);
+    expect(exportResults).toHaveBeenCalledExactlyOnceWith("run-current");
+    f.status.workspaceContext.revision++;
+    await polling.advance(2000);
+    await act(async () => finishExport("exports/results-delayed.json"));
+    await waitFor(() => expect(save.disabled).toBe(false));
+    expect(screen.queryByText(/exports\/results-delayed\.json/)).toBeNull();
+  } finally {
+    polling.restore();
+  }
+});
+
 it("lets a user confirm a grounded impulse without marking it discussed", async () => {
   const f = fixture();
   f.status.status = "waiting";

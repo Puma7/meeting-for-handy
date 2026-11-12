@@ -44,7 +44,9 @@ import { CustomOverview } from "./CustomOverview.jsx";
 import { Notes } from "./Notes.jsx";
 import SourceAudioPreview from "../SourceAudioPreview";
 import AnalysisDiagnostics from "../AnalysisDiagnostics";
-import MeetingQuestions from "../MeetingQuestions";
+import MeetingQuestions, {
+  initialMeetingQuestionLookup,
+} from "../MeetingQuestions";
 import SavedWorkspaceHistory from "../SavedWorkspaceHistory";
 import { IconButton, Modal, Panel, Status } from "./ui.jsx";
 import { usePanelSettings } from "./usePanelSettings.jsx";
@@ -90,6 +92,19 @@ const statusName = {
 /** Present native/action failures consistently while preserving non-Error rejection values. */
 function workspaceErrorMessage(error) {
   return error instanceof Error ? error.message : String(error);
+}
+
+/** Identify the result and human-edit revisions for which a save notice is current. */
+function resultExportRevision(status) {
+  const workspace = status?.view?.workspace;
+  return workspace && status.view.runId
+    ? JSON.stringify([
+        status.view.runId,
+        workspace.revision,
+        workspace.context?.revision,
+        status.workspaceContext?.revision,
+      ])
+    : null;
 }
 
 /** Provide the application language to the isolated live-workspace renderer. */
@@ -270,6 +285,7 @@ function WorkspaceContents({
   current.current = state;
   const workspace = status?.view?.workspace;
   const [resultExport, setResultExport] = useState("");
+  const pendingResultExport = useRef(null);
   const entities = workspace?.entities || [],
     originals = workspace?.originals || [];
   const currentSourceIds = useMemo(() => {
@@ -312,6 +328,13 @@ function WorkspaceContents({
         native.revision < (context.current?.revision ?? 0)
       )
         return;
+      if (
+        resultExportRevision(next) !==
+        resultExportRevision(latestStatus.current)
+      ) {
+        pendingResultExport.current = null;
+        setResultExport("");
+      }
       latestStatus.current = next;
       setStatus(next);
       if (
@@ -840,10 +863,17 @@ function WorkspaceContents({
               disabled={busy}
               onClick={() =>
                 action(async () => {
+                  const request = {};
+                  const revision = resultExportRevision(status);
+                  pendingResultExport.current = request;
                   setResultExport("");
-                  setResultExport(
-                    await adapter.exportResults(status.view.runId),
-                  );
+                  const path = await adapter.exportResults(status.view.runId);
+                  if (
+                    alive.current &&
+                    pendingResultExport.current === request &&
+                    resultExportRevision(latestStatus.current) === revision
+                  )
+                    setResultExport(path);
                 })
               }
             >
@@ -852,7 +882,12 @@ function WorkspaceContents({
           )}
           <IconButton
             label={language === "de" ? "Meeting befragen" : "Ask this meeting"}
-            onClick={() => setModal({ type: "meeting-questions" })}
+            onClick={() =>
+              setModal({
+                type: "meeting-questions",
+                lookup: initialMeetingQuestionLookup,
+              })
+            }
           >
             <MessageCircleQuestion size={16} aria-hidden="true" />
           </IconButton>
@@ -1296,6 +1331,8 @@ function WorkspaceContents({
             workspace={workspace}
             locale={language}
             openSource={ctx.onSource}
+            lookup={modal.lookup}
+            onLookupChange={(lookup) => setModal({ ...modal, lookup })}
           />
         </Modal>
       )}

@@ -4,6 +4,17 @@ use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use zeroize::Zeroizing;
 
+const PROBE_SOURCE: u32 = 1;
+const CONFIRMED_DAY: &str = "The project meeting has been confirmed for Wednesday.";
+const PROPOSED_DAY: &str = "Friday was only suggested.";
+
+fn confirms_setup_day(quotes: &[meeting_notes::questions::Quote]) -> bool {
+    !quotes.is_empty()
+        && quotes
+            .iter()
+            .all(|quote| quote.source == PROBE_SOURCE && quote.quote.contains(CONFIRMED_DAY))
+}
+
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct SetupProbeRequest {
@@ -26,7 +37,7 @@ struct ProbeTextModel {
 #[serde(rename_all = "camelCase")]
 pub(crate) struct SetupProbeResult {
     audio_roundtrip: bool,
-    recognition: bool,
+    transcription_worker: bool,
     text_answer: Option<bool>,
 }
 
@@ -73,7 +84,8 @@ pub(crate) fn check_cli(args: &[String]) -> AppResult<()> {
         "{}",
         serde_json::to_string(&result).map_err(|_| "Could not serialize setup-check result.")?
     );
-    if !result.audio_roundtrip || !result.recognition || result.text_answer == Some(false) {
+    if !result.audio_roundtrip || !result.transcription_worker || result.text_answer == Some(false)
+    {
         return Err("At least one synthetic setup stage did not pass.".into());
     }
     Ok(())
@@ -92,26 +104,63 @@ fn check(service: &Service, request: SetupProbeRequest) -> AppResult<SetupProbeR
     }
     .map_err(|error| error.to_string())?;
     let backend = crate::backend_directory()?;
-    let (audio_roundtrip, recognition) =
+    let (audio_roundtrip, transcription_worker) =
         crate::asr::setup_signal_probe(&service.root, model, &resolved, &backend)?;
     let text_answer = request.text.map(|text| {
-            crate::history_questions::local_client(
-                service, text.endpoint, text.model, Zeroizing::new(text.api_key), text.use_saved_key,
-            ).and_then(|client| {
-                let passage = meeting_notes::questions::Passage {
-                    id: 1,
-                    meeting: "Synthetic setup".into(),
-                    text: "The project meeting has been confirmed for Wednesday. Friday was only suggested.".into(),
-                };
-                meeting_notes::questions::answer(&client, "Which day was confirmed for the project meeting?", &[passage])
-                    .map(|quotes| quotes.iter().any(|quote| quote.quote.contains("confirmed for Wednesday"))
-                        && !quotes.iter().any(|quote| quote.quote.contains("Friday")))
-                    .map_err(|_| "The local model did not pass the synthetic check.".into())
-            }).unwrap_or(false)
-        });
+        crate::history_questions::local_client(
+            service,
+            text.endpoint,
+            text.model,
+            Zeroizing::new(text.api_key),
+            text.use_saved_key,
+        )
+        .and_then(|client| {
+            let passage = meeting_notes::questions::Passage {
+                id: PROBE_SOURCE,
+                meeting: "Synthetic setup".into(),
+                text: format!("{CONFIRMED_DAY} {PROPOSED_DAY}"),
+            };
+            meeting_notes::questions::answer(
+                &client,
+                "Which day was confirmed for the project meeting?",
+                &[passage],
+            )
+            .map(|quotes| confirms_setup_day(&quotes))
+            .map_err(|_| "The local model did not pass the synthetic check.".into())
+        })
+        .unwrap_or(false)
+    });
     Ok(SetupProbeResult {
         audio_roundtrip,
-        recognition,
+        transcription_worker,
         text_answer,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use meeting_notes::questions::Quote;
+
+    #[test]
+    fn setup_requires_the_confirmed_day_but_accepts_its_literal_context() {
+        let quote = |text: &str| Quote {
+            source: PROBE_SOURCE,
+            quote: text.into(),
+        };
+        assert!(confirms_setup_day(&[quote(CONFIRMED_DAY)]));
+        assert!(confirms_setup_day(&[quote(&format!(
+            "{CONFIRMED_DAY} {PROPOSED_DAY}"
+        ))]));
+        assert!(!confirms_setup_day(&[]));
+        assert!(!confirms_setup_day(&[quote(PROPOSED_DAY)]));
+        assert!(!confirms_setup_day(&[
+            quote(CONFIRMED_DAY),
+            quote(PROPOSED_DAY)
+        ]));
+        assert!(!confirms_setup_day(&[Quote {
+            source: PROBE_SOURCE + 1,
+            quote: CONFIRMED_DAY.into(),
+        }]));
+    }
 }

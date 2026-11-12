@@ -3,7 +3,7 @@ use crate::{blocking, meeting_files, AppResult, Service};
 use meeting_core::library::{LibraryIndex, SearchHit, SearchScope};
 use meeting_notes::{
     questions::{self, Passage, MAX_PASSAGES, MAX_QUESTION_CHARS},
-    Connection, TextClient,
+    AnalysisControl, Connection, TextClient,
 };
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -74,7 +74,10 @@ fn ask(service: &Service, request: HistoryQuestion) -> AppResult<HistoryAnswer> 
             "Choose up to 12 saved meetings. / Wähle bis zu zwölf gespeicherte Meetings.".into(),
         );
     }
-    let _operation = service.reserve_operation(crate::operations::Kind::Analysis)?;
+    let operation = service.reserve_operation(crate::operations::Kind::HistoryQuestion)?;
+    let control = operation
+        .history_control()
+        .ok_or("History question controls are unavailable")?;
     // Prevent erasure until the model call and publication of the answer finish,
     // without holding the recording transition or any recording handle.
     let _source = meeting_core::archive::source_publication_lease(&service.root)
@@ -85,7 +88,10 @@ fn ask(service: &Service, request: HistoryQuestion) -> AppResult<HistoryAnswer> 
         .question_candidates(&terms, &scope, &request.meeting_ids)
         .map_err(|_| SEARCH_ERROR)?;
     drop(index);
-    let located = locate(service, &scope, &terms, hits);
+    let located = locate(service, &scope, &terms, hits, control);
+    if control.is_cancelled() {
+        return Err(crate::operations::RECORDING_PRIORITY.into());
+    }
     if located.is_empty() {
         return Ok(HistoryAnswer {
             searched_passages: 0,
@@ -93,7 +99,7 @@ fn ask(service: &Service, request: HistoryQuestion) -> AppResult<HistoryAnswer> 
         });
     }
     if service.lock()?.active.is_some() {
-        return Err("Recording and transcription have priority. Ask again when they finish. / Aufnahme und Transkription haben Vorrang. Stelle die Frage danach erneut.".into());
+        return Err(crate::operations::RECORDING_PRIORITY.into());
     }
     let client = local_client(
         service,
@@ -111,7 +117,11 @@ fn ask(service: &Service, request: HistoryQuestion) -> AppResult<HistoryAnswer> 
             )
         })
         .unzip();
-    let quotes = questions::answer(&client, question, &passages).map_err(|_| ANSWER_ERROR)?;
+    let result = questions::answer_with_control(&client, question, &passages, control);
+    if control.is_cancelled() {
+        return Err(crate::operations::RECORDING_PRIORITY.into());
+    }
+    let quotes = result.map_err(|_| ANSWER_ERROR)?;
     let citations = quotes
         .into_iter()
         .map(|item| {
@@ -186,20 +196,22 @@ fn locate(
     scope: &SearchScope,
     terms: &[String],
     hits: Vec<SearchHit>,
+    control: &AnalysisControl,
 ) -> Vec<LocatedPassage> {
     let mut groups: Vec<Vec<SearchHit>> = Vec::new();
     for hit in hits {
         if let Some(group) = groups.iter_mut().find(|group| group[0].id == hit.id) {
-            if group.len() < 3 {
-                group.push(hit);
-            }
-        } else if groups.len() < MAX_PASSAGES {
+            group.push(hit);
+        } else {
             groups.push(vec![hit]);
         }
     }
     let mut first = Vec::new();
     let mut additional = Vec::new();
     for group in groups {
+        if control.is_cancelled() {
+            break;
+        }
         let id = &group[0].id;
         let Ok(folder) = meeting_files::session_folder(&service.root, id) else {
             continue;
@@ -222,7 +234,6 @@ fn locate(
             continue;
         }
         let current_title = meta.title.as_deref().unwrap_or(&data.title);
-        let title_matches = questions::matches_keywords(current_title, terms);
         let title: String = current_title.chars().take(160).collect();
         let mut matches = group.into_iter().filter_map(|hit| {
             let file = hit.source_id?;
@@ -232,7 +243,7 @@ fn locate(
                 return None;
             }
             let text = questions::excerpt(part.text.as_deref()?, terms);
-            if text.is_empty() || (!title_matches && !questions::matches_keywords(text, terms)) {
+            if text.is_empty() || !questions::matches_keywords(text, terms) {
                 return None;
             }
             Some(LocatedPassage {
@@ -249,7 +260,10 @@ fn locate(
         });
         if let Some(entry) = matches.next() {
             first.push(entry);
-            additional.extend(matches);
+            if first.len() == MAX_PASSAGES {
+                break;
+            }
+            additional.extend(matches.take(2));
         }
     }
     first
@@ -274,6 +288,25 @@ mod tests {
     const FILE: &str = "system-000000016000.wav";
     const QUESTION: &str =
         "Was wurde in den beiden Meetings zum Liefertermin für Projekt Orion gesagt?";
+
+    struct OwnedFixture(std::path::PathBuf);
+
+    impl OwnedFixture {
+        fn new() -> Self {
+            let path = std::env::temp_dir().join(format!(
+                "hm-history-question-{}",
+                meeting_notes::new_job_id()
+            ));
+            fs::create_dir(&path).unwrap();
+            Self(path)
+        }
+    }
+
+    impl Drop for OwnedFixture {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
 
     fn fixtures(root: &Path) -> Service {
         let service = Service::new(root.to_owned()).unwrap();
@@ -300,18 +333,7 @@ mod tests {
 
     #[test]
     fn question_uses_current_sections_and_meeting_identity_even_when_file_names_match() {
-        let root = std::env::temp_dir().join(format!(
-            "hm-history-question-{}",
-            meeting_notes::new_job_id()
-        ));
-        fs::create_dir(&root).unwrap();
-        struct OwnedFixture(std::path::PathBuf);
-        impl Drop for OwnedFixture {
-            fn drop(&mut self) {
-                let _ = fs::remove_dir_all(&self.0);
-            }
-        }
-        let fixture = OwnedFixture(root);
+        let fixture = OwnedFixture::new();
         let service = fixtures(&fixture.0);
         let terms = questions::keywords(QUESTION);
         let scope = SearchScope::default();
@@ -326,7 +348,8 @@ mod tests {
             .question_candidates(&terms, &scope, &["0123456789abcdef0123456789abcdee".into()])
             .unwrap()
             .is_empty());
-        let passages = locate(&service, &scope, &terms, hits.clone());
+        let control = AnalysisControl::default();
+        let passages = locate(&service, &scope, &terms, hits.clone(), &control);
         assert_eq!(passages.len(), 2);
         for id in [FIRST, SECOND] {
             let passage = passages
@@ -341,15 +364,75 @@ mod tests {
             pinned_only: true,
             ..scope
         };
-        assert!(locate(&service, &vip_scope, &terms, hits).is_empty());
+        assert!(locate(&service, &vip_scope, &terms, hits, &control).is_empty());
 
         let terms = questions::keywords("Wie ist die anderung?");
         let hits = index.question_candidates(&terms, &scope, &[]).unwrap();
         assert_eq!(hits.len(), 1);
-        let passages = locate(&service, &scope, &terms, hits);
+        let passages = locate(&service, &scope, &terms, hits, &control);
         assert_eq!(passages.len(), 1);
         assert_eq!(passages[0].meeting_id, SECOND);
         assert!(passages[0].passage.text.contains("Änderung"));
+    }
+
+    #[test]
+    fn stale_candidates_do_not_consume_verified_meeting_or_passage_limits() {
+        let fixture = OwnedFixture::new();
+        let service = fixtures(&fixture.0);
+        let scope = SearchScope::default();
+        let terms = questions::keywords("Liefertermin");
+        let index = LibraryIndex::open(&service.root).unwrap();
+        let mut ranked = index
+            .question_candidates(&terms, &scope, &[FIRST.into()])
+            .unwrap();
+        let template = ranked.pop().unwrap();
+        let sessions = service.root.join("sessions");
+        let mut manifest: serde_json::Value =
+            serde_json::from_slice(&fs::read(sessions.join(FIRST).join("session.json")).unwrap())
+                .unwrap();
+        let ids: Vec<_> = (0..(MAX_PASSAGES * 2 + 1))
+            .map(|sequence| format!("{sequence:032x}"))
+            .collect();
+        for (position, id) in ids.iter().enumerate() {
+            let folder = sessions.join(id);
+            fs::create_dir(&folder).unwrap();
+            manifest["id"] = serde_json::json!(id);
+            fs::write(
+                folder.join("session.json"),
+                serde_json::to_vec(&manifest).unwrap(),
+            )
+            .unwrap();
+            let hit = SearchHit {
+                id: id.clone(),
+                ..template.clone()
+            };
+            let stale = |part| SearchHit {
+                source_id: Some(format!("system-stale-{part}.wav")),
+                ..hit.clone()
+            };
+            if position < MAX_PASSAGES {
+                ranked.push(stale(0));
+            } else {
+                if position == MAX_PASSAGES {
+                    ranked.extend((0..3).map(stale));
+                }
+                ranked.push(hit);
+            }
+        }
+        let passages = locate(
+            &service,
+            &scope,
+            &terms,
+            ranked,
+            &AnalysisControl::default(),
+        );
+        assert_eq!(passages.len(), MAX_PASSAGES);
+        for (index, passage) in passages.iter().enumerate() {
+            assert_eq!(passage.meeting_id, ids[MAX_PASSAGES + index]);
+            assert_eq!(passage.source_id, FILE);
+            assert_eq!(passage.passage.id, index as u32 + 1);
+            assert!(passage.passage.text.contains("Mittwoch"));
+        }
     }
 
     #[test]

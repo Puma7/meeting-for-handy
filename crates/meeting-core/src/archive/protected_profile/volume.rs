@@ -1,7 +1,7 @@
 //! Owns an unlocked encrypted volume and prevents writes to its mountpoint after detachment.
 use super::{
     checked_root, copy_profile, metadata, migration_paths, reject_link, verify_marked, Protection,
-    Receipt, DIRECTORY_PREFIX,
+    Receipt, DIRECTORY_PREFIX, VAULT_MARKER,
 };
 use crate::Result;
 use std::{
@@ -18,7 +18,6 @@ mod platform;
 #[path = "volume/macos.rs"]
 mod platform;
 
-const VAULT_MARKER: &str = "protected-volume.v1";
 const VAULT_MARKER_CONTENT: &[u8] = b"HandyMeeting encrypted volume v1\n";
 const PROFILE_MARKER_CONTENT: &[u8] = b"HandyMeeting encrypted volume profile v1\n";
 const UNAVAILABLE: &str = "The encrypted volume provider is unavailable. / Die Verschlüsselung für dieses Profil ist nicht verfügbar.";
@@ -150,6 +149,10 @@ impl MountedVolume {
     }
 
     pub fn unmount(mut self) -> Result<()> {
+        self.try_unmount()
+    }
+
+    pub fn try_unmount(&mut self) -> Result<()> {
         self.close()
     }
 }
@@ -190,24 +193,36 @@ pub fn migrate_volume(source: &Path, parent: &Path, password: &str) -> Result<Re
         return Err(UNAVAILABLE.into());
     }
     let (source, parent) = migration_paths(source, parent)?;
-    let vault = tempfile::Builder::new()
+    let mut stage = tempfile::Builder::new()
         .prefix(DIRECTORY_PREFIX)
-        .tempdir_in(parent)?
-        .keep();
-    fs::set_permissions(&vault, Permissions::from_mode(0o700))?;
-    let use_lock = reserve_vault(&vault)?;
-    platform::create(&vault, password)?;
-    let mounted = MountedVolume::attach(&vault, password, use_lock)?;
-    fs::create_dir(mounted.root())?;
-    let (files, bytes) = copy_profile(
-        &source,
-        mounted.root(),
-        &mounted.protection,
-        PROFILE_MARKER_CONTENT,
-    )?;
-    mounted.verify()?;
+        .tempdir_in(parent)?;
+    fs::set_permissions(stage.path(), Permissions::from_mode(0o700))?;
+    let use_lock = reserve_vault(stage.path())?;
+    // A failed helper may still have a live mount. Only remove its backing after
+    // a normal detach has confirmed that the owned mount is closed.
+    stage.disable_cleanup(true);
+    let vault = stage.path();
+    platform::create(vault, password).map_err(|error| retained_stage(vault, error))?;
+    let mounted = MountedVolume::attach(vault, password, use_lock)
+        .map_err(|error| retained_stage(vault, error))?;
+    let copied = (|| -> Result<_> {
+        fs::create_dir(mounted.root())?;
+        let copied = copy_profile(
+            &source,
+            mounted.root(),
+            &mounted.protection,
+            PROFILE_MARKER_CONTENT,
+        )?;
+        mounted.verify()?;
+        Ok(copied)
+    })();
+    mounted
+        .unmount()
+        .map_err(|error| retained_stage(vault, error))?;
+    stage.disable_cleanup(false);
+    let (files, bytes) = copied?;
+    let vault = stage.path();
     // Publish the outer marker only after all writes and a normal unmount succeed.
-    mounted.unmount()?;
     let mut marker = OpenOptions::new()
         .write(true)
         .create_new(true)
@@ -215,12 +230,24 @@ pub fn migrate_volume(source: &Path, parent: &Path, password: &str) -> Result<Re
         .open(vault.join(VAULT_MARKER))?;
     marker.write_all(VAULT_MARKER_CONTENT)?;
     marker.sync_all()?;
-    File::open(&vault)?.sync_all()?;
+    File::open(vault)?.sync_all()?;
     Ok(Receipt {
-        path: vault,
+        path: stage.keep(),
         files,
         bytes,
     })
+}
+
+fn retained_stage(
+    path: &Path,
+    error: Box<dyn std::error::Error + Send + Sync>,
+) -> Box<dyn std::error::Error + Send + Sync> {
+    format!(
+        "{error}\nUnfinished encrypted copy kept at {}. / Unfertige verschlüsselte Kopie aufbewahrt unter {}.",
+        path.display(),
+        path.display()
+    )
+    .into()
 }
 
 pub fn open_volume(vault: &Path, password: &str) -> Result<MountedVolume> {

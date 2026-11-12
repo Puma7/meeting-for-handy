@@ -195,7 +195,10 @@ pub fn create(
         return Err("Die Zieldatei existiert bereits. / The destination already exists.".into());
     }
     let _archive = operation_lock(root)?;
-    let _publication = publication_lease(root, true)?;
+    // Exclude erasure while allowing publishers for other sessions to finish.
+    // The archive lease serializes metadata changes and the store owns this
+    // session's native writer lease until the backup is verified and published.
+    let _publication = source_publication_lease(root)?;
     let sessions = metadata::checked_directory(&root.join("sessions"))?;
     let folder = metadata::checked_directory(&sessions.join(meeting_id))?;
     let store = SessionStore::open(&folder)?;
@@ -203,17 +206,16 @@ pub fn create(
     if data.id != meeting_id || data.read_only {
         return Err("Only native sessions with their local originals can be backed up here".into());
     }
-    let mut paths = Vec::new();
-    let mut directories = Vec::new();
-    inventory(&folder, &folder, &mut paths, &mut directories)?;
-    paths.sort_by(|a, b| a.0.cmp(&b.0));
-    directories.sort();
+    let (paths, directories) = backup_inventory(&folder)?;
     let mut files = Vec::with_capacity(paths.len());
+    let mut modified = Vec::with_capacity(paths.len());
     let mut total = 0u64;
     for (name, path) in &paths {
         cancelled(cancel)?;
+        let metadata = regular(path)?;
+        modified.push(metadata.modified()?);
         total = total
-            .checked_add(regular(path)?.len())
+            .checked_add(metadata.len())
             .ok_or("Backup size overflow")?;
         if total > MAX_TOTAL {
             return Err("Encrypted backup exceeds its size limit".into());
@@ -276,11 +278,33 @@ pub fn create(
     )?
     .read_exact(&mut [0u8; 4])?;
     cancelled(cancel)?;
+    let (current_paths, current_directories) = backup_inventory(&folder)?;
+    if current_paths != paths || current_directories != manifest.directories {
+        return Err("Source changed while the encrypted copy was being created".into());
+    }
+    for ((_, path), (entry, timestamp)) in paths.iter().zip(manifest.files.iter().zip(modified)) {
+        cancelled(cancel)?;
+        let metadata = regular(path)?;
+        if metadata.len() != entry.bytes || metadata.modified()? != timestamp {
+            return Err("Source changed while the encrypted copy was being created".into());
+        }
+    }
     pending
         .persist_noclobber(&output)
         .map_err(|error| error.error)?;
     sync_directory(output.parent().ok_or("Missing backup directory")?)?;
     Ok((summary, recovery))
+}
+
+type BackupPaths = (Vec<(String, PathBuf)>, Vec<String>);
+
+fn backup_inventory(folder: &Path) -> Result<BackupPaths> {
+    let mut paths = Vec::new();
+    let mut directories = Vec::new();
+    inventory(folder, folder, &mut paths, &mut directories)?;
+    paths.sort_by(|a, b| a.0.cmp(&b.0));
+    directories.sort();
+    Ok((paths, directories))
 }
 
 /// Authenticate a backup without writing any plaintext or accessing an original session.
@@ -324,13 +348,30 @@ pub fn recover(
     sync_tree(&profile)?;
     // Coordinate lock files created by read-back are empty and excluded from the copy.
     cancelled(cancel)?;
+    publish_recovery(&profile, &directory, sync_directory)
+}
+
+fn publish_recovery(
+    profile: &Path,
+    directory: &Path,
+    sync: impl Fn(&Path) -> Result<()>,
+) -> Result<PathBuf> {
     let destination = tempfile::Builder::new()
         .prefix("HandyMeeting-Recovery-")
-        .tempdir_in(&directory)?;
+        .tempdir_in(directory)?;
     let published = destination.path().join("profile");
-    fs::rename(&profile, &published)?;
-    sync_directory(destination.path())?;
-    sync_directory(&directory)?;
+    fs::rename(profile, &published)?;
+    if let Err(error) = sync(destination.path()).and_then(|()| sync(directory)) {
+        if let Err(cleanup) = destination.close() {
+            return Err(format!(
+                "{error}\nCould not remove the unfinished recovery at {} ({cleanup}). / Die unvollständige Wiederherstellung unter {} konnte nicht entfernt werden ({cleanup}).",
+                published.display(),
+                published.display(),
+            )
+            .into());
+        }
+        return Err(error);
+    }
     let _ = destination.keep();
     Ok(published)
 }
