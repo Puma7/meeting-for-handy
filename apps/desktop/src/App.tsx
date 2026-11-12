@@ -11,8 +11,10 @@ import HistorySearch, {
   initialHistorySearch,
   type HistoryQuestionReturn,
 } from "./views/HistorySearch";
-import HistoryQuestions from "./views/HistoryQuestions";
-import EncryptedBackup from "./views/EncryptedBackup";
+import HistoryQuestions, {
+  historyQuestionUsesMeeting,
+} from "./views/HistoryQuestions";
+import EncryptedBackup, { type BackupResult } from "./views/EncryptedBackup";
 import LibraryStatus from "./views/LibraryStatus";
 import UpdatePanel from "./views/UpdatePanel";
 import SettingsView from "./views/SettingsView";
@@ -224,6 +226,9 @@ export default function App({ api = desktopApi }: { api?: DesktopApi }) {
   const historyQuestionReturn = useRef<HistoryQuestionReturn | undefined>(
     undefined,
   );
+  const [backupReceipts, setBackupReceipts] = useState<
+    ReadonlyMap<string, BackupResult>
+  >(() => new Map());
   const [page, setPage] = useState<Page>("meeting"),
     [app, setApp] = useState<AppState | null>(null),
     [connected, setConnected] = useState(false),
@@ -1323,12 +1328,15 @@ export default function App({ api = desktopApi }: { api?: DesktopApi }) {
     notesJob.forget(id);
     erasureBlocked.current.add(id);
     if (
-      historyQuestionReturn.current?.answer.citations.some(
-        (citation) => citation.meetingId === id,
+      historyQuestionReturn.current &&
+      historyQuestionUsesMeeting(
+        historyQuestionReturn.current,
+        (meetingId) => meetingId === id,
       )
     ) {
       historyQuestionReturn.current = undefined;
     }
+    setErasureRevision((value) => value + 1);
     ++erasureEpoch.current;
     ++requestSequence.current;
     ++notesLoadSequence.current;
@@ -2744,6 +2752,7 @@ export default function App({ api = desktopApi }: { api?: DesktopApi }) {
                         : {}),
                     })
                 : undefined,
+              cancelProbe: api.cancelMeetingSetup,
             }}
             resume={() =>
               void action(async () => {
@@ -2769,10 +2778,27 @@ export default function App({ api = desktopApi }: { api?: DesktopApi }) {
                   key={meeting.id}
                   locale={locale}
                   disabled={busy || recording || catchingUp}
-                  run={(passphrase) =>
-                    api.createEncryptedBackup!(meeting.id, passphrase)
-                  }
+                  run={async (passphrase) => {
+                    const result = await api.createEncryptedBackup!(
+                      meeting.id,
+                      passphrase,
+                    );
+                    if (!result) return null;
+                    if (result.summary.meetingId !== meeting.id)
+                      throw new Error(t.wrongMeeting);
+                    return {
+                      file: result.file,
+                      recoveryKey: result.recoveryKey,
+                    };
+                  }}
                   cancel={api.cancelEncryptedBackup}
+                  receipt={{
+                    result: backupReceipts.get(meeting.id) ?? null,
+                    setResult: (result) =>
+                      setBackupReceipts((current) =>
+                        new Map(current).set(meeting.id, result),
+                      ),
+                  }}
                 />
               )
             }

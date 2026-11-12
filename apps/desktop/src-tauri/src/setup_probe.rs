@@ -10,10 +10,10 @@ const CONFIRMED_DAY: &str = "The project meeting has been confirmed for Wednesda
 const PROPOSED_DAY: &str = "Friday was only suggested.";
 
 fn confirms_setup_day(quotes: &[meeting_notes::questions::Quote]) -> bool {
-    !quotes.is_empty()
+    quotes.iter().all(|quote| quote.source == PROBE_SOURCE)
         && quotes
             .iter()
-            .all(|quote| quote.source == PROBE_SOURCE && quote.quote.contains(CONFIRMED_DAY))
+            .any(|quote| quote.quote.contains(CONFIRMED_DAY))
 }
 
 pub(super) fn check_cancellation(control: &AnalysisControl) -> AppResult<()> {
@@ -57,6 +57,11 @@ pub(crate) async fn check_meeting_setup(
 ) -> AppResult<SetupProbeResult> {
     let service = Arc::clone(service.inner());
     blocking(move || check(&service, request)).await
+}
+
+#[tauri::command]
+pub(crate) fn cancel_meeting_setup(service: tauri::State<'_, Arc<Service>>) -> AppResult<bool> {
+    service.operations.cancel_setup()
 }
 
 /// Reproduce the same probe from an exact executable with a new isolated profile.
@@ -181,7 +186,7 @@ mod tests {
         ))]));
         assert!(!confirms_setup_day(&[]));
         assert!(!confirms_setup_day(&[quote(PROPOSED_DAY)]));
-        assert!(!confirms_setup_day(&[
+        assert!(confirms_setup_day(&[
             quote(CONFIRMED_DAY),
             quote(PROPOSED_DAY)
         ]));
@@ -189,5 +194,19 @@ mod tests {
             source: PROBE_SOURCE + 1,
             quote: CONFIRMED_DAY.into(),
         }]));
+    }
+
+    #[test]
+    fn manual_setup_cancellation_retains_admission_until_cleanup() {
+        let gate = operations::Gate::default();
+        assert!(!gate.cancel_setup().unwrap());
+        let lease = gate.try_acquire(operations::Kind::SetupProbe).unwrap();
+        let control = lease.setup_control().unwrap();
+        assert!(check_cancellation(control).is_ok());
+        assert!(gate.cancel_setup().unwrap());
+        assert!(check_cancellation(control).is_err());
+        assert!(gate.try_acquire(operations::Kind::Maintenance).is_err());
+        drop(lease);
+        assert!(gate.try_acquire(operations::Kind::Maintenance).is_ok());
     }
 }

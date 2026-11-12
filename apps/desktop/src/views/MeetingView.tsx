@@ -77,6 +77,7 @@ type Props = {
       | "unavailable";
     check: () => void;
     probe?: () => ReturnType<NonNullable<DesktopApi["checkMeetingSetup"]>>;
+    cancelProbe?: NonNullable<DesktopApi["cancelMeetingSetup"]>;
     probeKey?: string;
   };
   start: () => Promise<void>;
@@ -331,6 +332,7 @@ export default function MeetingView({
                 <SetupProbe
                   key={textModelCheck.probeKey}
                   run={textModelCheck.probe}
+                  cancel={textModelCheck.cancelProbe}
                   disabled={!recognitionReady || busy}
                   locale={locale}
                 />

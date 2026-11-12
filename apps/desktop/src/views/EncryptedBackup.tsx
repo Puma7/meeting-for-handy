@@ -2,7 +2,7 @@ import { useRef, useState } from "react";
 import { errorMessage } from "../api";
 import type { BackupCredential, Locale } from "../types";
 
-type Result = { file: string; recoveryKey?: string };
+export type BackupResult = { file: string; recoveryKey?: string };
 
 export default function EncryptedBackup({
   locale,
@@ -10,12 +10,20 @@ export default function EncryptedBackup({
   disabled,
   run,
   cancel,
+  receipt,
 }: {
   locale: Locale;
   restore?: boolean;
   disabled?: boolean;
-  run: (credential: string, kind: BackupCredential) => Promise<Result | null>;
+  run: (
+    credential: string,
+    kind: BackupCredential,
+  ) => Promise<BackupResult | null>;
   cancel?: () => Promise<boolean>;
+  receipt?: {
+    result: BackupResult | null;
+    setResult: (next: BackupResult) => void;
+  };
 }) {
   const de = locale === "de";
   const passphrase = useRef<HTMLInputElement>(null);
@@ -25,7 +33,9 @@ export default function EncryptedBackup({
   const [cancelling, setCancelling] = useState(false);
   const [kind, setKind] = useState<BackupCredential>("passphrase");
   const [error, setError] = useState("");
-  const [result, setResult] = useState<Result | null>(null);
+  const [localResult, setLocalResult] = useState<BackupResult | null>(null);
+  const result = receipt ? receipt.result : localResult;
+  const setResult = receipt?.setResult ?? setLocalResult;
   const action = restore
     ? de
       ? "Verschlüsselte Sitzung wiederherstellen"
@@ -50,7 +60,7 @@ export default function EncryptedBackup({
           event.preventDefault();
           if (disabled || started.current || !passphrase.current) return;
           const secret = passphrase.current.value;
-          setResult(null);
+          if (restore) setLocalResult(null);
           setError("");
           if (
             !restore &&
@@ -70,7 +80,8 @@ export default function EncryptedBackup({
           started.current = true;
           setBusy(true);
           try {
-            setResult(await run(secret, kind));
+            const completed = await run(secret, kind);
+            if (completed) setResult(completed);
           } catch (failure) {
             setError(errorMessage(failure));
           } finally {

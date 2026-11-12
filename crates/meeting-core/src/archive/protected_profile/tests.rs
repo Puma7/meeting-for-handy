@@ -76,6 +76,10 @@ fn reindex(root: &Path, id: &str) -> LibraryIndex {
     index
 }
 
+fn migrate_fixture(source: &Path, parent: &Path, protection: &impl Protection) -> Result<Receipt> {
+    migrate_with(source, parent, protection, &MigrationControl::default())
+}
+
 #[test]
 fn copies_sessions_annotations_and_recovery_records_and_rebuilds_search() {
     let source = tempfile::tempdir().unwrap();
@@ -102,7 +106,7 @@ fn copies_sessions_annotations_and_recovery_records_and_rebuilds_search() {
     let original_index = fs::read(source.path().join("library-index/library.sqlite3")).unwrap();
     let before = inventory(source.path()).unwrap();
     let protection = TestProtection { reject: None };
-    let result = migrate_with(source.path(), parent.path(), &protection).unwrap();
+    let result = migrate_fixture(source.path(), parent.path(), &protection).unwrap();
     assert!(result.files > 7 && result.bytes > 100);
     assert_eq!(before, inventory(&result.path).unwrap());
     assert_eq!(before, inventory(source.path()).unwrap());
@@ -127,16 +131,16 @@ fn failed_protection_and_active_sessions_leave_the_original_untouched() {
     let blocked = TestProtection {
         reject: Some("session.json"),
     };
-    assert!(migrate_with(source.path(), parent.path(), &blocked).is_err());
+    assert!(migrate_fixture(source.path(), parent.path(), &blocked).is_err());
     assert!(fs::read_dir(parent.path()).unwrap().next().is_none());
 
     let active = SessionStore::open(&source.path().join("sessions").join(id)).unwrap();
     let protection = TestProtection { reject: None };
-    assert!(migrate_with(source.path(), parent.path(), &protection).is_err());
+    assert!(migrate_fixture(source.path(), parent.path(), &protection).is_err());
     drop(active);
     assert!(fs::read_dir(parent.path()).unwrap().next().is_none());
     assert_eq!(inventory(source.path()).unwrap(), before);
-    assert!(migrate_with(source.path(), source.path(), &protection).is_err());
+    assert!(migrate_fixture(source.path(), source.path(), &protection).is_err());
 
     let lease = reserve_runtime(source.path()).unwrap();
     assert!(reserve_runtime(source.path()).is_err());
@@ -163,9 +167,80 @@ fn source_changes_during_copy_prevent_publication() {
     let parent = tempfile::tempdir().unwrap();
     let id = session(source.path());
     let late = source.path().join("sessions").join(id).join("user-file");
-    assert!(migrate_with(source.path(), parent.path(), &ChangingSource(late.clone())).is_err());
+    assert!(migrate_fixture(source.path(), parent.path(), &ChangingSource(late.clone())).is_err());
     assert!(fs::read_dir(parent.path()).unwrap().next().is_none());
     assert_eq!(fs::read(late).unwrap(), b"a concurrently added user file");
+}
+
+#[test]
+fn cancelling_a_partial_copy_preserves_the_original_and_other_destinations() {
+    struct CancelDuringCopy<'a>(&'a MigrationControl);
+    impl Protection for CancelDuringCopy<'_> {
+        fn enable_directory(&self, _: &Path) -> Result<()> {
+            Ok(())
+        }
+        fn check(&self, path: &Path) -> Result<()> {
+            if path.file_name().is_some_and(|name| name == "session.json") {
+                assert!(path.is_file());
+                assert!(self.0.cancel());
+            }
+            Ok(())
+        }
+    }
+
+    let source = tempfile::tempdir().unwrap();
+    let parent = tempfile::tempdir().unwrap();
+    let id = session(source.path());
+    drop(reindex(source.path(), &id));
+    let index = source.path().join("library-index/library.sqlite3");
+    let original_index = fs::read(&index).unwrap();
+    let before = inventory(source.path()).unwrap();
+    let sibling = parent.path().join("previous-copy");
+    fs::write(&sibling, b"unrelated bytes").unwrap();
+    let control = MigrationControl::default();
+    let error = migrate_with(
+        source.path(),
+        parent.path(),
+        &CancelDuringCopy(&control),
+        &control,
+    )
+    .err()
+    .unwrap();
+    assert!(error.is::<MigrationCancelled>());
+    assert!(control.begin_publication().is_err());
+    assert_eq!(fs::read_dir(parent.path()).unwrap().count(), 1);
+    assert_eq!(fs::read(sibling).unwrap(), b"unrelated bytes");
+    assert_eq!(inventory(source.path()).unwrap(), before);
+    assert_eq!(fs::read(index).unwrap(), original_index);
+
+    let publication = MigrationControl::default();
+    publication.begin_publication().unwrap();
+    assert!(!publication.cancel());
+    publication.check().unwrap();
+}
+
+#[test]
+fn a_large_file_checks_cancellation_between_written_blocks() {
+    struct CancelAfterFirstWrite<'a>(&'a MigrationControl, usize);
+    impl Write for CancelAfterFirstWrite<'_> {
+        fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+            self.1 += bytes.len();
+            assert!(self.0.cancel());
+            Ok(bytes.len())
+        }
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
+    let control = MigrationControl::default();
+    let bytes = vec![7; 2 * 64 * 1024];
+    let mut input = bytes.as_slice();
+    let mut output = CancelAfterFirstWrite(&control, 0);
+    let error = copy_blocks(&mut input, &mut output, &control).unwrap_err();
+    assert!(error.is::<MigrationCancelled>());
+    assert_eq!(output.1, 64 * 1024);
+    assert_eq!(input, &bytes[output.1..]);
 }
 
 #[test]

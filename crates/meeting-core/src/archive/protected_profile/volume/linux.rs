@@ -149,7 +149,19 @@ fn mount_path(path: &Path) -> Vec<u8> {
     encoded
 }
 
-fn mount_id(table: &[u8], mount: &Path, source: &[u8], uid: u32) -> Result<Option<u64>> {
+#[derive(Debug, PartialEq, Eq)]
+struct MountRecord {
+    id: u64,
+    protected: bool,
+}
+
+/// Identify exactly one mount of this attachment before inspecting its access flags.
+fn mount_record(
+    table: &[u8],
+    mount: &Path,
+    source: &[u8],
+    uid: u32,
+) -> Result<Option<MountRecord>> {
     let encoded = mount_path(mount);
     let owner = format!("user_id={uid}");
     let mut mounted = None;
@@ -170,34 +182,47 @@ fn mount_id(table: &[u8], mount: &Path, source: &[u8], uid: u32) -> Result<Optio
         if fields.next() != Some(b"fuse.gocryptfs") || fields.next() != Some(source) {
             return Err(NOT_MOUNTED.into());
         }
-        for required in [b"rw".as_slice(), b"nodev", b"nosuid", b"noexec"] {
-            if !flags
-                .split(|byte| *byte == b',')
-                .any(|flag| flag == required)
-            {
-                return Err(NOT_MOUNTED.into());
-            }
-        }
         let super_flags = fields.next().ok_or(NOT_MOUNTED)?;
-        let mut super_flags = super_flags.split(|byte| *byte == b',');
-        if super_flags
+        let super_flags = super_flags.split(|byte| *byte == b',');
+        let mut owners = super_flags
             .clone()
-            .any(|flag| flag == b"allow_other" || flag == b"allow_root")
-            || !super_flags.any(|flag| flag == owner.as_bytes())
-        {
+            .filter(|flag| flag.starts_with(b"user_id="));
+        if owners.next() != Some(owner.as_bytes()) || owners.next().is_some() {
             return Err(NOT_MOUNTED.into());
         }
-        mounted = Some(std::str::from_utf8(id)?.parse::<u64>()?);
+        let protected = !super_flags
+            .clone()
+            .any(|flag| flag == b"allow_other" || flag == b"allow_root")
+            && [b"rw".as_slice(), b"nodev", b"nosuid", b"noexec"]
+                .iter()
+                .all(|required| {
+                    flags
+                        .split(|byte| *byte == b',')
+                        .any(|flag| flag == *required)
+                });
+        mounted = Some(MountRecord {
+            id: std::str::from_utf8(id)?.parse::<u64>()?,
+            protected,
+        });
     }
     Ok(mounted)
 }
 
-fn has_source(table: &[u8], source: &[u8]) -> bool {
+fn has_source(table: &[u8], vault_source: &[u8]) -> bool {
     table.split(|byte| *byte == b'\n').any(|record| {
         let mut fields = record.split(|byte| *byte == b' ').skip(6);
-        fields.any(|field| field == b"-")
-            && fields.next() == Some(b"fuse.gocryptfs")
-            && fields.next() == Some(source)
+        if !fields.any(|field| field == b"-") || fields.next() != Some(b"fuse.gocryptfs") {
+            return false;
+        }
+        fields.next().is_some_and(|source| {
+            source == vault_source
+                || source
+                    .strip_prefix(vault_source)
+                    .and_then(|suffix| suffix.strip_prefix(b"-"))
+                    .is_some_and(|suffix| {
+                        suffix.len() == 32 && suffix.iter().all(u8::is_ascii_hexdigit)
+                    })
+        })
     })
 }
 
@@ -211,8 +236,8 @@ pub(super) struct Attachment {
 }
 
 impl Attachment {
-    fn mounted(&self) -> Result<Option<u64>> {
-        mount_id(
+    fn mounted(&self) -> Result<Option<MountRecord>> {
+        mount_record(
             &fs::read(MOUNTINFO)?,
             &self.mount,
             self.source.as_bytes(),
@@ -224,7 +249,9 @@ impl Attachment {
         if !self.detached
             && mount == self.mount
             && self.mount_id.is_some()
-            && self.mounted()? == self.mount_id
+            && self
+                .mounted()?
+                .is_some_and(|mount| mount.protected && Some(mount.id) == self.mount_id)
         {
             Ok(())
         } else {
@@ -243,8 +270,8 @@ impl Attachment {
         if self.detached {
             return Ok(());
         }
-        if let Some(id) = self.mounted()? {
-            if self.mount_id.is_some_and(|expected| id != expected) {
+        if let Some(record) = self.mounted()? {
+            if self.mount_id.is_some_and(|expected| record.id != expected) {
                 return Err(NOT_MOUNTED.into());
             }
             let tool = unmount_tool().ok_or(DETACH_FAILED)?;
@@ -274,6 +301,16 @@ impl Attachment {
         self.detached = true;
         Ok(())
     }
+
+    fn failed_startup(
+        &mut self,
+        error: Box<dyn std::error::Error + Send + Sync>,
+    ) -> Box<dyn std::error::Error + Send + Sync> {
+        match self.unmount(STOP_LIMIT) {
+            Ok(()) => error,
+            Err(cleanup) => format!("{error}\n{cleanup}\nCheck the mount at {} before reopening this profile. / Bitte den Einhängepunkt {} vor erneutem Öffnen des Profils prüfen.", self.mount.display(), self.mount.display()).into(),
+        }
+    }
 }
 
 impl Drop for Attachment {
@@ -283,6 +320,15 @@ impl Drop for Attachment {
 }
 
 pub(super) fn attach(vault: &Path, mount: &Path, password: &str) -> Result<Attachment> {
+    attach_with_access(vault, mount, password, "-rw")
+}
+
+fn attach_with_access(
+    vault: &Path,
+    mount: &Path,
+    password: &str,
+    access: &str,
+) -> Result<Attachment> {
     validate_password(password)?;
     if !available() {
         return Err(UNAVAILABLE.into());
@@ -300,16 +346,17 @@ pub(super) fn attach(vault: &Path, mount: &Path, password: &str) -> Result<Attac
     }
     // A leftover daemon can outlive its window or a failed normal unmount.
     // The stable backing identity prevents opening a second mount of that vault.
-    let source = format!("handymeeting-{:x}-{:x}", directory.dev(), directory.ino());
+    let vault_source = format!("handymeeting-{:x}-{:x}", directory.dev(), directory.ino());
+    let source = format!("{vault_source}-{}", uuid::Uuid::new_v4().simple());
     let table = fs::read(MOUNTINFO)?;
-    if has_source(&table, source.as_bytes()) {
+    if has_source(&table, vault_source.as_bytes()) {
         return Err(ALREADY_MOUNTED.into());
     }
     // The new mountpoint itself must also have no preexisting mount.
-    mount_id(&table, mount, source.as_bytes(), uid)?;
+    mount_record(&table, mount, source.as_bytes(), uid)?;
     let child = start(
         command(&tool)
-            .args(["-fg", "-q", "-rw", "-nosuid", "-nodev", "-noexec"])
+            .args(["-fg", "-q", access, "-nosuid", "-nodev", "-noexec"])
             .arg(format!("-fsname={source}"))
             .arg("--")
             .arg(cipher)
@@ -327,23 +374,30 @@ pub(super) fn attach(vault: &Path, mount: &Path, password: &str) -> Result<Attac
     let deadline = Instant::now() + START_LIMIT;
     loop {
         if let Some(status) = attached.child.try_wait()? {
-            return Err(if status.code() == Some(12) {
+            let error = if status.code() == Some(12) {
                 WRONG_PASSWORD
             } else {
                 FUSE_FAILED
-            }
-            .into());
+            };
+            return Err(attached.failed_startup(error.into()));
         }
-        if let Some(id) = attached.mounted()? {
-            attached.mount_id = Some(id);
-            return Ok(attached);
+        match attached.mounted() {
+            Ok(Some(record)) => {
+                attached.mount_id = Some(record.id);
+                if record.protected {
+                    return Ok(attached);
+                }
+                return Err(attached.failed_startup(NOT_MOUNTED.into()));
+            }
+            Ok(None) => {}
+            Err(error) => return Err(attached.failed_startup(error)),
         }
         if Instant::now() >= deadline {
             // No match was found. Stop only our startup child and let its drop
             // guard attempt an ordinary unmount if it mounted in the meantime.
             let _ = attached.child.kill();
             let _ = attached.child.wait();
-            return Err(FUSE_FAILED.into());
+            return Err(attached.failed_startup(FUSE_FAILED.into()));
         }
         thread::sleep(POLL);
     }
@@ -358,13 +412,16 @@ mod tests {
         let path = Path::new("/tmp/meeting files\\one");
         let owned = b"18 10 0:41 / /tmp/meeting\\040files\\134one rw,nosuid,nodev,noexec shared:2 - fuse.gocryptfs handymeeting-own rw,user_id=1000,group_id=1000\n";
         assert_eq!(
-            mount_id(owned, path, b"handymeeting-own", 1000).unwrap(),
-            Some(18)
+            mount_record(owned, path, b"handymeeting-own", 1000).unwrap(),
+            Some(MountRecord {
+                id: 18,
+                protected: true
+            })
         );
-        assert!(mount_id(owned, path, b"handymeeting-other", 1000).is_err());
-        assert!(mount_id(owned, path, b"handymeeting-own", 1001).is_err());
+        assert!(mount_record(owned, path, b"handymeeting-other", 1000).is_err());
+        assert!(mount_record(owned, path, b"handymeeting-own", 1001).is_err());
         assert_eq!(
-            mount_id(
+            mount_record(
                 owned,
                 Path::new("/tmp/meeting files"),
                 b"handymeeting-own",
@@ -373,7 +430,7 @@ mod tests {
             .unwrap(),
             None
         );
-        assert!(mount_id(
+        assert!(mount_record(
             &[owned.as_slice(), owned.as_slice()].concat(),
             path,
             b"handymeeting-own",
@@ -382,9 +439,63 @@ mod tests {
         .is_err());
 
         let shared = b"18 10 0:41 / /tmp/meeting\\040files\\134one rw,nosuid,nodev,noexec - fuse.gocryptfs handymeeting-own rw,allow_other,user_id=1000\n";
-        assert!(mount_id(shared, path, b"handymeeting-own", 1000).is_err());
+        assert_eq!(
+            mount_record(shared, path, b"handymeeting-own", 1000).unwrap(),
+            Some(MountRecord {
+                id: 18,
+                protected: false
+            })
+        );
         assert!(has_source(shared, b"handymeeting-own"));
         assert!(!has_source(shared, b"handymeeting-other"));
+        let readonly = b"19 10 0:42 / /tmp/meeting\\040files\\134one ro,nosuid,nodev,noexec - fuse.gocryptfs handymeeting-own-75c197bd1f32421dac4b0fa710dc7242 ro,user_id=1000\n";
+        assert_eq!(
+            mount_record(
+                readonly,
+                path,
+                b"handymeeting-own-75c197bd1f32421dac4b0fa710dc7242",
+                1000
+            )
+            .unwrap(),
+            Some(MountRecord {
+                id: 19,
+                protected: false
+            })
+        );
+        assert!(mount_record(
+            readonly,
+            path,
+            b"handymeeting-own-81f55ae834914c3c97558346bed483f6",
+            1000
+        )
+        .is_err());
+        assert!(has_source(readonly, b"handymeeting-own"));
+    }
+
+    #[test]
+    #[ignore = "Requires the native FUSE provider in a disposable test environment"]
+    fn native_rejected_readonly_mount_is_detached_and_can_be_reopened() {
+        let mut vault = tempfile::tempdir().unwrap();
+        let mut mount = tempfile::tempdir().unwrap();
+        let password = uuid::Uuid::new_v4().simple().to_string();
+        create(vault.path(), &password).unwrap();
+        vault.disable_cleanup(true);
+        mount.disable_cleanup(true);
+        let directory = fs::metadata(vault.path().join("cipher")).unwrap();
+        let source = format!("handymeeting-{:x}-{:x}", directory.dev(), directory.ino());
+        let error = attach_with_access(vault.path(), mount.path(), &password, "-ro")
+            .err()
+            .unwrap();
+        assert_eq!(error.to_string(), NOT_MOUNTED);
+        assert!(!has_source(
+            &fs::read(MOUNTINFO).unwrap(),
+            source.as_bytes()
+        ));
+        let mut reopened = attach(vault.path(), mount.path(), &password).unwrap();
+        reopened.check(mount.path()).unwrap();
+        reopened.detach(mount.path()).unwrap();
+        mount.disable_cleanup(false);
+        vault.disable_cleanup(false);
     }
 
     #[test]

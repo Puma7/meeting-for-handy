@@ -16,11 +16,77 @@ mod startup;
 #[cfg(any(windows, target_os = "linux", target_os = "macos"))]
 pub(super) use startup::{acknowledge_window, managed_startup, report_failure};
 
+#[derive(Default)]
+pub(super) struct CopyControl(Mutex<Option<Arc<storage::MigrationControl>>>);
+
+impl CopyControl {
+    fn begin(&self) -> AppResult<ActiveCopy<'_>> {
+        let mut active = self
+            .0
+            .lock()
+            .map_err(|_| "Profile copy control is unavailable")?;
+        if active.is_some() {
+            return Err(
+                "Eine Profilkopie läuft bereits. / A profile copy is already running.".into(),
+            );
+        }
+        let migration = Arc::new(storage::MigrationControl::default());
+        *active = Some(Arc::clone(&migration));
+        Ok(ActiveCopy {
+            control: self,
+            migration,
+        })
+    }
+
+    fn cancel(&self) -> AppResult<bool> {
+        let active = self
+            .0
+            .lock()
+            .map_err(|_| "Profile copy control is unavailable")?;
+        Ok(active.as_ref().is_some_and(|migration| migration.cancel()))
+    }
+
+    fn state(&self) -> AppResult<Option<MigrationState>> {
+        let active = self
+            .0
+            .lock()
+            .map_err(|_| "Profile copy control is unavailable")?;
+        Ok(active.as_ref().map(|migration| {
+            if migration.cancellation_requested() {
+                MigrationState::Cancelling
+            } else {
+                MigrationState::Copying
+            }
+        }))
+    }
+}
+
+struct ActiveCopy<'a> {
+    control: &'a CopyControl,
+    migration: Arc<storage::MigrationControl>,
+}
+
+impl Drop for ActiveCopy<'_> {
+    fn drop(&mut self) {
+        if let Ok(mut active) = self.control.0.lock() {
+            *active = None;
+        }
+    }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+enum MigrationState {
+    Copying,
+    Cancelling,
+}
+
 #[derive(Serialize)]
 pub(crate) struct Status {
     supported: bool,
     active: bool,
     provider: Option<&'static str>,
+    migration: Option<MigrationState>,
 }
 
 #[tauri::command]
@@ -29,6 +95,7 @@ pub(crate) fn protected_profile_status(service: State<'_, Arc<Service>>) -> AppR
         supported: storage::supported(),
         active: service.protected_profile,
         provider: storage::provider_name(),
+        migration: service.protected_profile_migration.state()?,
     })
 }
 
@@ -41,25 +108,57 @@ pub(crate) async fn create_protected_profile(
     let service = Arc::clone(service.inner());
     let passphrase = passphrase.map(Zeroizing::new);
     blocking(move || {
-        if !storage::supported() || service.protected_profile {
-            return Err("Ein neues verschlüsseltes Profil ist hier nicht verfügbar. / A new encrypted profile is unavailable here.".into());
-        }
-        let _admission = crate::retention_commands::reserve(&service)?;
-        let Some(parent) = app.dialog().file()
-            .set_title("Ordner für das geschützte Profil / Parent folder for the protected profile")
-            .blocking_pick_folder() else { return Ok(None); };
-        let parent = parent.into_path().map_err(|_| "Choose a local folder.")?;
-        #[cfg(any(target_os = "linux", target_os = "macos"))]
-        let receipt = storage::migrate_volume(&service.root, &parent, required_passphrase(passphrase.as_ref())?);
-        #[cfg(not(any(target_os = "linux", target_os = "macos")))]
-        let receipt = {
-            drop(passphrase);
-            storage::migrate(&service.root, &parent)
-        };
-        let receipt = receipt.map_err(|error| error.to_string())?;
-        *service.protected_profile_copy.lock().map_err(|_| "Protected profile state is unavailable")? = Some(receipt.path.clone());
-        Ok(Some(receipt))
+        validate_create(&service)?;
+        copy_after_selection(&service, || {
+            app.dialog().file()
+                .set_title("Ordner für das geschützte Profil / Parent folder for the protected profile")
+                .blocking_pick_folder()
+                .map(|parent| parent.into_path().map_err(|_| "Choose a local folder.".into()))
+                .transpose()
+        }, |parent, control| {
+            validate_create(&service)?;
+            #[cfg(any(target_os = "linux", target_os = "macos"))]
+            let receipt = storage::migrate_volume_cancellable(&service.root, parent, required_passphrase(passphrase.as_ref())?, control);
+            #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+            let receipt = {
+                drop(passphrase);
+                storage::migrate_cancellable(&service.root, parent, control)
+            };
+            receipt.map_err(|error| error.to_string())
+        })
     }).await
+}
+
+fn validate_create(service: &Service) -> AppResult<()> {
+    if !storage::supported() || service.protected_profile {
+        return Err("Ein neues verschlüsseltes Profil ist hier nicht verfügbar. / A new encrypted profile is unavailable here.".into());
+    }
+    Ok(())
+}
+
+fn copy_after_selection(
+    service: &Arc<Service>,
+    choose: impl FnOnce() -> AppResult<Option<PathBuf>>,
+    migrate: impl FnOnce(&std::path::Path, &storage::MigrationControl) -> AppResult<storage::Receipt>,
+) -> AppResult<Option<storage::Receipt>> {
+    let operation = service.protected_profile_migration.begin()?;
+    let Some(parent) = choose()? else {
+        return Ok(None);
+    };
+    let _admission = crate::retention_commands::reserve(service)?;
+    let receipt = migrate(&parent, &operation.migration)?;
+    *service
+        .protected_profile_copy
+        .lock()
+        .map_err(|_| "Protected profile state is unavailable")? = Some(receipt.path.clone());
+    Ok(Some(receipt))
+}
+
+#[tauri::command]
+pub(crate) fn cancel_protected_profile_migration(
+    service: State<'_, Arc<Service>>,
+) -> AppResult<bool> {
+    service.protected_profile_migration.cancel()
 }
 
 #[tauri::command]
@@ -71,42 +170,57 @@ pub(crate) async fn open_protected_profile(
     let service = Arc::clone(service.inner());
     let passphrase = passphrase.map(Zeroizing::new);
     blocking(move || {
-        let _admission = service.reserve_operation(Kind::Maintenance)?;
-        let Some(path) = profile_to_open(&service.protected_profile_copy, || {
-            let Some(path) = app
-                .dialog()
-                .file()
-                .set_title("Geschütztes Profil auswählen / Choose the protected profile")
-                .blocking_pick_folder()
-            else {
-                return Ok(None);
-            };
-            Ok(Some(
-                path.into_path().map_err(|_| "Choose a local folder.")?,
-            ))
-        })?
-        else {
-            return Ok(false);
-        };
-        launch(path, passphrase)?;
-        Ok(true)
+        open_after_selection(
+            &service,
+            || {
+                app.dialog()
+                    .file()
+                    .set_title("Geschütztes Profil auswählen / Choose the protected profile")
+                    .blocking_pick_folder()
+                    .map(|path| {
+                        path.into_path()
+                            .map_err(|_| "Choose a local folder.".into())
+                    })
+                    .transpose()
+            },
+            |path| launch(path, passphrase),
+        )
     })
     .await
 }
 
-fn profile_to_open(
-    recent_copy: &Mutex<Option<PathBuf>>,
+fn open_after_selection(
+    service: &Service,
     choose: impl FnOnce() -> AppResult<Option<PathBuf>>,
-) -> AppResult<Option<PathBuf>> {
-    // Offer the newly created copy once. A failed launch must let the user choose again.
-    let recent = recent_copy
+    launch: impl FnOnce(PathBuf) -> AppResult<()>,
+) -> AppResult<bool> {
+    let recent = service
+        .protected_profile_copy
         .lock()
         .map_err(|_| "Protected profile state is unavailable")?
-        .take();
-    match recent {
-        Some(path) => Ok(Some(path)),
-        None => choose(),
+        .clone();
+    let path = match &recent {
+        Some(path) => path.clone(),
+        None => match choose()? {
+            Some(path) => path,
+            None => return Ok(false),
+        },
+    };
+    let _admission = service.reserve_operation(Kind::Maintenance)?;
+    if recent.is_some() {
+        // Consume the automatic copy only after admission. An unsuccessful launch then lets
+        // the user choose another folder, while a busy recording preserves the choice.
+        let mut current = service
+            .protected_profile_copy
+            .lock()
+            .map_err(|_| "Protected profile state is unavailable")?;
+        if *current != recent {
+            return Err("Die Profilauswahl hat sich geändert. Bitte erneut versuchen. / The selected profile changed. Please try again.".into());
+        }
+        current.take();
     }
+    launch(path)?;
+    Ok(true)
 }
 
 #[cfg(any(target_os = "linux", target_os = "macos"))]
@@ -172,19 +286,100 @@ pub(crate) fn launch_path(args: &[OsString]) -> AppResult<Option<PathBuf>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_profile::TestProfile;
+
+    #[test]
+    fn both_profile_pickers_allow_recording_and_recheck_before_working() {
+        let fixture = TestProfile::new().unwrap();
+        let service = Arc::new(Service::new(fixture.path().join("profile")).unwrap());
+        let chosen = fixture.path().join("chosen-profile");
+        let mut recording = None;
+        let result = copy_after_selection(
+            &service,
+            || {
+                recording = Some(service.reserve_operation(Kind::Recording).unwrap());
+                Ok(Some(chosen.clone()))
+            },
+            |_, _| panic!("a recording started before the folder was selected"),
+        );
+        assert!(result.is_err());
+        drop(recording.take());
+        let result = open_after_selection(
+            &service,
+            || {
+                recording = Some(service.reserve_operation(Kind::Recording).unwrap());
+                Ok(Some(chosen.clone()))
+            },
+            |_| panic!("a recording started before the folder was selected"),
+        );
+        assert!(result.is_err());
+        drop(recording.take());
+        assert!(open_after_selection(&service, || Ok(None), |_| unreachable!()).is_ok());
+    }
+
+    #[test]
+    fn migration_keeps_admission_until_cancellation_cleanup_finishes() {
+        let fixture = TestProfile::new().unwrap();
+        let service = Arc::new(Service::new(fixture.path().join("profile")).unwrap());
+        let result = copy_after_selection(
+            &service,
+            || Ok(Some(fixture.path().to_owned())),
+            |_, _| {
+                assert!(matches!(
+                    service.protected_profile_migration.state().unwrap(),
+                    Some(MigrationState::Copying)
+                ));
+                assert!(service.protected_profile_migration.cancel().unwrap());
+                assert!(matches!(
+                    service.protected_profile_migration.state().unwrap(),
+                    Some(MigrationState::Cancelling)
+                ));
+                assert!(service.reserve_operation(Kind::Recording).is_err());
+                Err("synthetic cancellation cleanup complete".into())
+            },
+        );
+        assert_eq!(
+            result.err().unwrap(),
+            "synthetic cancellation cleanup complete"
+        );
+        assert!(!service.protected_profile_migration.cancel().unwrap());
+        assert!(service
+            .protected_profile_migration
+            .state()
+            .unwrap()
+            .is_none());
+        assert!(service.reserve_operation(Kind::Recording).is_ok());
+        assert!(service.protected_profile_copy.lock().unwrap().is_none());
+    }
 
     #[test]
     fn an_automatic_copy_is_offered_once_even_without_a_successful_launch() {
-        let stale = PathBuf::from("moved-protected-copy");
-        let recovered = PathBuf::from("available-protected-copy");
-        let recent = Mutex::new(Some(stale.clone()));
-        let first = profile_to_open(&recent, || panic!("only offer the automatic copy"));
-        assert_eq!(first.unwrap(), Some(stale));
-        assert_eq!(
-            profile_to_open(&recent, || Ok(Some(recovered.clone()))).unwrap(),
-            Some(recovered)
+        let fixture = TestProfile::new().unwrap();
+        let service = Service::new(fixture.path().join("profile")).unwrap();
+        let stale = fixture.path().join("moved-protected-copy");
+        let recovered = fixture.path().join("available-protected-copy");
+        *service.protected_profile_copy.lock().unwrap() = Some(stale.clone());
+        let recording = service.reserve_operation(Kind::Recording).unwrap();
+        assert!(open_after_selection(&service, || unreachable!(), |_| unreachable!()).is_err());
+        drop(recording);
+        let first = open_after_selection(
+            &service,
+            || unreachable!(),
+            |selected| {
+                assert_eq!(selected, stale);
+                Err("synthetic missing copy".into())
+            },
         );
-        assert_eq!(profile_to_open(&recent, || Ok(None)).unwrap(), None);
+        assert_eq!(first.unwrap_err(), "synthetic missing copy");
+        assert!(open_after_selection(
+            &service,
+            || Ok(Some(recovered.clone())),
+            |selected| {
+                assert_eq!(selected, recovered);
+                Ok(())
+            }
+        )
+        .unwrap());
     }
 
     #[test]

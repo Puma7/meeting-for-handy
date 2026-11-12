@@ -370,9 +370,21 @@ pub(crate) fn explicit_task_calendar_date(quote: &str) -> Option<&str> {
         return None;
     }
     let german = marker.eq_ignore_ascii_case("bis");
-    let after = quote[start + marker.len()..]
-        .trim_end_matches(['.', '!'])
-        .trim_end();
+    let after = quote[start + marker.len()..].trim_end();
+    let after = after.trim_end_matches('!').trim_end();
+    // In German, the terminal point of a numeric month belongs to the date.
+    let numeric_month = german
+        && after
+            .strip_suffix('.')
+            .and_then(|date| date.split_whitespace().next_back())
+            .is_some_and(|token| {
+                (1..=2).contains(&token.len()) && token.bytes().all(|byte| byte.is_ascii_digit())
+            });
+    let after = if numeric_month {
+        after
+    } else {
+        after.trim_end_matches('.').trim_end()
+    };
     if !after.starts_with(char::is_whitespace) {
         return None;
     }
@@ -456,6 +468,8 @@ fn literal_calendar_deadlines_reject_uncertainty_and_calendar_overflow() {
             "Ich bringe die Unterlagen bis zum 23. September 2026 mit.",
             Some("23. September 2026"),
         ),
+        ("Jana bringt die Unterlagen bis zum 23. 9.", Some("23. 9.")),
+        ("Jana bringt die Unterlagen bis zum 23. 13.", None),
         (
             "I will write the guide, maybe by September twenty-third.",
             None,

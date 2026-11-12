@@ -13,6 +13,7 @@ export type ProtectedProfileStatus = {
   supported: boolean;
   active: boolean;
   provider: ProtectedProfileProvider;
+  migration?: "copying" | "cancelling" | null;
 };
 export type ProtectedProfileReceipt = {
   path: string;
@@ -594,6 +595,7 @@ export interface DesktopApi {
   createProtectedProfile?(
     passphrase?: string,
   ): Promise<ProtectedProfileReceipt | null>;
+  cancelProtectedProfileMigration?(): Promise<boolean>;
   openProtectedProfile?(passphrase?: string): Promise<boolean | null>;
   checkMeetingSetup?(request: {
     modelId: string;
@@ -603,6 +605,7 @@ export interface DesktopApi {
     transcriptionWorker: boolean;
     textAnswer: boolean | null;
   }>;
+  cancelMeetingSetup?(): Promise<boolean>;
   rebuildSearchIndex?(): Promise<string>;
   getLibraryProgress?(): Promise<LibraryProgress | null>;
   cancelLibraryJob?(jobId: string): Promise<boolean>;

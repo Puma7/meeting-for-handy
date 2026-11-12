@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { errorMessage } from "../api";
+import { ACTIVE_POLL_MS } from "../jobPolling";
 import type {
   Locale,
   ProtectedProfileProvider,
@@ -71,12 +72,14 @@ export default function ProtectedProfile({
   disabled,
   readStatus,
   create,
+  cancel,
   open,
 }: {
   locale: Locale;
   disabled?: boolean;
   readStatus: () => Promise<ProtectedProfileStatus>;
   create: (passphrase?: string) => Promise<ProtectedProfileReceipt | null>;
+  cancel?: () => Promise<boolean>;
   open?: (passphrase?: string) => Promise<boolean | null>;
 }) {
   const de = locale === "de";
@@ -86,6 +89,7 @@ export default function ProtectedProfile({
   const [receipt, setReceipt] = useState<ProtectedProfileReceipt | null>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState<ProfileAction | null>(null);
+  const [cancelling, setCancelling] = useState(false);
   const [opened, setOpened] = useState(false);
   const [passwordAction, setPasswordAction] = useState<ProfileAction | null>(
     null,
@@ -93,6 +97,10 @@ export default function ProtectedProfile({
   const passphrase = useRef<HTMLInputElement>(null);
   const repeated = useRef<HTMLInputElement>(null);
   const running = useRef(false);
+  const attempt = useRef(0);
+  const observedCopy = useRef(false);
+  const busyAction = busy ?? (status?.migration ? "copy" : null);
+  const cancellationPending = cancelling || status?.migration === "cancelling";
   const provider = status?.provider ?? "windowsEfs";
   const copy = providerText[provider][locale];
   const temporaryDrafts = de
@@ -102,24 +110,39 @@ export default function ProtectedProfile({
   useEffect(() => {
     if (!expanded) return;
     let current = true;
+    let timer: ReturnType<typeof setTimeout> | undefined;
     setStatus(null);
     setStatusError("");
-    void readStatus().then(
-      (next) => {
-        if (current) setStatus(next);
-      },
-      (failure: unknown) => {
-        if (current) setStatusError(errorMessage(failure));
-      },
-    );
+    async function readMigrationStatus() {
+      try {
+        const next = await readStatus();
+        if (!current) return;
+        if (!next.migration && !running.current) {
+          if (observedCopy.current) attempt.current += 1;
+          setCancelling(false);
+        }
+        observedCopy.current = Boolean(next.migration);
+        setStatus(next);
+      } catch (failure) {
+        if (!current) return;
+        if (!observedCopy.current) setStatusError(errorMessage(failure));
+      }
+      if (observedCopy.current) {
+        timer = setTimeout(() => void readMigrationStatus(), ACTIVE_POLL_MS);
+      }
+    }
+    void readMigrationStatus();
     return () => {
       current = false;
+      observedCopy.current = false;
+      clearTimeout(timer);
     };
   }, [expanded, readStatus]);
 
   async function run(action: ProfileAction, secret?: string) {
-    if (disabled || running.current) return;
+    if (disabled || running.current || observedCopy.current) return;
     running.current = true;
+    attempt.current += 1;
     setBusy(action);
     setError("");
     setOpened(false);
@@ -136,6 +159,25 @@ export default function ProtectedProfile({
     } finally {
       running.current = false;
       setBusy(null);
+      setCancelling(false);
+    }
+  }
+
+  async function requestCancellation() {
+    if (!cancel || cancellationPending || busyAction !== "copy") return;
+    const current = attempt.current;
+    const stillActive = () =>
+      attempt.current === current && (running.current || observedCopy.current);
+    setCancelling(true);
+    setError("");
+    try {
+      const accepted = await cancel();
+      if (!accepted && stillActive()) setCancelling(false);
+    } catch (failure) {
+      if (stillActive()) {
+        setCancelling(false);
+        setError(errorMessage(failure));
+      }
     }
   }
 
@@ -145,7 +187,7 @@ export default function ProtectedProfile({
   }
 
   function requestAction(action: ProfileAction) {
-    if (disabled || running.current) return;
+    if (disabled || running.current || observedCopy.current) return;
     if (provider === "windowsEfs") {
       void run(action);
       return;
@@ -197,7 +239,7 @@ export default function ProtectedProfile({
             <button
               className="secondary"
               type="button"
-              disabled={disabled || busy !== null}
+              disabled={disabled || busyAction !== null}
               onClick={() => requestAction("copy")}
             >
               {de
@@ -208,12 +250,22 @@ export default function ProtectedProfile({
               <button
                 className="secondary"
                 type="button"
-                disabled={disabled || busy !== null}
+                disabled={disabled || busyAction !== null}
                 onClick={() => requestAction("open")}
               >
                 {de
                   ? "Verschlüsseltes Profil öffnen"
                   : "Open encrypted profile"}
+              </button>
+            )}
+            {busyAction === "copy" && cancel && (
+              <button
+                className="secondary"
+                type="button"
+                disabled={cancellationPending}
+                onClick={() => void requestCancellation()}
+              >
+                {de ? "Profilkopie abbrechen" : "Cancel profile copy"}
               </button>
             )}
           </div>
@@ -252,7 +304,7 @@ export default function ProtectedProfile({
                 void run(passwordAction, secret);
               }}
             >
-              <fieldset disabled={disabled || busy !== null}>
+              <fieldset disabled={disabled || busyAction !== null}>
                 <legend>
                   {passwordAction === "copy"
                     ? de
@@ -309,12 +361,16 @@ export default function ProtectedProfile({
               </fieldset>
             </form>
           )}
-          {busy && (
+          {busyAction && (
             <p role="status">
-              {busy === "copy"
-                ? de
-                  ? "Profil kopieren und prüfen …"
-                  : "Copying and verifying profile …"
+              {busyAction === "copy"
+                ? cancellationPending
+                  ? de
+                    ? "Profilkopie wird abgebrochen …"
+                    : "Cancelling profile copy …"
+                  : de
+                    ? "Profil kopieren und prüfen …"
+                    : "Copying and verifying profile …"
                 : de
                   ? "Geschütztes Profil öffnen …"
                   : "Opening encrypted profile …"}

@@ -10,6 +10,9 @@ import userEvent from "@testing-library/user-event";
 import MeetingLabels from "./views/MeetingLabels";
 import SpeakerLabels from "./views/SpeakerLabels";
 import HistorySearch, { initialHistorySearch } from "./views/HistorySearch";
+import HistoryQuestions, {
+  type HistoryQuestionResult,
+} from "./views/HistoryQuestions";
 import type { DesktopApi, Meeting, SearchPage } from "./types";
 it.each([
   [
@@ -514,6 +517,56 @@ it("discards an in-flight answer when the transcript-only scope changes", async 
     }),
   );
   expect(await screen.findByText(/contain no supported answer/)).toBeTruthy();
+});
+
+it("clears an answer and removes an erased selected meeting even when that meeting was not cited", async () => {
+  const other = { ...meeting, id: "uncited", title: "Uncited meeting" };
+  const hidden = new Set<string>();
+  const initialResult: HistoryQuestionResult = {
+    question: "When is delivery?",
+    meetingIds: [meeting.id, other.id],
+    answer: {
+      searchedPassages: 2,
+      citations: [
+        {
+          meetingId: meeting.id,
+          meetingTitle: meeting.title,
+          sourceId: "audio/system-0.wav",
+          startMs: 0,
+          quote: "Delivery was confirmed in the first meeting.",
+        },
+      ],
+    },
+  };
+  const ask = vi.fn().mockResolvedValue({ searchedPassages: 0, citations: [] });
+  const props = {
+    ask,
+    locale: "en" as const,
+    model: { endpoint: "http://127.0.0.1:1235/v1/", model: "synthetic" },
+    invalidDates: false,
+    hiddenMeetingIds: hidden,
+    initialResult,
+    choices: [meeting, other],
+    onOpen: vi.fn(),
+  };
+  const view = render(<HistoryQuestions {...props} />);
+  expect(
+    screen.getByText(initialResult.answer.citations[0].quote),
+  ).toBeTruthy();
+  hidden.add(other.id);
+  view.rerender(<HistoryQuestions {...props} />);
+  expect(
+    screen.queryByText(initialResult.answer.citations[0].quote),
+  ).toBeNull();
+  hidden.delete(other.id);
+  view.rerender(<HistoryQuestions {...props} />);
+  expect(
+    screen.queryByText(initialResult.answer.citations[0].quote),
+  ).toBeNull();
+  await userEvent.click(screen.getByRole("button", { name: "Answer locally" }));
+  expect(ask).toHaveBeenCalledExactlyOnceWith(
+    expect.objectContaining({ meetingIds: [meeting.id] }),
+  );
 });
 
 it("loads verified audio only after a user requests the exact history result", async () => {

@@ -1,4 +1,9 @@
-import { act, render, screen } from "@testing-library/react";
+import {
+  act,
+  render,
+  screen,
+  waitForElementToBeRemoved,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { expect, it, vi } from "vitest";
 import type {
@@ -94,6 +99,102 @@ it("clears the previous copy receipt when a new copy is canceled or fails", asyn
   expect(screen.queryByText(/Encrypted profile verified/)).toBeNull();
   expect(screen.queryByText("synthetic/second")).toBeNull();
   expect(open).not.toHaveBeenCalled();
+});
+
+it("requests cancellation and keeps the copy busy until native cleanup finishes", async () => {
+  const readStatus = vi.fn().mockResolvedValue({
+    supported: true,
+    active: false,
+    provider: "windowsEfs",
+  });
+  let finish!: (reason: string) => void;
+  const create = vi.fn(
+    () =>
+      new Promise<ProtectedProfileReceipt>((_, reject) => (finish = reject)),
+  );
+  const cancel = vi.fn().mockResolvedValue(true);
+  render(
+    <ProtectedProfile
+      locale="en"
+      readStatus={readStatus}
+      create={create}
+      cancel={cancel}
+    />,
+  );
+  const user = userEvent.setup();
+  await user.click(screen.getByText("Encrypt session storage"));
+  const start = await screen.findByRole("button", {
+    name: "Create encrypted profile",
+  });
+  await user.click(start);
+  const stop = screen.getByRole("button", { name: "Cancel profile copy" });
+  await user.click(stop);
+  expect(cancel).toHaveBeenCalledTimes(1);
+  expect(stop).toHaveProperty("disabled", true);
+  expect(start).toHaveProperty("disabled", true);
+  expect(screen.getByRole("status").textContent).toBe(
+    "Cancelling profile copy …",
+  );
+  await act(async () => finish("Profile copy cancelled."));
+  expect(screen.getByRole("alert").textContent).toBe("Profile copy cancelled.");
+  expect(start).toHaveProperty("disabled", false);
+  expect(
+    screen.queryByRole("button", { name: "Cancel profile copy" }),
+  ).toBeNull();
+  expect(screen.queryByText(/Encrypted profile verified/)).toBeNull();
+});
+
+it("can cancel a profile copy after returning to settings", async () => {
+  let migration: "copying" | "cancelling" | null = null;
+  let completeCopy!: (receipt: ProtectedProfileReceipt | null) => void;
+  const readStatus = vi.fn(async () => ({
+    supported: true,
+    active: false,
+    provider: "windowsEfs" as const,
+    migration,
+  }));
+  const create = vi.fn(() => {
+    migration = "copying";
+    return new Promise<ProtectedProfileReceipt | null>((resolve) => {
+      completeCopy = resolve;
+    });
+  });
+  const cancel = vi.fn(async () => {
+    migration = "cancelling";
+    return true;
+  });
+  const settings = () => (
+    <ProtectedProfile
+      locale="en"
+      readStatus={readStatus}
+      create={create}
+      cancel={cancel}
+    />
+  );
+  const user = userEvent.setup();
+  const initial = render(settings());
+  await user.click(screen.getByText("Encrypt session storage"));
+  await user.click(
+    await screen.findByRole("button", { name: "Create encrypted profile" }),
+  );
+  initial.unmount();
+
+  render(settings());
+  await user.click(screen.getByText("Encrypt session storage"));
+  const stop = await screen.findByRole("button", {
+    name: "Cancel profile copy",
+  });
+  await user.click(stop);
+  expect(cancel).toHaveBeenCalledTimes(1);
+  expect(stop).toHaveProperty("disabled", true);
+  await act(async () => {
+    migration = null;
+    completeCopy(null);
+  });
+  await waitForElementToBeRemoved(stop);
+  expect(
+    screen.getByRole("button", { name: "Create encrypted profile" }),
+  ).toHaveProperty("disabled", false);
 });
 
 it("opens an existing profile without first creating a copy", async () => {

@@ -252,6 +252,7 @@ fn apply_response(
                 "Ungültiger neuer Meetingeintrag."
             );
         }
+        let due_was_omitted = c.due.is_none();
         if c.kind == "task" && old.is_none() {
             ensure!(
                 !c.evidence.iter().any(|e| task_missing_pledge(&e.quote)),
@@ -501,7 +502,7 @@ fn apply_response(
                             && (e.owner == c.owner
                                 || ((terminal_identity || same_task_witness) && c.owner.is_none()))
                             && (e.due == c.due
-                                || ((terminal_identity || same_task_witness) && c.due.is_none()))
+                                || ((terminal_identity || same_task_witness) && due_was_omitted))
                             && (e.evidence == c.evidence
                                 || terminal_identity
                                 || same_decision_witness

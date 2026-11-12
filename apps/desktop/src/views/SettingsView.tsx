@@ -248,6 +248,7 @@ export default function SettingsView({
             disabled={unavailable}
             readStatus={api.protectedProfileStatus}
             create={api.createProtectedProfile}
+            cancel={api.cancelProtectedProfileMigration}
             open={api.openProtectedProfile}
           />
         )}

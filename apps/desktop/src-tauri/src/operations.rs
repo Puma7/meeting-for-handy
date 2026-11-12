@@ -46,7 +46,7 @@ impl Kind {
 const BUSY: &str = "Another operation is still running. Wait for it to finish or cancel it first. / Ein anderer Vorgang läuft noch. Bitte zuerst abschließen oder abbrechen.";
 const QUESTION_CANCELLING: &str = "The meeting question is stopping for recording. Try again shortly. / Die Meetingfrage wird für die Aufnahme beendet. Bitte gleich erneut versuchen.";
 const SETUP_CANCELLING: &str = "The setup check is stopping for recording. Try again shortly. / Die Funktionsprobe wird für die Aufnahme beendet. Bitte gleich erneut versuchen.";
-pub(crate) const SETUP_CANCELLED: &str = "Recording and transcription have priority. Run the setup check again after they finish. / Aufnahme und Transkription haben Vorrang. Starte die Funktionsprobe danach erneut.";
+pub(crate) const SETUP_CANCELLED: &str = "The setup check was cancelled. Run it again when ready. / Die Funktionsprobe wurde abgebrochen. Du kannst sie erneut starten.";
 pub(crate) const RECORDING_PRIORITY: &str = "Recording and transcription have priority. Ask again when they finish. / Aufnahme und Transkription haben Vorrang. Stelle die Frage danach erneut.";
 const UNAVAILABLE: &str = "Operation control is unavailable; saved work is preserved. / Vorgangssteuerung ist gesperrt; gesicherte Daten bleiben erhalten.";
 const SETUP_CLEANUP_WAIT: Duration = Duration::from_secs(3);
@@ -85,6 +85,19 @@ impl Lease {
 }
 
 impl Gate {
+    pub(crate) fn cancel_setup(&self) -> Result<bool, String> {
+        let active = self.0.active.lock().map_err(|_| UNAVAILABLE)?;
+        let Some(control) = active
+            .iter()
+            .find(|work| work.kind == Kind::SetupProbe)
+            .and_then(|work| work.control.as_ref())
+        else {
+            return Ok(false);
+        };
+        control.cancel();
+        Ok(true)
+    }
+
     /// Reserve admission without waiting for mutex contention or conflicting work. The returned
     /// lease must span actual work, cancellation and cleanup.
     pub(crate) fn try_acquire(&self, kind: Kind) -> Result<Lease, String> {

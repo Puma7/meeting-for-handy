@@ -1,4 +1,10 @@
-import { act, render, screen } from "@testing-library/react";
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { expect, it, vi } from "vitest";
 import EncryptedBackup from "./EncryptedBackup";
@@ -74,6 +80,53 @@ it("requests cancellation of the active recovery without displaying a success re
   await screen.findByRole("button", { name: "Recover an encrypted meeting" });
   expect(screen.queryByText("Recovered profile")).toBeNull();
   expect(screen.queryByText("HANDYMEETING_DATA_DIR")).toBeNull();
+});
+
+it("retains the completed key through invalid, cancelled and failed replacement attempts", async () => {
+  const firstKey = "aa".repeat(32);
+  const secondKey = "bb".repeat(32);
+  const run = vi
+    .fn()
+    .mockResolvedValueOnce({ file: "first.hmvault", recoveryKey: firstKey })
+    .mockResolvedValueOnce(null)
+    .mockRejectedValueOnce(new Error("Synthetic write failure"))
+    .mockResolvedValueOnce({ file: "second.hmvault", recoveryKey: secondKey });
+  render(<EncryptedBackup locale="en" run={run} />);
+  fireEvent.click(
+    screen.getByText("Create an encrypted copy", { selector: "summary" }),
+  );
+  const submit = screen.getByRole("button", {
+    name: "Create an encrypted copy",
+  });
+  function submitCopy(repeat = "synthetic passphrase") {
+    fireEvent.change(screen.getByLabelText("Passphrase"), {
+      target: { value: "synthetic passphrase" },
+    });
+    fireEvent.change(screen.getByLabelText("Repeat passphrase"), {
+      target: { value: repeat },
+    });
+    fireEvent.click(submit);
+  }
+  submitCopy();
+  expect(await screen.findByDisplayValue(firstKey)).toBeTruthy();
+  submitCopy("different passphrase");
+  expect(screen.getByRole("alert").textContent).toMatch(/same passphrase/);
+  expect(run).toHaveBeenCalledTimes(1);
+  expect(screen.getByDisplayValue(firstKey)).toBeTruthy();
+  submitCopy();
+  await waitFor(() => expect(submit).toHaveProperty("disabled", false));
+  expect(run).toHaveBeenCalledTimes(2);
+  expect(screen.getByDisplayValue(firstKey)).toBeTruthy();
+  submitCopy();
+  expect(await screen.findByRole("alert")).toHaveProperty(
+    "textContent",
+    "Synthetic write failure",
+  );
+  expect(screen.getByText("first.hmvault")).toBeTruthy();
+  expect(screen.getByDisplayValue(firstKey)).toBeTruthy();
+  submitCopy();
+  expect(await screen.findByDisplayValue(secondKey)).toBeTruthy();
+  expect(screen.queryByDisplayValue(firstKey)).toBeNull();
 });
 
 it("clears a passphrase when switching to key recovery and submits only the chosen credential", async () => {

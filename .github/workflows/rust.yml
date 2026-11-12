@@ -294,6 +294,9 @@ jobs:
         run: rustup toolchain install 1.91.1 --profile minimal
       - name: Migrate synthetic sessions and reopen a detached encrypted copy
         run: cargo +1.91.1 test -p meeting-core --locked --lib archive::protected_profile::tests::native_volume_migrates_and_recovers_from_a_detached_ciphertext_copy -- --ignored --exact
+      - name: Reject and detach an owned Linux mount with the wrong access mode
+        if: runner.os == 'Linux'
+        run: cargo +1.91.1 test -p meeting-core --locked --lib archive::protected_profile::volume::platform::tests::native_rejected_readonly_mount_is_detached_and_can_be_reopened -- --ignored --exact
   portable-core:
     needs: plan
     if: needs.plan.outputs.packages != 'true'

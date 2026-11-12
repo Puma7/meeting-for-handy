@@ -251,6 +251,37 @@ fn a_mixed_german_fact_keeps_its_observation_and_separate_literal_decision() {
 }
 
 #[test]
+fn inferred_deadline_does_not_duplicate_an_existing_undated_task() {
+    let mut state = WorkspaceState::default();
+    let pledge = source(
+        "s_guide",
+        0,
+        "I will send the guide by September 23rd, 2026.",
+    );
+    let proposal = answer(json!([{
+        "proposalId":"p_guide","kind":"task","text":"Send the guide",
+        "status":"open","attention":"current","due":null,
+        "evidence":[{"sourceId":pledge.id,"quote":pledge.text}]
+    }]));
+    let first = request(&state, "live_update", &pledge);
+    validate::apply(&mut state, &first, &proposal).unwrap();
+    let old = state.entities[0].clone();
+    assert_eq!(old.due, None);
+
+    let repeat = request(&state, "tasks", &pledge);
+    let mut fresh = WorkspaceState::default();
+    let first_with_inference = request(&fresh, "tasks", &pledge);
+    validate::apply(&mut fresh, &first_with_inference, &proposal).unwrap();
+    assert_eq!(
+        fresh.entities[0].due.as_deref(),
+        Some("September 23rd, 2026")
+    );
+
+    validate::apply(&mut state, &repeat, &proposal).unwrap();
+    assert_eq!(state.entities, vec![old]);
+}
+
+#[test]
 fn an_explicit_completion_matches_a_task_title_that_echoes_its_deadline() {
     let mut state = WorkspaceState::default();
     let promise = source(

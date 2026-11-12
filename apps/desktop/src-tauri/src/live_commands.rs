@@ -2,7 +2,7 @@
 use crate::live_notes::{LiveNotesRequest, LiveNotesStatus};
 use crate::local_models::{LocalModelSetup, PullProgress};
 use crate::{blocking, AppResult, Service};
-use std::sync::Arc;
+use std::{collections::HashMap, sync::Arc};
 use tauri::State;
 
 /// Resolve only a validated native session; callers keep its publication lease throughout the read.
@@ -60,10 +60,6 @@ pub(crate) async fn export_workspace_results(
         let _publication = meeting_core::archive::source_publication_lease(&service.root)
             .map_err(|e| e.to_string())?;
         let folder = crate::meeting_files::session_folder(&service.root, &meeting_id)?;
-        let data = service.data(&meeting_id)?;
-        if data.read_only || data.id != meeting_id {
-            return Err("Diese Sitzung ist schreibgeschützt. / This session is read-only.".into());
-        }
         let view = service
             .live_notes
             .status_with_preference(&service, &meeting_id, true)?
@@ -71,7 +67,11 @@ pub(crate) async fn export_workspace_results(
             .filter(|view| view.run_id.as_deref() == Some(run_id.as_str()))
             .and_then(|view| view.workspace)
             .ok_or("Der Auswertungsstand hat sich geändert. / The analysis changed.")?;
-        let results = workspace_export(&meeting_id, &run_id, &view);
+        let data = service.data(&meeting_id)?;
+        if data.read_only || data.id != meeting_id {
+            return Err("Diese Sitzung ist schreibgeschützt. / This session is read-only.".into());
+        }
+        let results = workspace_export(&meeting_id, &run_id, &view, &data);
         let bytes = serde_json::to_vec_pretty(&results).map_err(|_| {
             "Auswertung konnte nicht exportiert werden. / Could not export the analysis."
         })?;
@@ -84,13 +84,14 @@ fn workspace_export(
     meeting_id: &str,
     run_id: &str,
     view: &meeting_notes::workspace::WorkspaceState,
+    data: &meeting_core::SessionData,
 ) -> serde_json::Value {
-    let current: std::collections::HashMap<_, _> = view
-        .originals
+    let current_sources = meeting_notes::live::pending(&[], &crate::live_notes::live_texts(data).0);
+    let current: HashMap<_, _> = current_sources
         .iter()
-        .filter(|source| !view.superseded_sources.contains(&source.id))
-        .map(|source| (&source.id, &source.text))
+        .map(|source| ((source.key.as_str(), source.chunk), source))
         .collect();
+    let mut verified = HashMap::new();
     let confirmed = view.current_confirmations();
     let entries: Vec<_> = view
         .entities
@@ -99,10 +100,21 @@ fn workspace_export(
         .filter(|entry| {
             !entry.evidence.is_empty()
                 && entry.evidence.iter().all(|evidence| {
+                    let source = verified
+                        .entry(evidence.source_id.as_str())
+                        .or_insert_with(|| {
+                            // The saved identifier binds the quote to its original transcript chunk.
+                            // A stale workspace may not yet have marked a recognized revision superseded.
+                            let saved = view.audio_source(&evidence.source_id)?;
+                            let latest = current.get(&(saved.key.as_str(), saved.chunk))?;
+                            (latest.source == saved.source
+                                && latest.start_ms == saved.start_ms
+                                && latest.end_ms == saved.end_ms
+                                && latest.text == saved.text)
+                                .then_some(saved)
+                        });
                     !evidence.quote.trim().is_empty()
-                        && current
-                            .get(&evidence.source_id)
-                            .is_some_and(|text| text.contains(&evidence.quote))
+                        && source.is_some_and(|source| source.text.contains(&evidence.quote))
                 })
         })
         .map(|entry| {
@@ -121,15 +133,57 @@ fn workspace_export(
 }
 
 #[test]
-fn export_preserves_confirmed_revision_and_omits_superseded_evidence() {
+fn export_preserves_confirmed_revision_and_rejects_a_new_transcript_version() {
+    use meeting_core::{PcmWriter, SessionStore, TranscriptCheckpoint, SAMPLE_RATE};
     use meeting_notes::workspace::{Entity, Event, WorkspaceState};
+    use sha2::{Digest, Sha256};
+
+    const ORIGINAL: &str = "We selected the blue room.";
+    let profile = crate::test_profile::TestProfile::new().unwrap();
+    let store = SessionStore::create(
+        profile.path(),
+        "Synthetic export meeting",
+        "synthetic-model",
+        "system",
+        Some("mic"),
+    )
+    .unwrap();
+    for track in ["system", "microphone"] {
+        let mut writer = PcmWriter::new(store.clone(), track).unwrap();
+        writer.append(&vec![1000; SAMPLE_RATE as usize]).unwrap();
+        writer.finish().unwrap();
+    }
+    let recorded = store.snapshot().unwrap();
+    let write_text = |part: &meeting_core::AudioPart, text: &str, revision_after_restart| {
+        store
+            .append_transcript(TranscriptCheckpoint {
+                sequence: 0,
+                at: String::new(),
+                file: part.file.clone(),
+                model_id: "synthetic-model".into(),
+                full: text.into(),
+                committed: text.into(),
+                tentative: String::new(),
+                processed_samples: part.confirmed_sample_count,
+                final_text: true,
+                revision_after_restart,
+            })
+            .unwrap();
+    };
+    for part in &recorded.parts {
+        write_text(part, ORIGINAL, false);
+    }
+    let original = store.snapshot().unwrap();
+    let source = meeting_notes::live::pending(&[], &crate::live_notes::live_texts(&original).0)
+        .into_iter()
+        .find(|source| source.source == "system")
+        .unwrap();
+    let hash = Sha256::digest(format!("{}\0{}", source.id, source.text));
+    let source_id = format!("s_{}", &format!("{hash:x}")[..16]);
     let mut view = WorkspaceState::default();
     view.originals.push(meeting_notes::Source {
-        id: "C1".into(),
-        source: "system".into(),
-        start_ms: 0,
-        end_ms: 1_000,
-        text: "We selected the blue room.".into(),
+        id: source_id.clone(),
+        ..source.as_source()
     });
     view.entities.push(Entity {
         id: "decision1".into(),
@@ -142,8 +196,8 @@ fn export_preserves_confirmed_revision_and_omits_superseded_evidence() {
         due: None,
         human_locked: true,
         evidence: vec![meeting_notes::Evidence {
-            source_id: "C1".into(),
-            quote: "We selected the blue room.".into(),
+            source_id: source_id.clone(),
+            quote: ORIGINAL.into(),
         }],
     });
     view.events.push(Event {
@@ -156,16 +210,40 @@ fn export_preserves_confirmed_revision_and_omits_superseded_evidence() {
         status: "confirmed".into(),
         evidence: view.entities[0].evidence.clone(),
     });
-    let exported = workspace_export("synthetic", "run", &view);
+    // Fixture for a workspace generation that has already recorded and confirmed the old source.
+    let mut stored = serde_json::to_value(&view).unwrap();
+    stored["processed"] = serde_json::json!([source]);
+    let mut view: WorkspaceState = serde_json::from_value(stored).unwrap();
+    let export = |view: &WorkspaceState, data: &meeting_core::SessionData| {
+        workspace_export(&original.id, "run", view, data)
+    };
+    let exported = export(&view, &original);
     assert_eq!(exported["entries"][0]["review"], "confirmed");
     assert_eq!(exported["entries"][0]["entry"]["status"], "recorded");
+    let system = original
+        .parts
+        .iter()
+        .find(|part| part.source == "system")
+        .unwrap();
+    write_text(system, "We selected the red room.", true);
+    let revised = store.snapshot().unwrap();
+    assert!(view.current_confirmations().contains_key("decision1"));
+    assert!(revised
+        .parts
+        .iter()
+        .any(|part| part.source == "microphone" && part.text.as_deref() == Some(ORIGINAL)));
+    assert!(export(&view, &revised)["entries"]
+        .as_array()
+        .unwrap()
+        .is_empty());
+
     view.entities[0].revision = 3;
     assert_eq!(
-        workspace_export("synthetic", "run", &view)["entries"][0]["review"],
+        export(&view, &original)["entries"][0]["review"],
         "status-edited"
     );
-    view.superseded_sources.push("C1".into());
-    assert!(workspace_export("synthetic", "run", &view)["entries"]
+    view.superseded_sources.push(source_id);
+    assert!(export(&view, &original)["entries"]
         .as_array()
         .unwrap()
         .is_empty());

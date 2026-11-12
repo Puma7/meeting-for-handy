@@ -1,7 +1,8 @@
 //! Owns an unlocked encrypted volume and prevents writes to its mountpoint after detachment.
 use super::{
-    checked_root, copy_profile, metadata, migration_paths, reject_link, verify_marked, Protection,
-    Receipt, DIRECTORY_PREFIX, VAULT_MARKER,
+    checked_root, copy_profile, finish_stage, metadata, migration_paths, reject_link,
+    verify_marked, verify_marker, write_profile_marker, MigrationControl, Protection, Receipt,
+    DIRECTORY_PREFIX, VAULT_MARKER,
 };
 use crate::Result;
 use std::{
@@ -188,6 +189,16 @@ fn verify_vault_marker(vault: &Path) -> Result<()> {
 }
 
 pub fn migrate_volume(source: &Path, parent: &Path, password: &str) -> Result<Receipt> {
+    migrate_volume_cancellable(source, parent, password, &MigrationControl::default())
+}
+
+pub fn migrate_volume_cancellable(
+    source: &Path,
+    parent: &Path,
+    password: &str,
+    control: &MigrationControl,
+) -> Result<Receipt> {
+    control.check()?;
     validate_password(password, true)?;
     if !available() {
         return Err(UNAVAILABLE.into());
@@ -203,34 +214,42 @@ pub fn migrate_volume(source: &Path, parent: &Path, password: &str) -> Result<Re
     stage.disable_cleanup(true);
     let vault = stage.path();
     platform::create(vault, password).map_err(|error| retained_stage(vault, error))?;
+    if let Err(error) = control.check() {
+        drop(use_lock);
+        stage.disable_cleanup(false);
+        return finish_stage(stage, Err(error)).map(|(_, value)| value);
+    }
     let mounted = MountedVolume::attach(vault, password, use_lock)
         .map_err(|error| retained_stage(vault, error))?;
     let copied = (|| -> Result<_> {
+        control.check()?;
         fs::create_dir(mounted.root())?;
-        let copied = copy_profile(
-            &source,
-            mounted.root(),
-            &mounted.protection,
-            PROFILE_MARKER_CONTENT,
-        )?;
-        mounted.verify()?;
+        let copied = copy_profile(&source, mounted.root(), &mounted.protection, control)?;
+        control.check()?;
+        mounted.check_attachment()?;
+        write_profile_marker(mounted.root(), &mounted.protection, PROFILE_MARKER_CONTENT)?;
+        verify_marker(mounted.root(), &mounted.protection, PROFILE_MARKER_CONTENT)?;
         Ok(copied)
     })();
     mounted
         .unmount()
         .map_err(|error| retained_stage(vault, error))?;
     stage.disable_cleanup(false);
-    let (files, bytes) = copied?;
-    let vault = stage.path();
-    // Publish the outer marker only after all writes and a normal unmount succeed.
-    let mut marker = OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .mode(0o600)
-        .open(vault.join(VAULT_MARKER))?;
-    marker.write_all(VAULT_MARKER_CONTENT)?;
-    marker.sync_all()?;
-    File::open(vault)?.sync_all()?;
+    let result = copied.and_then(|copied| {
+        control.begin_publication()?;
+        let vault = stage.path();
+        // Publish the outer marker only after all writes and a normal unmount succeed.
+        let mut marker = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .open(vault.join(VAULT_MARKER))?;
+        marker.write_all(VAULT_MARKER_CONTENT)?;
+        marker.sync_all()?;
+        File::open(vault)?.sync_all()?;
+        Ok(copied)
+    });
+    let (stage, (files, bytes)) = finish_stage(stage, result)?;
     Ok(Receipt {
         path: stage.keep(),
         files,

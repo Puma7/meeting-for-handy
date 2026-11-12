@@ -2051,6 +2051,80 @@ describe("template structure", () => {
 });
 
 describe("workspace navigation (synthetic IPC)", () => {
+  it("preserves a completed backup receipt only for its meeting after navigating away", async () => {
+    const other = {
+      ...meeting,
+      id: "other-synthetic-session",
+      title: "Another meeting",
+    };
+    const api = fakeApi();
+    api.listMeetings = vi.fn().mockResolvedValue([meeting, other]);
+    api.getMeeting = vi.fn(async (id: string) =>
+      id === meeting.id ? meeting : other,
+    );
+    type Receipt = NonNullable<
+      Awaited<ReturnType<NonNullable<DesktopApi["createEncryptedBackup"]>>>
+    >;
+    let finish!: (receipt: Receipt) => void;
+    const pending = new Promise<Receipt>((resolve) => {
+      finish = resolve;
+    });
+    api.createEncryptedBackup = vi.fn(() => pending);
+    const key = "af".repeat(32);
+    const file = "synthetic-a.hmvault";
+    render(<App api={api} />);
+    await ready();
+    async function openDetail(title: string) {
+      await userEvent.click(screen.getByRole("button", { name: "Historie" }));
+      const row = (await screen.findByText(title)).closest(
+        ".session-row",
+      ) as HTMLElement;
+      await userEvent.click(
+        within(row).getByRole("button", { name: "Öffnen" }),
+      );
+      await userEvent.click(
+        await screen.findByText("Verschlüsselte Kopie erstellen", {
+          selector: "summary",
+        }),
+      );
+    }
+    await openDetail(meeting.title);
+    fireEvent.change(screen.getByLabelText("Passphrase"), {
+      target: { value: "synthetic passphrase" },
+    });
+    fireEvent.change(screen.getByLabelText("Passphrase wiederholen"), {
+      target: { value: "synthetic passphrase" },
+    });
+    await userEvent.click(
+      screen.getByRole("button", { name: "Verschlüsselte Kopie erstellen" }),
+    );
+    expect(api.createEncryptedBackup).toHaveBeenCalledExactlyOnceWith(
+      meeting.id,
+      "synthetic passphrase",
+    );
+    await openDetail(other.title);
+    await act(async () =>
+      finish({
+        file,
+        recoveryKey: key,
+        summary: { meetingId: meeting.id, files: 1, bytes: 1 },
+      }),
+    );
+    expect(screen.queryByDisplayValue(key)).toBeNull();
+    expect(screen.queryByText(file)).toBeNull();
+    await openDetail(meeting.title);
+    expect(screen.getByDisplayValue(key)).toBeTruthy();
+    expect(screen.getByText(file)).toBeTruthy();
+    await userEvent.click(
+      screen.getByRole("button", { name: "Schlüssel ausblenden" }),
+    );
+    await openDetail(other.title);
+    await openDetail(meeting.title);
+    expect(screen.queryByDisplayValue(key)).toBeNull();
+    expect(screen.getByText(file)).toBeTruthy();
+    expect(Object.values(localStorage).join(" ")).not.toContain(key);
+  });
+
   it("opens the verified original and keeps the answer when returning to check other citations", async () => {
     localStorage.setItem(
       "handymeeting.rust.live-notes.v1",

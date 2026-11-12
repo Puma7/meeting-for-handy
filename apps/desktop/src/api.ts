@@ -120,12 +120,15 @@ export const desktopApi: DesktopApi = {
       "create_protected_profile",
       passphrase === undefined ? undefined : { passphrase },
     ),
+  cancelProtectedProfileMigration: () =>
+    desktopInvoke("cancel_protected_profile_migration"),
   openProtectedProfile: (passphrase) =>
     desktopInvoke(
       "open_protected_profile",
       passphrase === undefined ? undefined : { passphrase },
     ),
   checkMeetingSetup: (request) => jobInvoke("check_meeting_setup", { request }),
+  cancelMeetingSetup: () => desktopInvoke("cancel_meeting_setup"),
   rebuildSearchIndex: () => jobInvoke("rebuild_search_index"),
   getLibraryProgress: () => desktopInvoke("get_library_progress"),
   cancelLibraryJob: (jobId) => desktopInvoke("cancel_library_job", { jobId }),

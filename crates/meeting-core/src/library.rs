@@ -66,7 +66,8 @@ pub struct SearchScope {
 }
 
 impl SearchScope {
-    fn validate(&self) -> Result<()> {
+    /// Validate date boundaries before either indexed search or its empty-storage fast path.
+    pub fn validate(&self) -> Result<()> {
         if [self.from_ms, self.before_ms]
             .into_iter()
             .flatten()

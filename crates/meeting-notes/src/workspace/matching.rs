@@ -217,6 +217,15 @@ pub(super) fn calendar_task_matches(title: &str, quote: &str) -> bool {
     let another_assignment = (0..trailing.len().saturating_sub(1)).any(|index| {
         let fragment = &trailing[index..trailing.len().min(index + 4)];
         present_assignment_quote(&fragment.join(" "))
+            || (!german
+                && fragment
+                    .iter()
+                    .position(|word| word.eq_ignore_ascii_case("will"))
+                    .is_some_and(|offset| {
+                        let auxiliary = index + offset;
+                        auxiliary + 1 < trailing.len()
+                            && finite_subject_before(trailing_lower, trailing, index, auxiliary)
+                    }))
             || (german
                 && fragment.len() >= 3
                 && trailing_lower[index + 1]
@@ -261,6 +270,11 @@ fn calendar_task_deadline_requires_its_own_action_and_object() {
             "Review the guide",
             "I will review the guide by September 23rd 2026.",
             true,
+        ),
+        (
+            "Send the guide",
+            "I will send the guide Jane will review the guide by September 23rd 2026.",
+            false,
         ),
     ] {
         assert_eq!(

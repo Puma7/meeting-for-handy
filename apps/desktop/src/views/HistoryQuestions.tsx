@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { ArrowRight } from "lucide-react";
 import { errorMessage } from "../api";
 import { clock } from "../domain";
@@ -21,6 +21,16 @@ export type HistoryQuestionResult = {
   answer: HistoryAnswer;
   meetingIds: string[];
 };
+
+export function historyQuestionUsesMeeting(
+  result: HistoryQuestionResult,
+  matches: (id: string) => boolean,
+) {
+  return (
+    result.meetingIds.some(matches) ||
+    result.answer.citations.some((hit) => matches(hit.meetingId))
+  );
+}
 
 export default function HistoryQuestions({
   ask,
@@ -47,14 +57,27 @@ export default function HistoryQuestions({
 }) {
   const de = locale === "de";
   const [question, setQuestion] = useState(initialResult?.question ?? "");
-  const [answer, setAnswer] = useState<HistoryAnswer | null>(
-    initialResult?.answer ?? null,
+  const [answer, setAnswer] = useState<HistoryQuestionResult | null>(
+    initialResult ?? null,
   );
   const [initiallyOpen] = useState(Boolean(initialResult));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [selection, setSelection] = useState(initialResult?.meetingIds ?? []);
+  const [selectedIds, setSelection] = useState(initialResult?.meetingIds ?? []);
   const [findMeeting, setFindMeeting] = useState("");
+  const selection = selectedIds.filter((id) => !hiddenMeetingIds?.has(id));
+  const selectionRemoved = selection.length !== selectedIds.length;
+  const answerRemoved = Boolean(
+    answer &&
+      historyQuestionUsesMeeting(answer, (id) =>
+        Boolean(hiddenMeetingIds?.has(id)),
+      ),
+  );
+  useEffect(() => {
+    if (selectionRemoved)
+      setSelection((ids) => ids.filter((id) => !hiddenMeetingIds?.has(id)));
+    if (answerRemoved) setAnswer(null);
+  }, [selectionRemoved, answerRemoved, hiddenMeetingIds]);
   const candidates = choices?.filter(
     (meeting) =>
       !hiddenMeetingIds?.has(meeting.id) &&
@@ -68,11 +91,8 @@ export default function HistoryQuestions({
       .slice(0, 12),
   ];
   const meetingIds = meetingId ? [meetingId] : selection;
-  const visible = answer?.citations.some((hit) =>
-    hiddenMeetingIds?.has(hit.meetingId),
-  )
-    ? null
-    : answer;
+  const visibleResult = answerRemoved ? null : answer;
+  const visible = visibleResult?.answer;
   return (
     <details className="history-questions" open={initiallyOpen}>
       <summary>
@@ -92,14 +112,13 @@ export default function HistoryQuestions({
           setError(null);
           setAnswer(null);
           try {
-            setAnswer(
-              await ask({
-                ...model,
-                question: question.trim(),
-                scope,
-                ...(meetingIds.length ? { meetingIds } : {}),
-              }),
-            );
+            const response = await ask({
+              ...model,
+              question: question.trim(),
+              scope,
+              ...(meetingIds.length ? { meetingIds } : {}),
+            });
+            setAnswer({ question, answer: response, meetingIds });
           } catch (failure) {
             setError(errorMessage(failure));
           } finally {
@@ -232,8 +251,8 @@ export default function HistoryQuestions({
             : "The retrieved passages contain no supported answer."}
         </p>
       )}
-      {visible &&
-        visible.citations.map((hit, index) => (
+      {visibleResult &&
+        visibleResult.answer.citations.map((hit, index) => (
           <article
             className="session-row"
             key={`${hit.meetingId}:${hit.sourceId}:${index}`}
@@ -247,9 +266,7 @@ export default function HistoryQuestions({
             <button
               type="button"
               className="secondary"
-              onClick={() =>
-                onOpen(hit, { question, answer: visible, meetingIds })
-              }
+              onClick={() => onOpen(hit, visibleResult)}
             >
               <ArrowRight size={15} aria-hidden="true" />
               {de ? "Originalstelle öffnen" : "Open original passage"}
