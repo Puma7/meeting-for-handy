@@ -1186,9 +1186,9 @@ pub fn run() {
     use tauri_plugin_dialog::DialogExt;
     let args: Vec<_> = std::env::args_os().skip(1).collect();
     let prepared = desktop_service(&args).map(Arc::new);
-    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    #[cfg(any(windows, target_os = "linux", target_os = "macos"))]
     let managed_startup = protected_profile::managed_startup(&args);
-    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    #[cfg(any(windows, target_os = "linux", target_os = "macos"))]
     if managed_startup && prepared.is_err() {
         protected_profile::report_failure();
         return;
@@ -1238,7 +1238,7 @@ pub fn run() {
             });
             if window.is_err() {
                 let handle = app.handle().clone();
-                #[cfg(any(target_os = "linux", target_os = "macos"))]
+                #[cfg(any(windows, target_os = "linux", target_os = "macos"))]
                 if managed_startup {
                     protected_profile::report_failure();
                     handle.exit(1);
@@ -1248,7 +1248,7 @@ pub fn run() {
                     .title("Meeting for Handy").show(move |_| handle.exit(1));
                 return Ok(());
             }
-            #[cfg(any(target_os = "linux", target_os = "macos"))]
+            #[cfg(any(windows, target_os = "linux", target_os = "macos"))]
             if managed_startup && !protected_profile::acknowledge_window() {
                 // The parent timed out or closed. Exit through normal protected teardown.
                 app.handle().exit(1);

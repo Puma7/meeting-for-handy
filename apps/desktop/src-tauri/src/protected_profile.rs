@@ -2,14 +2,18 @@
 use crate::{blocking, operations::Kind, AppResult, Service};
 use meeting_core::archive::protected_profile as storage;
 use serde::Serialize;
-use std::{ffi::OsString, path::PathBuf, sync::Arc};
+use std::{
+    ffi::OsString,
+    path::PathBuf,
+    sync::{Arc, Mutex},
+};
 use tauri::{AppHandle, State};
 use tauri_plugin_dialog::DialogExt;
 use zeroize::Zeroizing;
 
-#[cfg(any(target_os = "linux", target_os = "macos"))]
+#[cfg(any(windows, target_os = "linux", target_os = "macos"))]
 mod startup;
-#[cfg(any(target_os = "linux", target_os = "macos"))]
+#[cfg(any(windows, target_os = "linux", target_os = "macos"))]
 pub(super) use startup::{acknowledge_window, managed_startup, report_failure};
 
 #[derive(Serialize)]
@@ -68,33 +72,41 @@ pub(crate) async fn open_protected_profile(
     let passphrase = passphrase.map(Zeroizing::new);
     blocking(move || {
         let _admission = service.reserve_operation(Kind::Maintenance)?;
-        let recent = service
-            .protected_profile_copy
-            .lock()
-            .map_err(|_| "Protected profile state is unavailable")?
-            .clone();
-        let path = match recent {
-            Some(path) => path,
-            None => {
-                let Some(path) = app
-                    .dialog()
-                    .file()
-                    .set_title("Geschütztes Profil auswählen / Choose the protected profile")
-                    .blocking_pick_folder()
-                else {
-                    return Ok(false);
-                };
-                path.into_path().map_err(|_| "Choose a local folder.")?
-            }
+        let Some(path) = profile_to_open(&service.protected_profile_copy, || {
+            let Some(path) = app
+                .dialog()
+                .file()
+                .set_title("Geschütztes Profil auswählen / Choose the protected profile")
+                .blocking_pick_folder()
+            else {
+                return Ok(None);
+            };
+            Ok(Some(
+                path.into_path().map_err(|_| "Choose a local folder.")?,
+            ))
+        })?
+        else {
+            return Ok(false);
         };
         launch(path, passphrase)?;
-        *service
-            .protected_profile_copy
-            .lock()
-            .map_err(|_| "Protected profile state is unavailable")? = None;
         Ok(true)
     })
     .await
+}
+
+fn profile_to_open(
+    recent_copy: &Mutex<Option<PathBuf>>,
+    choose: impl FnOnce() -> AppResult<Option<PathBuf>>,
+) -> AppResult<Option<PathBuf>> {
+    // Offer the newly created copy once. A failed launch must let the user choose again.
+    let recent = recent_copy
+        .lock()
+        .map_err(|_| "Protected profile state is unavailable")?
+        .take();
+    match recent {
+        Some(path) => Ok(Some(path)),
+        None => choose(),
+    }
 }
 
 #[cfg(any(target_os = "linux", target_os = "macos"))]
@@ -112,14 +124,19 @@ fn launch(path: PathBuf, passphrase: Option<Zeroizing<String>>) -> AppResult<()>
     command.arg("--protected-profile").arg(&path);
     #[cfg(any(target_os = "linux", target_os = "macos"))]
     {
-        startup::launch(command, required_passphrase(passphrase.as_ref())?)
+        command.arg("--password-stdin");
+        startup::launch(command, Some(required_passphrase(passphrase.as_ref())?))
     }
-    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+    #[cfg(windows)]
     {
         drop(passphrase);
         storage::verify(&path).map_err(|error| error.to_string())?;
-        command.spawn().map_err(|_| START_FAILED)?;
-        Ok(())
+        startup::launch(command, None)
+    }
+    #[cfg(not(any(windows, target_os = "linux", target_os = "macos")))]
+    {
+        drop(passphrase);
+        Err(START_FAILED.into())
     }
 }
 
@@ -142,6 +159,10 @@ pub(crate) fn launch_path(args: &[OsString]) -> AppResult<Option<PathBuf>> {
         [_, path, flag, rest @ ..] if flag == "--password-stdin"
             && (rest.is_empty() || matches!(rest, [ack] if ack == startup::FLAG))
             && std::path::Path::new(path).is_absolute() => Ok(Some(PathBuf::from(path))),
+        #[cfg(windows)]
+        [_, path, flag] if flag == startup::FLAG && std::path::Path::new(path).is_absolute() => {
+            Ok(Some(PathBuf::from(path)))
+        }
         #[cfg(not(any(target_os = "linux", target_os = "macos")))]
         [_, path] if std::path::Path::new(path).is_absolute() => Ok(Some(PathBuf::from(path))),
         _ => Err("Open the encrypted profile from Settings or specify its absolute path and the required unlock method. / Verschlüsseltes Profil über die Einstellungen öffnen oder den absoluten Pfad samt Entsperrmethode angeben.".into()),
@@ -151,6 +172,20 @@ pub(crate) fn launch_path(args: &[OsString]) -> AppResult<Option<PathBuf>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_automatic_copy_is_offered_once_even_without_a_successful_launch() {
+        let stale = PathBuf::from("moved-protected-copy");
+        let recovered = PathBuf::from("available-protected-copy");
+        let recent = Mutex::new(Some(stale.clone()));
+        let first = profile_to_open(&recent, || panic!("only offer the automatic copy"));
+        assert_eq!(first.unwrap(), Some(stale));
+        assert_eq!(
+            profile_to_open(&recent, || Ok(Some(recovered.clone()))).unwrap(),
+            Some(recovered)
+        );
+        assert_eq!(profile_to_open(&recent, || Ok(None)).unwrap(), None);
+    }
 
     #[test]
     fn explicit_launch_requires_one_absolute_profile_path() {
@@ -164,7 +199,7 @@ mod tests {
             launch_path(&args).unwrap().as_deref(),
             Some(absolute.as_path())
         );
-        #[cfg(any(target_os = "linux", target_os = "macos"))]
+        #[cfg(any(windows, target_os = "linux", target_os = "macos"))]
         {
             assert!(!managed_startup(&args));
             args.push(startup::FLAG.into());

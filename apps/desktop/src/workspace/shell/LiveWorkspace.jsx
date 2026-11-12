@@ -1643,6 +1643,34 @@ function LivePanel({
     Math.max(1, view.count || 5),
   );
   if (panel === "impulses") items = items.slice(0, impulseLimit);
+  const visibleEntries = new Map(items.map((item) => [item.id, item]));
+  const confirmed = new Set();
+  for (const event of workspace?.events || []) {
+    const item = visibleEntries.get(event.entityId);
+    if (
+      !item?.humanLocked ||
+      !event.human ||
+      event.status !== "confirmed" ||
+      event.text !== item.text ||
+      !item.evidence?.length ||
+      event.evidence?.length !== item.evidence.length ||
+      workspace?.contextExcludedIds?.includes(item.id) ||
+      !item.evidence.every(
+        (e, index) =>
+          e.sourceId === event.evidence[index].sourceId &&
+          e.quote === event.evidence[index].quote &&
+          !workspace?.supersededSources?.includes(e.sourceId),
+      )
+    )
+      continue;
+    const binding = workspace?.inheritedConfirmations?.[item.id];
+    if (
+      binding?.revision === item.revision
+        ? binding.eventId === event.id
+        : event.revision === item.revision
+    )
+      confirmed.add(item.id);
+  }
   const needle = (view.query || "").trim().toLocaleLowerCase();
   const transcript = (meeting.parts || [])
     .map((part) => {
@@ -1993,13 +2021,7 @@ function LivePanel({
                       </Status>
                     </div>
                     <span className="result-origin">
-                      {workspace?.events?.some(
-                        (e) =>
-                          e.human &&
-                          e.status === "confirmed" &&
-                          e.entityId === item.id &&
-                          e.revision === item.revision,
-                      )
+                      {confirmed.has(item.id)
                         ? language === "de"
                           ? "Inhalt bestätigt"
                           : "Content confirmed"
@@ -2029,13 +2051,7 @@ function LivePanel({
                           !workspace?.supersededSources?.includes(e.sourceId),
                       ) &&
                       !workspace?.contextExcludedIds?.includes(item.id) &&
-                      !workspace?.events?.some(
-                        (e) =>
-                          e.human &&
-                          e.status === "confirmed" &&
-                          e.entityId === item.id &&
-                          e.revision === item.revision,
-                      ) && (
+                      !confirmed.has(item.id) && (
                         <button
                           type="button"
                           className="subtle-button"

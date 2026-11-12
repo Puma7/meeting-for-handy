@@ -91,12 +91,7 @@ fn workspace_export(
         .filter(|source| !view.superseded_sources.contains(&source.id))
         .map(|source| (&source.id, &source.text))
         .collect();
-    let confirmed: std::collections::HashSet<_> = view
-        .events
-        .iter()
-        .filter(|event| event.human && event.status == "confirmed")
-        .map(|event| (&event.entity_id, event.revision))
-        .collect();
+    let confirmed = view.current_confirmations();
     let entries: Vec<_> = view
         .entities
         .iter()
@@ -111,7 +106,7 @@ fn workspace_export(
                 })
         })
         .map(|entry| {
-            let review = if confirmed.contains(&(&entry.id, entry.revision)) {
+            let review = if confirmed.contains_key(entry.id.as_str()) {
                 "confirmed"
             } else if entry.human_locked {
                 "status-edited"

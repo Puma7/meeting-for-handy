@@ -1,6 +1,7 @@
 use crate::{Evidence, Source};
 use anyhow::{ensure, Result};
 use serde::{Deserialize, Serialize};
+use std::collections::{BTreeMap, HashMap};
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -108,6 +109,15 @@ pub struct Event {
     pub status: String,
     pub evidence: Vec<Evidence>,
 }
+
+/// Associate a destination revision with its immutable source confirmation, if any.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct InheritedConfirmation {
+    pub(crate) revision: u64,
+    pub(crate) event_id: Option<String>,
+}
+
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct WorkspaceState {
@@ -131,6 +141,8 @@ pub struct WorkspaceState {
     pub context: WorkspaceContext,
     pub entities: Vec<Entity>,
     pub events: Vec<Event>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub(crate) inherited_confirmations: BTreeMap<String, InheritedConfirmation>,
     pub overview_refs: Vec<String>,
     pub originals: Vec<Source>,
     #[serde(skip_serializing)]
@@ -139,6 +151,41 @@ pub struct WorkspaceState {
     pub(crate) inherited_sources: Vec<crate::live::LiveSource>,
 }
 impl WorkspaceState {
+    /// Resolve only exact, current human confirmations. Inherited revisions use the
+    /// original event identity, while older journals retain their direct revision match.
+    pub fn current_confirmations(&self) -> HashMap<&str, &Event> {
+        let entries: HashMap<_, _> = self
+            .entities
+            .iter()
+            .filter(|entry| {
+                entry.human_locked
+                    && !self.context_excluded_ids.contains(&entry.id)
+                    && !entry.evidence.is_empty()
+                    && entry
+                        .evidence
+                        .iter()
+                        .all(|evidence| !self.superseded_sources.contains(&evidence.source_id))
+            })
+            .map(|entry| (entry.id.as_str(), entry))
+            .collect();
+        self.events
+            .iter()
+            .filter(|event| event.human && event.status == "confirmed")
+            .filter_map(|event| {
+                let entry = entries.get(event.entity_id.as_str())?;
+                let exact_revision = self
+                    .inherited_confirmations
+                    .get(&entry.id)
+                    .filter(|binding| binding.revision == entry.revision)
+                    .map_or(event.revision == entry.revision, |binding| {
+                        binding.event_id.as_ref() == Some(&event.id)
+                    });
+                (exact_revision && event.text == entry.text && event.evidence == entry.evidence)
+                    .then_some((entry.id.as_str(), event))
+            })
+            .collect()
+    }
+
     /// Resolve a current original to its internal transcript chunk without exposing its file key.
     pub fn audio_source(&self, id: &str) -> Option<&crate::live::LiveSource> {
         if self.superseded_sources.iter().any(|old| old == id) {

@@ -1088,6 +1088,52 @@ it("sends explicit content confirmation for the shown revision and exports the a
   expect(exportResults).toHaveBeenCalledExactlyOnceWith("run-current");
 });
 
+it.each([
+  [9, true],
+  [10, false],
+] as const)(
+  "shows inherited confirmation only for the exact bound revision %d",
+  async (revision, confirmed) => {
+    const f = fixture();
+    const workspace = f.status.view.workspace;
+    const item = Object.assign(workspace.entities[0], {
+      kind: "decision",
+      status: "recorded",
+      revision,
+      humanLocked: true,
+    });
+    Object.assign(workspace, {
+      events: [
+        {
+          id: "h_original_confirmation",
+          entityId: item.id,
+          revision: 2,
+          human: true,
+          status: "confirmed",
+          text: item.text,
+          evidence: item.evidence,
+        },
+      ],
+      inheritedConfirmations: {
+        [item.id]: { revision: 9, eventId: "h_original_confirmation" },
+      },
+    });
+    render(
+      <LiveWorkspace
+        adapter={f.adapter}
+        meeting={f.meeting}
+        onBack={() => {}}
+      />,
+    );
+    fireEvent.click(await screen.findByRole("tab", { name: "Details" }));
+    await screen.findByText(item.text);
+    expect(Boolean(screen.queryByText("Inhalt bestätigt"))).toBe(confirmed);
+    expect(
+      Boolean(screen.queryByRole("button", { name: "Inhalt bestätigen" })),
+    ).toBe(!confirmed);
+  },
+);
+
 it("shows further grounded tasks and keeps the visible results after reading a quote", async () => {
   const f = fixture();
   const workspace = f.status.view.workspace;

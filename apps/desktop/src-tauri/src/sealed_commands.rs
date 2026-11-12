@@ -3,6 +3,7 @@
 use crate::{blocking, operations::Kind, AppResult, Service};
 use meeting_core::archive::sealed;
 use serde::{Deserialize, Serialize};
+use std::path::PathBuf;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
     Arc, Mutex,
@@ -75,48 +76,61 @@ pub(crate) async fn create_encrypted_backup(
     let service = Arc::clone(service.inner());
     let passphrase = Zeroizing::new(passphrase);
     blocking(move || {
-        crate::validate_id(&meeting_id)?;
-        let _admission = service.reserve_operation(Kind::Maintenance)?;
-        let operation = service.sealed_backups.begin()?;
-        let Some(path) = app
-            .dialog()
-            .file()
-            .set_title("Verschlüsselte Sitzungskopie speichern / Save encrypted meeting copy")
-            .add_filter("HandyMeeting", &["hmvault"])
-            .set_file_name("HandyMeeting.hmvault")
-            .blocking_save_file()
-        else {
-            return Ok(None);
-        };
-        let mut path = path
-            .into_path()
-            .map_err(|_| "Only a local backup file is supported")?;
-        if path.extension().is_none() {
-            path.set_extension("hmvault");
-        }
-        if !path
-            .extension()
-            .is_some_and(|ext| ext.eq_ignore_ascii_case("hmvault"))
-        {
-            return Err(
-                "Bitte die Dateiendung .hmvault verwenden. / Use the .hmvault extension.".into(),
-            );
-        }
-        let (summary, recovery_key) = sealed::create(
-            &service.root,
-            &meeting_id,
-            &path,
-            passphrase.as_bytes(),
-            &operation.cancel,
-        )
-        .map_err(|e| e.to_string())?;
-        Ok(Some(BackupReceipt {
-            file: path.to_string_lossy().into_owned(),
-            summary,
-            recovery_key: recovery_key.encode(),
-        }))
+        create_backup(&service, &meeting_id, passphrase.as_bytes(), || {
+            app.dialog()
+                .file()
+                .set_title("Verschlüsselte Sitzungskopie speichern / Save encrypted meeting copy")
+                .add_filter("HandyMeeting", &["hmvault"])
+                .set_file_name("HandyMeeting.hmvault")
+                .blocking_save_file()
+                .map(|path| {
+                    path.into_path()
+                        .map_err(|_| "Only a local backup file is supported".into())
+                })
+                .transpose()
+        })
     })
     .await
+}
+
+fn create_backup(
+    service: &Arc<Service>,
+    meeting_id: &str,
+    passphrase: &[u8],
+    choose_destination: impl FnOnce() -> AppResult<Option<PathBuf>>,
+) -> AppResult<Option<BackupReceipt>> {
+    crate::validate_id(meeting_id)?;
+    // The detail view retains the store's writer lease. Drop it and fence reopens
+    // until the encrypted backup releases its own session lease.
+    let _admission = crate::retention_commands::reserve(service)?;
+    let operation = service.sealed_backups.begin()?;
+    let Some(mut path) = choose_destination()? else {
+        return Ok(None);
+    };
+    if path.extension().is_none() {
+        path.set_extension("hmvault");
+    }
+    if !path
+        .extension()
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("hmvault"))
+    {
+        return Err(
+            "Bitte die Dateiendung .hmvault verwenden. / Use the .hmvault extension.".into(),
+        );
+    }
+    let (summary, recovery_key) = sealed::create(
+        &service.root,
+        meeting_id,
+        &path,
+        passphrase,
+        &operation.cancel,
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(Some(BackupReceipt {
+        file: path.to_string_lossy().into_owned(),
+        summary,
+        recovery_key: recovery_key.encode(),
+    }))
 }
 
 #[tauri::command]
@@ -165,4 +179,60 @@ pub(crate) fn cancel_encrypted_backup(service: State<'_, Arc<Service>>) -> AppRe
         cancel.store(true, Ordering::Release);
     }
     Ok(current.is_some())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use meeting_core::SessionStore;
+    use std::fs;
+
+    struct Fixture(PathBuf);
+
+    impl Drop for Fixture {
+        fn drop(&mut self) {
+            if self
+                .0
+                .canonicalize()
+                .as_ref()
+                .is_ok_and(|path| path == &self.0)
+            {
+                let _ = fs::remove_dir_all(&self.0);
+            }
+        }
+    }
+
+    #[test]
+    fn creates_encrypted_backup_from_an_open_meeting_detail() {
+        let temp = std::env::temp_dir().canonicalize().unwrap();
+        let fixture = temp.join(format!("hm-sealed-detail-{}", meeting_notes::new_job_id()));
+        fs::create_dir(&fixture).unwrap();
+        let fixture = Fixture(fixture);
+        let root = fixture.0.join("profile");
+        let service = Arc::new(Service::new(root.clone()).unwrap());
+        let store =
+            SessionStore::create(&root.join("sessions"), "Synthetic meeting", "m", "s", None)
+                .unwrap();
+        let id = store.snapshot().unwrap().id;
+        store.set_status("complete").unwrap();
+        drop(store);
+
+        assert_eq!(service.data(&id).unwrap().id, id);
+        assert!(SessionStore::open(&root.join("sessions").join(&id)).is_err());
+        let output = fixture.0.join("selected-backup.hmvault");
+        let passphrase = Zeroizing::new(meeting_notes::new_job_id());
+        let receipt = create_backup(&service, &id, passphrase.as_bytes(), || {
+            assert!(
+                service.data(&id).is_err(),
+                "Backup must fence detail reopens"
+            );
+            Ok(Some(output.clone()))
+        })
+        .unwrap()
+        .unwrap();
+
+        assert_eq!(receipt.summary.meeting_id, id);
+        assert!(output.is_file());
+        assert_eq!(service.data(&id).unwrap().id, id);
+    }
 }

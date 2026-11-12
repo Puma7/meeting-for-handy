@@ -34,6 +34,8 @@ type HistorySearchState = {
 
 export type HistoryQuestionReturn = HistoryQuestionResult & { key: string };
 
+const PAGE_SIZE = 25;
+
 export const initialHistorySearch: HistorySearchState = {
   query: "",
   from: "",
@@ -42,6 +44,10 @@ export const initialHistorySearch: HistorySearchState = {
   transcriptOnly: false,
   offset: 0,
 };
+
+function lastPageOffset(total: number) {
+  return Math.floor(Math.max(0, total - 1) / PAGE_SIZE) * PAGE_SIZE;
+}
 
 /** Use local calendar days, including the shorter or longer days around a clock change. */
 function dayBoundary(value: string, nextDay = false) {
@@ -160,36 +166,50 @@ export default function HistorySearch({
         .sort(historyOrder)
     : [];
   const viewOffset = authoritative
-    ? Math.min(offset, Math.max(0, Math.floor((native.length - 1) / 25) * 25))
+    ? Math.min(offset, lastPageOffset(native.length))
     : offset;
-  const visiblePage: SearchPage | null = invalidDates
-    ? null
-    : authoritative
-      ? {
-          items: native.slice(viewOffset, viewOffset + 25).map((item) => ({
-            ...item,
-            pinned: item.userMetadata?.pinned ?? false,
-            audioRemoved: item.userMetadata?.audioRemoved ?? false,
-            metadataRevision: item.userMetadata?.revision ?? 0,
-            sourceId: null,
-            startMs: null,
-            endMs: null,
-            excerpt: "",
-          })),
-          total: native.length,
-          offset: viewOffset,
-          limit: 25,
-        }
-      : result?.key === requestKey
-        ? result.page
-        : null;
+  const indexedPage = result?.key === requestKey ? result.page : null;
+  const indexedLastOffset = indexedPage
+    ? lastPageOffset(indexedPage.total)
+    : offset;
+  const recoveringPage =
+    !authoritative && !invalidDates && !busy && offset > indexedLastOffset;
+  const visiblePage: SearchPage | null =
+    invalidDates || recoveringPage
+      ? null
+      : authoritative
+        ? {
+            items: native
+              .slice(viewOffset, viewOffset + PAGE_SIZE)
+              .map((item) => ({
+                ...item,
+                pinned: item.userMetadata?.pinned ?? false,
+                audioRemoved: item.userMetadata?.audioRemoved ?? false,
+                metadataRevision: item.userMetadata?.revision ?? 0,
+                sourceId: null,
+                startMs: null,
+                endMs: null,
+                excerpt: "",
+              })),
+            total: native.length,
+            offset: viewOffset,
+            limit: PAGE_SIZE,
+          }
+        : indexedPage;
   const visibleImports =
     !hasQuery && !invalidDates
       ? imported.filter(
           (item) => !hiddenMeetingIds?.has(item.id) && inScope(item, scope),
         )
       : [];
-  const loading = !authoritative && !invalidDates && busy;
+  const loading = !authoritative && !invalidDates && (busy || recoveringPage);
+  useEffect(() => {
+    if (!recoveringPage) return;
+    // Deletion or an index refresh can remove the current last page.
+    const next = { ...state, offset: indexedLastOffset };
+    setState(next);
+    onStateChange?.(next);
+  }, [recoveringPage, indexedLastOffset, state, onStateChange]);
   useEffect(() => {
     const update = () => setRefresh((v) => v + 1);
     window.addEventListener("library-index-updated", update);
@@ -210,8 +230,8 @@ export default function HistorySearch({
     const timer = setTimeout(
       () => {
         const search = scope
-          ? searchMeetings.call(api, query, offset, 25, scope)
-          : searchMeetings.call(api, query, offset, 25);
+          ? searchMeetings.call(api, query, offset, PAGE_SIZE, scope)
+          : searchMeetings.call(api, query, offset, PAGE_SIZE);
         void search
           .then((value) => {
             if (generation.current === current)
@@ -494,7 +514,7 @@ export default function HistorySearch({
           ))}
         </div>
       )}
-      {visiblePage && visiblePage.total > 25 && (
+      {visiblePage && visiblePage.total > PAGE_SIZE && (
         <div className="search-pages">
           <button
             className="secondary"
@@ -503,19 +523,20 @@ export default function HistorySearch({
               de ? "Die vorherige Seite anzeigen." : "Show the previous page."
             }
             onClick={() =>
-              updateSearch({ offset: Math.max(0, viewOffset - 25) })
+              updateSearch({ offset: Math.max(0, viewOffset - PAGE_SIZE) })
             }
           >
             {de ? "Zurück" : "Previous"}
           </button>
           <span>
-            {viewOffset + 1}–{Math.min(viewOffset + 25, visiblePage.total)}
+            {viewOffset + 1}–
+            {Math.min(viewOffset + PAGE_SIZE, visiblePage.total)}
           </span>
           <button
             className="secondary"
-            disabled={loading || viewOffset + 25 >= visiblePage.total}
+            disabled={loading || viewOffset + PAGE_SIZE >= visiblePage.total}
             title={de ? "Die nächste Seite anzeigen." : "Show the next page."}
-            onClick={() => updateSearch({ offset: viewOffset + 25 })}
+            onClick={() => updateSearch({ offset: viewOffset + PAGE_SIZE })}
           >
             {de ? "Weiter" : "Next"}
           </button>

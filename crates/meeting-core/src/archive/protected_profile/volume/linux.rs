@@ -25,6 +25,7 @@ const NOT_MOUNTED: &str = "The encrypted Linux profile is unavailable or its mou
 const WRONG_PASSWORD: &str = "The encrypted Linux profile could not be unlocked with this passphrase. / Das verschlüsselte Linux-Profil konnte mit dieser Passphrase nicht entsperrt werden.";
 const FUSE_FAILED: &str = "Linux could not mount the encrypted profile. Check that the system FUSE helper and /dev/fuse are usable. / Linux konnte das verschlüsselte Profil nicht einhängen. Bitte das FUSE-Einhängeprogramm und /dev/fuse prüfen.";
 const DETACH_FAILED: &str = "The encrypted Linux profile is still mounted. Close applications using the profile before unmounting. / Das verschlüsselte Linux-Profil ist noch eingehängt. Bitte zuerst Programme schließen, die das Profil verwenden.";
+const CHILD_STILL_RUNNING: &str = "The encrypted Linux profile is still closing. Close files open from the profile and retry. / Das verschlüsselte Linux-Profil wird noch geschlossen. Bitte geöffnete Dateien aus dem Profil schließen und erneut versuchen.";
 const ALREADY_MOUNTED: &str = "This Linux vault is still mounted. Close the existing mount before reopening it. / Dieses Linux-Profil ist noch eingehängt. Bitte den bestehenden Einhängepunkt vor dem erneuten Öffnen aushängen.";
 
 fn system_tool(name: &str) -> Option<PathBuf> {
@@ -235,10 +236,10 @@ impl Attachment {
         if mount != self.mount {
             return Err(NOT_MOUNTED.into());
         }
-        self.unmount()
+        self.unmount(STOP_LIMIT)
     }
 
-    fn unmount(&mut self) -> Result<()> {
+    fn unmount(&mut self, child_wait: Duration) -> Result<()> {
         if self.detached {
             return Ok(());
         }
@@ -265,17 +266,19 @@ impl Attachment {
                 return Err(DETACH_FAILED.into());
             }
         }
-        self.detached = true;
         // Let gocryptfs finish flushing and releasing its keys. An external lazy
-        // unmount may still have users, so never signal the filesystem process here.
-        let _ = wait_until(&mut self.child, STOP_LIMIT)?;
+        // unmount may still have users even when the mount no longer appears in mountinfo.
+        if wait_until(&mut self.child, child_wait)?.is_none() {
+            return Err(CHILD_STILL_RUNNING.into());
+        }
+        self.detached = true;
         Ok(())
     }
 }
 
 impl Drop for Attachment {
     fn drop(&mut self) {
-        let _ = self.unmount();
+        let _ = self.unmount(STOP_LIMIT);
     }
 }
 
@@ -382,5 +385,38 @@ mod tests {
         assert!(mount_id(shared, path, b"handymeeting-own", 1000).is_err());
         assert!(has_source(shared, b"handymeeting-own"));
         assert!(!has_source(shared, b"handymeeting-other"));
+    }
+
+    #[test]
+    fn absent_mount_cannot_complete_detach_while_its_child_is_alive() {
+        let mount = tempfile::tempdir().unwrap();
+        // The fixture process waits on a pipe we own. No FUSE mount or signal is needed.
+        let mut child = Command::new("/bin/sh")
+            .args(["-c", "IFS= read -r line"])
+            .stdin(Stdio::piped())
+            .spawn()
+            .unwrap();
+        let mut input = child.stdin.take().unwrap();
+        let mut attachment = Attachment {
+            child,
+            mount: mount.path().to_owned(),
+            source: "handymeeting-absent-fixture".into(),
+            mount_id: Some(1),
+            uid: effective_uid().unwrap(),
+            detached: false,
+        };
+        assert_eq!(attachment.mounted().unwrap(), None);
+        let first = attachment.unmount(Duration::ZERO);
+        let prematurely_detached = attachment.detached;
+
+        input.write_all(b"\n").unwrap();
+        drop(input);
+        let retry = attachment.unmount(STOP_LIMIT);
+        assert!(attachment.child.wait().unwrap().success());
+
+        assert_eq!(first.unwrap_err().to_string(), CHILD_STILL_RUNNING);
+        assert!(!prematurely_detached);
+        assert!(retry.is_ok());
+        assert!(attachment.detached);
     }
 }

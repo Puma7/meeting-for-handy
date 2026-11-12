@@ -3,13 +3,14 @@
 use crate::AppResult;
 use std::{
     ffi::OsString,
-    io::{self, BufRead, Read, Write},
+    io::{self, Read, Write},
     process::{Command, Stdio},
     sync::mpsc::{self, Receiver, RecvTimeoutError},
     thread,
     time::Duration,
 };
-use zeroize::Zeroizing;
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+use {std::io::BufRead, zeroize::Zeroizing};
 
 pub(super) const FLAG: &str = "--startup-ack";
 const READY: &[u8; 8] = b"HM-READY";
@@ -17,16 +18,27 @@ const FAILED: &[u8; 8] = b"HM-ERROR";
 const ACCEPTED: &[u8; 7] = b"HM-OPEN";
 const STARTUP_LIMIT: Duration = Duration::from_secs(90);
 const ACK_LIMIT: Duration = Duration::from_secs(5);
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 const START_FAILED: &str = "Das geschützte Profil konnte nicht geöffnet werden. Prüfe die Passphrase und ob das Profil bereits geöffnet ist. / The protected profile could not open. Check the passphrase and whether the profile is already open.";
+#[cfg(windows)]
+const START_FAILED: &str = "Das geschützte Profil konnte nicht geöffnet werden. Prüfe den Ordner und ob das Profil bereits geöffnet ist. / The protected profile could not open. Check the folder and whether the profile is already open.";
 const START_TIMEOUT: &str = "Das geschützte Profil hat den Start nicht rechtzeitig bestätigt. Versuche es erneut, sobald der vorige Startversuch beendet ist. / The protected profile did not confirm startup in time. Retry once the previous attempt has ended.";
 
 pub(crate) fn managed_startup(args: &[OsString]) -> bool {
-    matches!(args, [launch, _, password, startup] if launch == "--protected-profile" && password == "--password-stdin" && startup == FLAG)
+    #[cfg(windows)]
+    {
+        matches!(args, [launch, _, startup] if launch == "--protected-profile" && startup == FLAG)
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    {
+        matches!(args, [launch, _, password, startup] if launch == "--protected-profile" && password == "--password-stdin" && startup == FLAG)
+    }
 }
 
-pub(super) fn launch(mut command: Command, password: &str) -> AppResult<()> {
+pub(super) fn launch(mut command: Command, password: Option<&str>) -> AppResult<()> {
     let mut child = command
-        .args(["--password-stdin", FLAG])
+        .arg(FLAG)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
@@ -48,10 +60,12 @@ pub(super) fn launch(mut command: Command, password: &str) -> AppResult<()> {
         let _ = io::copy(&mut output, &mut io::sink());
         let _ = child.wait();
     });
-    input
-        .write_all(password.as_bytes())
-        .and_then(|()| input.write_all(b"\n"))
-        .map_err(|_| START_FAILED)?;
+    if let Some(password) = password {
+        input
+            .write_all(password.as_bytes())
+            .and_then(|()| input.write_all(b"\n"))
+            .map_err(|_| START_FAILED)?;
+    }
     complete_startup(&mut input, confirmation, STARTUP_LIMIT)
 }
 
@@ -72,6 +86,7 @@ fn complete_startup(
     }
 }
 
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 pub(super) fn read_passphrase(input: impl BufRead, managed: bool) -> AppResult<Zeroizing<String>> {
     let mut passphrase = Zeroizing::new(String::new());
     let mut limited = input.take(1025);
@@ -120,6 +135,7 @@ mod tests {
     use super::*;
     use std::io::Cursor;
 
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
     #[test]
     fn managed_startup_consumes_only_the_bounded_passphrase_frame() {
         let mut input = Cursor::new(b"synthetic passphrase\nHM-OPEN");

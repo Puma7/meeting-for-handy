@@ -52,6 +52,10 @@ export interface WorkspaceState {
     status: string;
     evidence: { sourceId: string; quote: string }[];
   }[];
+  inheritedConfirmations?: Record<
+    string,
+    { revision: number; eventId: string | null }
+  >;
   overviewRefs: string[];
   contextExcludedIds?: string[];
   supersededSources?: string[];

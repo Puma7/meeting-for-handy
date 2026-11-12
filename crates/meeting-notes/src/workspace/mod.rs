@@ -143,6 +143,7 @@ impl WorkspaceRunner {
             .cloned()
             .collect();
         let mut selected = HashSet::new();
+        let confirmations = previous.current_confirmations();
         for mut entity in candidates {
             let incoming = previous.human_activity.get(&entity.id);
             let current = next.human_activity.get(&entity.id);
@@ -166,6 +167,15 @@ impl WorkspaceRunner {
             if let Some(at) = incoming {
                 next.human_activity.insert(entity.id.clone(), *at);
             }
+            next.inherited_confirmations.insert(
+                entity.id.clone(),
+                InheritedConfirmation {
+                    revision: entity.revision,
+                    event_id: confirmations
+                        .get(entity.id.as_str())
+                        .map(|event| event.id.clone()),
+                },
+            );
             selected.insert(entity.id.clone());
             // Journal replay replaces existing IDs in place. Keep the same
             // order in memory; only genuinely new inherited IDs are appended.

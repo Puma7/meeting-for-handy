@@ -9,7 +9,7 @@ import {
 import userEvent from "@testing-library/user-event";
 import MeetingLabels from "./views/MeetingLabels";
 import SpeakerLabels from "./views/SpeakerLabels";
-import HistorySearch from "./views/HistorySearch";
+import HistorySearch, { initialHistorySearch } from "./views/HistorySearch";
 import type { DesktopApi, Meeting, SearchPage } from "./types";
 it.each([
   [
@@ -250,6 +250,62 @@ it("ignores late search responses and opens the source section of the current hi
   expect(screen.queryByText("Stale result")).toBeNull();
   await userEvent.click(screen.getByRole("button", { name: "Open" }));
   expect(open).toHaveBeenCalledWith(meeting.id, "audio/system-0.wav");
+});
+
+it("returns to a valid indexed page when deletion empties the last page", async () => {
+  let matches: SearchPage["items"] = Array.from({ length: 26 }, (_, index) => ({
+    ...meeting,
+    id: `synthetic-search-${index + 1}`,
+    title: `Indexed hit ${index + 1}`,
+    pinned: false,
+    audioRemoved: false,
+    metadataRevision: 0,
+    sourceId: "audio/system-0.wav",
+    startMs: 0,
+    endMs: 30000,
+    excerpt: "synthetic report",
+  }));
+  const search = vi.fn(
+    async (_query: string, offset: number, limit: number) => ({
+      items: matches.slice(offset, offset + limit),
+      total: matches.length,
+      offset,
+      limit,
+    }),
+  );
+  const onStateChange = vi.fn();
+  render(
+    <HistorySearch
+      api={{ searchMeetings: search } as unknown as DesktopApi}
+      locale="en"
+      initialState={{ ...initialHistorySearch, query: "report" }}
+      onStateChange={onStateChange}
+      onOpen={vi.fn()}
+      onErase={(target) => {
+        matches = matches.filter((item) => item.id !== target.id);
+        window.dispatchEvent(new Event("library-index-updated"));
+      }}
+    />,
+  );
+  await screen.findByText("Indexed hit 25");
+  await userEvent.click(screen.getByRole("button", { name: "Next" }));
+  await screen.findByText("Indexed hit 26");
+  await userEvent.click(
+    screen.getByRole("button", {
+      name: "Permanently delete meeting: Indexed hit 26",
+    }),
+  );
+  expect(await screen.findByText("Indexed hit 1")).toBeTruthy();
+  expect(screen.queryByText("Indexed hit 26")).toBeNull();
+  expect(search.mock.calls).toEqual([
+    ["report", 0, 25],
+    ["report", 25, 25],
+    ["report", 25, 25],
+    ["report", 0, 25],
+  ]);
+  expect(onStateChange).toHaveBeenLastCalledWith(
+    expect.objectContaining({ offset: 0 }),
+  );
 });
 
 it("applies local day and VIP filters to the history and forwards the same scope to transcript search", async () => {
