@@ -396,6 +396,54 @@ impl Service {
             )?,
         })
     }
+    fn selected_catalog(
+        &self,
+        explicit: Option<&Path>,
+        cached: Option<&Path>,
+        setup: Option<&meeting_notes::AnalysisControl>,
+    ) -> AppResult<(HandyBridge, ModelCatalog, bool)> {
+        // A chosen path is recorded by the caller, but only a Handy program is started.
+        if explicit
+            .or(cached)
+            .is_some_and(|p| !plausible_handy_path(p))
+        {
+            return Err("Bitte die Handy-Programmdatei auswählen (handy, Handy.exe, Handy.app oder eine Handy-AppImage). / Choose the Handy program itself.".into());
+        }
+        let discovery_path = self.selections.handy_discovery_path(explicit, cached)?;
+        let discovered = discovery_path.is_none();
+        let bridge = HandyBridge::discover(discovery_path.as_deref()).map_err(|e| e.to_string())?;
+        let catalog = match setup {
+            Some(control) => bridge.refresh_cancellable(|| control.is_cancelled()),
+            None => bridge.refresh(),
+        }
+        .map_err(|e| e.to_string())?;
+        Ok((bridge, catalog, discovered))
+    }
+
+    /// Read a fresh catalogue for the optional probe without publishing discovery status.
+    fn refresh_for_setup(
+        &self,
+        control: &meeting_notes::AnalysisControl,
+    ) -> AppResult<(HandyBridge, ModelCatalog)> {
+        let _refresh = loop {
+            setup_probe::check_cancellation(control)?;
+            match self.refresh_gate.try_lock() {
+                Ok(refresh) => break refresh,
+                Err(std::sync::TryLockError::WouldBlock) => {
+                    std::thread::sleep(std::time::Duration::from_millis(20));
+                }
+                Err(std::sync::TryLockError::Poisoned(_)) => {
+                    return Err("Die Handy-Modellabfrage ist gesperrt.".into());
+                }
+            }
+        };
+        let cached = self.lock()?.executable.clone();
+        let catalog = self.selected_catalog(None, cached.as_deref(), Some(control));
+        setup_probe::check_cancellation(control)?;
+        let (bridge, catalog, _) = catalog?;
+        Ok((bridge, catalog))
+    }
+
     /// Serialize model discovery while distinguishing OS discovery from native grants. Failed
     /// explicit choices retain their origin instead of reverting to an earlier program.
     fn refresh(
@@ -410,19 +458,9 @@ impl Service {
         let explicit = explicit.map(PathBuf::from);
         let cached = self.lock()?.executable.clone();
         let path = explicit.clone().or(cached.clone());
-        let mut discovered = false;
         let attempt = (|| {
-            // A chosen path is recorded below either way, but only a Handy program is started.
-            if path.as_deref().is_some_and(|p| !plausible_handy_path(p)) {
-                return Err("Bitte die Handy-Programmdatei auswählen (handy, Handy.exe, Handy.app oder eine Handy-AppImage). / Choose the Handy program itself.".to_string());
-            }
-            let discovery_path = self
-                .selections
-                .handy_discovery_path(explicit.as_deref(), cached.as_deref())?;
-            discovered = discovery_path.is_none();
-            let bridge =
-                HandyBridge::discover(discovery_path.as_deref()).map_err(|e| e.to_string())?;
-            let catalog = bridge.refresh().map_err(|e| e.to_string())?;
+            let (bridge, catalog, discovered) =
+                self.selected_catalog(explicit.as_deref(), cached.as_deref(), None)?;
             let models = catalog
                 .models
                 .iter()
@@ -450,7 +488,7 @@ impl Service {
                 models,
                 error: None,
             };
-            Ok::<_, String>((bridge, catalog, status))
+            Ok::<_, String>((bridge, catalog, status, discovered))
         })();
         let mut inner = self.lock()?;
         if explicitly_selected {
@@ -459,8 +497,8 @@ impl Service {
             inner.executable = path.clone();
         }
         match &attempt {
-            Ok((bridge, _, status)) => {
-                if discovered {
+            Ok((bridge, _, status, discovered)) => {
+                if *discovered {
                     self.selections
                         .remember_discovered_handy(bridge.executable())?;
                 }
@@ -477,7 +515,7 @@ impl Service {
                 });
             }
         }
-        attempt
+        attempt.map(|(bridge, catalog, status, _)| (bridge, catalog, status))
     }
     fn start(&self, request: StartRequest) -> AppResult<MeetingView> {
         self.start_for(request, None)
@@ -591,7 +629,7 @@ impl Service {
         if let Some(owner) = owner.as_deref() {
             self.agent.start_permitted(owner)?;
         }
-        let lease = self.operations.try_acquire(operations::Kind::Recording)?;
+        let lease = self.operations.acquire_recording()?;
         {
             let mut inner = self.lock()?;
             if inner.active.is_some() || inner.transitioning {
@@ -931,7 +969,7 @@ impl Service {
         if unavailable {
             return Err("Bitte zuerst die laufende Sitzung abschließen.".into());
         }
-        let lease = self.operations.try_acquire(operations::Kind::Recording)?;
+        let lease = self.operations.acquire_recording()?;
         if valid_legacy_id(&id) {
             return Err("Originalsitzungen werden in dieser Beta ausschließlich gelesen. Zum Nachholen die bisherige Version verwenden.".into());
         }
@@ -1233,7 +1271,10 @@ pub fn run() {
             let config = app.config().app.windows.first().ok_or("Desktop window configuration is missing")?;
             let window = tauri::WebviewWindowBuilder::from_config(app, config).and_then(|builder| {
                 #[cfg(target_os = "macos")]
-                let builder = builder.incognito(true);
+                let builder = {
+                    protected_menu::install_native_quit(app.handle())?;
+                    builder.incognito(true)
+                };
                 #[cfg(not(target_os = "macos"))]
                 let builder = builder.data_directory(service.root.join("webview"));
                 builder.build()
@@ -1272,6 +1313,8 @@ pub fn run() {
             .run_return(move |app, event| {
                 protected_shutdown::on_run_event(&shutdown_service, app, event);
             });
+        #[cfg(target_os = "macos")]
+        protected_menu::clear_native_quit();
         if protected_shutdown::leaving_mounted(&service) {
             std::process::exit(exit_code);
         }

@@ -2,7 +2,7 @@
 use crate::{blocking, meeting_files, AppResult, Service};
 use meeting_core::library::{LibraryIndex, SearchHit, SearchScope};
 use meeting_notes::{
-    questions::{self, Passage, MAX_PASSAGES, MAX_QUESTION_CHARS},
+    questions::{self, Passage, DEFAULT_PASSAGES, MAX_PASSAGES, MAX_QUESTION_CHARS},
     AnalysisControl, Connection, TextClient,
 };
 use serde::{Deserialize, Serialize};
@@ -64,7 +64,7 @@ fn ask(service: &Service, request: HistoryQuestion) -> AppResult<HistoryAnswer> 
         return Err("Enter a question with up to 400 characters. / Gib eine Frage mit bis zu 400 Zeichen ein.".into());
     }
     let scope = request.scope.unwrap_or_default();
-    if request.meeting_ids.len() > 12
+    if request.meeting_ids.len() > MAX_PASSAGES
         || request
             .meeting_ids
             .iter()
@@ -88,7 +88,9 @@ fn ask(service: &Service, request: HistoryQuestion) -> AppResult<HistoryAnswer> 
         .question_candidates(&terms, &scope, &request.meeting_ids)
         .map_err(|_| SEARCH_ERROR)?;
     drop(index);
-    let located = locate(service, &scope, &terms, hits, control);
+    // Keep the usual search compact and make room for every explicitly selected meeting.
+    let limit = request.meeting_ids.len().max(DEFAULT_PASSAGES);
+    let located = locate(service, &scope, &terms, hits, limit, control);
     if control.is_cancelled() {
         return Err(crate::operations::RECORDING_PRIORITY.into());
     }
@@ -196,6 +198,7 @@ fn locate(
     scope: &SearchScope,
     terms: &[String],
     hits: Vec<SearchHit>,
+    limit: usize,
     control: &AnalysisControl,
 ) -> Vec<LocatedPassage> {
     let mut groups: Vec<Vec<SearchHit>> = Vec::new();
@@ -260,7 +263,7 @@ fn locate(
         });
         if let Some(entry) = matches.next() {
             first.push(entry);
-            if first.len() == MAX_PASSAGES {
+            if first.len() == limit {
                 break;
             }
             additional.extend(matches.take(2));
@@ -269,7 +272,7 @@ fn locate(
     first
         .into_iter()
         .chain(additional)
-        .take(MAX_PASSAGES)
+        .take(limit)
         .enumerate()
         .map(|(index, mut entry)| {
             entry.passage.id = index as u32 + 1;
@@ -349,7 +352,14 @@ mod tests {
             .unwrap()
             .is_empty());
         let control = AnalysisControl::default();
-        let passages = locate(&service, &scope, &terms, hits.clone(), &control);
+        let passages = locate(
+            &service,
+            &scope,
+            &terms,
+            hits.clone(),
+            DEFAULT_PASSAGES,
+            &control,
+        );
         assert_eq!(passages.len(), 2);
         for id in [FIRST, SECOND] {
             let passage = passages
@@ -364,12 +374,20 @@ mod tests {
             pinned_only: true,
             ..scope
         };
-        assert!(locate(&service, &vip_scope, &terms, hits, &control).is_empty());
+        assert!(locate(
+            &service,
+            &vip_scope,
+            &terms,
+            hits,
+            DEFAULT_PASSAGES,
+            &control
+        )
+        .is_empty());
 
         let terms = questions::keywords("Wie ist die anderung?");
         let hits = index.question_candidates(&terms, &scope, &[]).unwrap();
         assert_eq!(hits.len(), 1);
-        let passages = locate(&service, &scope, &terms, hits, &control);
+        let passages = locate(&service, &scope, &terms, hits, DEFAULT_PASSAGES, &control);
         assert_eq!(passages.len(), 1);
         assert_eq!(passages[0].meeting_id, SECOND);
         assert!(passages[0].passage.text.contains("Änderung"));
@@ -424,6 +442,7 @@ mod tests {
             &scope,
             &terms,
             ranked,
+            MAX_PASSAGES,
             &AnalysisControl::default(),
         );
         assert_eq!(passages.len(), MAX_PASSAGES);

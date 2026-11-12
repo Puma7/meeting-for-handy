@@ -37,6 +37,7 @@ it("requires matching passphrases, clears both fields and shows the verified fil
   expect(first.value).toBe("");
   expect(repeat.value).toBe("");
   expect(await screen.findByText("example.hmvault")).toBeTruthy();
+  expect(screen.queryByText("HANDYMEETING_DATA_DIR")).toBeNull();
   expect(screen.getByDisplayValue(recoveryKey)).toBeTruthy();
   await user.click(
     screen.getByRole("button", { name: "Schlüssel ausblenden" }),
@@ -72,6 +73,7 @@ it("requests cancellation of the active recovery without displaying a success re
   await act(async () => complete(null));
   await screen.findByRole("button", { name: "Recover an encrypted meeting" });
   expect(screen.queryByText("Recovered profile")).toBeNull();
+  expect(screen.queryByText("HANDYMEETING_DATA_DIR")).toBeNull();
 });
 
 it("clears a passphrase when switching to key recovery and submits only the chosen credential", async () => {
@@ -93,4 +95,9 @@ it("clears a passphrase when switching to key recovery and submits only the chos
   expect(run).toHaveBeenCalledExactlyOnceWith(key, "recoveryKey");
   expect(field.value).toBe("");
   expect(await screen.findByText("isolated/profile")).toBeTruthy();
+  expect(
+    screen.getByText("HANDYMEETING_DATA_DIR").parentElement?.textContent,
+  ).toBe(
+    "This profile contains readable session files. To open it, set HANDYMEETING_DATA_DIR to the displayed profile folder in your terminal, then launch Meeting for Handy from that terminal.",
+  );
 });

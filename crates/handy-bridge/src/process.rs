@@ -41,6 +41,18 @@ pub(crate) fn run_query(
     arguments: &[&str],
     limits: CommandLimits,
 ) -> Result<Vec<u8>> {
+    run_query_cancellable(executable, arguments, limits, &|| false)
+}
+
+pub(crate) fn run_query_cancellable(
+    executable: &Path,
+    arguments: &[&str],
+    limits: CommandLimits,
+    cancelled: &impl Fn() -> bool,
+) -> Result<Vec<u8>> {
+    if cancelled() {
+        return Err(BridgeError::Cancelled);
+    }
     let mut command = Command::new(executable);
     command
         .args(arguments)
@@ -67,6 +79,9 @@ pub(crate) fn run_query(
         std::thread::spawn(move || read_bounded(stderr, limits.stderr_bytes, stderr_overflow));
     let started = Instant::now();
     let result = loop {
+        if cancelled() {
+            break Err(BridgeError::Cancelled);
+        }
         if overflow.load(Ordering::Acquire) {
             break Err(BridgeError::OutputLimit);
         }
@@ -92,6 +107,9 @@ pub(crate) fn run_query(
     let stdout = out.join().map_err(|_| BridgeError::QueryFailed)??;
     let _ = err.join().map_err(|_| BridgeError::QueryFailed)??;
     result?;
+    if cancelled() {
+        return Err(BridgeError::Cancelled);
+    }
     if overflow.load(Ordering::Acquire) {
         return Err(BridgeError::OutputLimit);
     }

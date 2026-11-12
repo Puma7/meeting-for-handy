@@ -387,17 +387,21 @@ pub(crate) fn explicit_task_calendar_date(quote: &str) -> Option<&str> {
     if !german && second.eq_ignore_ascii_case("the") {
         second = words.next()?;
     }
+    let trailing = words.next();
+    let stated_year =
+        trailing.filter(|word| word.len() == 4 && word.bytes().all(|value| value.is_ascii_digit()));
     let (day, month) = if german {
         (
             german_day(first)?,
             named_month(second).or_else(|| german_day(second))?,
         )
     } else {
+        if let Some(day) = second.strip_suffix(',') {
+            stated_year?;
+            second = day;
+        }
         (english_day(second)?, named_month(first)?)
     };
-    let trailing = words.next();
-    let stated_year =
-        trailing.filter(|word| word.len() == 4 && word.bytes().all(|value| value.is_ascii_digit()));
     let particle = if stated_year.is_some() {
         words.next()
     } else {
@@ -442,6 +446,12 @@ fn literal_calendar_deadlines_reject_uncertainty_and_calendar_overflow() {
             "I will finish the guide by September 23rd 2026.",
             Some("September 23rd 2026"),
         ),
+        (
+            "I will finish the guide by September 23rd, 2026.",
+            Some("September 23rd, 2026"),
+        ),
+        ("I will finish the guide by September 23rd, 0000.", None),
+        ("I will finish the guide by September 23rd, 26.", None),
         (
             "Ich bringe die Unterlagen bis zum 23. September 2026 mit.",
             Some("23. September 2026"),

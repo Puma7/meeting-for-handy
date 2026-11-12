@@ -1,5 +1,6 @@
 //! An explicit, synthetic setup check. It opens no capture device and saves no meeting.
-use crate::{blocking, AppResult, Service};
+use crate::{blocking, operations, AppResult, Service};
+use meeting_notes::AnalysisControl;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use zeroize::Zeroizing;
@@ -13,6 +14,14 @@ fn confirms_setup_day(quotes: &[meeting_notes::questions::Quote]) -> bool {
         && quotes
             .iter()
             .all(|quote| quote.source == PROBE_SOURCE && quote.quote.contains(CONFIRMED_DAY))
+}
+
+pub(super) fn check_cancellation(control: &AnalysisControl) -> AppResult<()> {
+    if control.is_cancelled() {
+        Err(operations::SETUP_CANCELLED.into())
+    } else {
+        Ok(())
+    }
 }
 
 #[derive(Deserialize)]
@@ -92,8 +101,20 @@ pub(crate) fn check_cli(args: &[String]) -> AppResult<()> {
 }
 
 fn check(service: &Service, request: SetupProbeRequest) -> AppResult<SetupProbeResult> {
-    let _probe = service.reserve_operation(crate::operations::Kind::Selection)?;
-    let (bridge, catalog, _) = service.refresh(None)?;
+    let text = request.text.map(|text| {
+        (
+            text.endpoint,
+            text.model,
+            Zeroizing::new(text.api_key),
+            text.use_saved_key,
+        )
+    });
+    // The admission remains held until the model request, worker and scratch cleanup finish.
+    let probe = service.reserve_operation(operations::Kind::SetupProbe)?;
+    let control = probe
+        .setup_control()
+        .ok_or("Setup check controls are unavailable")?;
+    let (bridge, catalog) = service.refresh_for_setup(control)?;
     let model = catalog
         .model(&request.model_id)
         .map_err(|error| error.to_string())?;
@@ -104,32 +125,38 @@ fn check(service: &Service, request: SetupProbeRequest) -> AppResult<SetupProbeR
     }
     .map_err(|error| error.to_string())?;
     let backend = crate::backend_directory()?;
-    let (audio_roundtrip, transcription_worker) =
-        crate::asr::setup_signal_probe(&service.root, model, &resolved, &backend)?;
-    let text_answer = request.text.map(|text| {
-        crate::history_questions::local_client(
-            service,
-            text.endpoint,
-            text.model,
-            Zeroizing::new(text.api_key),
-            text.use_saved_key,
-        )
-        .and_then(|client| {
-            let passage = meeting_notes::questions::Passage {
-                id: PROBE_SOURCE,
-                meeting: "Synthetic setup".into(),
-                text: format!("{CONFIRMED_DAY} {PROPOSED_DAY}"),
-            };
-            meeting_notes::questions::answer(
-                &client,
-                "Which day was confirmed for the project meeting?",
-                &[passage],
-            )
-            .map(|quotes| confirms_setup_day(&quotes))
-            .map_err(|_| "The local model did not pass the synthetic check.".into())
-        })
-        .unwrap_or(false)
+    let result = crate::asr::setup_signal_probe(&service.root, model, &resolved, &backend, control);
+    check_cancellation(control)?;
+    let (audio_roundtrip, transcription_worker) = result?;
+    let text_answer = text.map(|(endpoint, model, api_key, use_saved_key)| {
+        check_cancellation(control)
+            .and_then(|()| {
+                crate::history_questions::local_client(
+                    service,
+                    endpoint,
+                    model,
+                    api_key,
+                    use_saved_key,
+                )
+            })
+            .and_then(|client| {
+                let passage = meeting_notes::questions::Passage {
+                    id: PROBE_SOURCE,
+                    meeting: "Synthetic setup".into(),
+                    text: format!("{CONFIRMED_DAY} {PROPOSED_DAY}"),
+                };
+                meeting_notes::questions::answer_with_control(
+                    &client,
+                    "Which day was confirmed for the project meeting?",
+                    &[passage],
+                    control,
+                )
+                .map(|quotes| confirms_setup_day(&quotes))
+                .map_err(|_| "The local model did not pass the synthetic check.".into())
+            })
+            .unwrap_or(false)
     });
+    check_cancellation(control)?;
     Ok(SetupProbeResult {
         audio_roundtrip,
         transcription_worker,

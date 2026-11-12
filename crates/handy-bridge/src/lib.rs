@@ -19,7 +19,10 @@ pub use identity::{
     verify_catalog_model, verify_model_identity, ModelIdentity, RuntimeIdentity,
 };
 #[cfg(feature = "native-asr")]
-pub use identity::{create_model_identity, verify_model_snapshot, write_model_snapshot};
+pub use identity::{
+    create_model_identity, verify_model_snapshot, write_model_snapshot,
+    write_model_snapshot_cancellable,
+};
 pub use paths::ModelRoots;
 pub use process::{CommandLimits, ModelListRunner, SystemModelListRunner};
 pub use version::installed_version;
@@ -40,6 +43,8 @@ pub enum BridgeError {
     QueryFailed,
     #[error("Handy did not respond within the time limit. Existing recordings remain available.")]
     Timeout,
+    #[error("The optional Handy check was cancelled.")]
+    Cancelled,
     #[error("Handy returned more data than the permitted model-list limit.")]
     OutputLimit,
     #[error("Handy's model-list format is not supported. Update HandyMeeting before using this installation.")]
@@ -184,11 +189,33 @@ impl HandyBridge {
         self.refresh_with(&SystemModelListRunner)
     }
 
+    /// Cancel and reap the owned catalogue query used by the optional setup probe.
+    pub fn refresh_cancellable(&self, cancelled: impl Fn() -> bool) -> Result<ModelCatalog> {
+        if cancelled() {
+            return Err(BridgeError::Cancelled);
+        }
+        self.refresh_using(|executable, limits| {
+            process::run_query_cancellable(
+                executable,
+                &["--list-models", "--json"],
+                limits,
+                &cancelled,
+            )
+        })
+    }
+
     /// Each refresh executes a fresh query. A failed refresh returns an error;
     /// callers must not relabel an earlier catalog as current or selectable.
     pub fn refresh_with(&self, runner: &impl ModelListRunner) -> Result<ModelCatalog> {
+        self.refresh_using(|executable, limits| runner.list_models(executable, limits))
+    }
+
+    fn refresh_using(
+        &self,
+        list_models: impl FnOnce(&Path, CommandLimits) -> Result<Vec<u8>>,
+    ) -> Result<ModelCatalog> {
         let before = self.identity()?;
-        let bytes = runner.list_models(&self.executable, self.limits)?;
+        let bytes = list_models(&self.executable, self.limits)?;
         if bytes.len() > self.limits.stdout_bytes {
             return Err(BridgeError::OutputLimit);
         }

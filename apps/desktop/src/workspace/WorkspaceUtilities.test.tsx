@@ -174,3 +174,22 @@ it("keeps completed tasks out of the open list and refuses altered or superseded
   expect(meetingAnswers(current, "sources", "alte Anleitung").total).toBe(0);
   expect(meetingAnswers(current, "sources", "Anleitung").total).toBe(1);
 });
+
+it("keeps unclear grounded impulses in the open questions lookup", () => {
+  const current = workspace();
+  const grounded = current.entities[0];
+  current.entities = ["open", "unclear", "discussed"].map((status) => ({
+    ...grounded,
+    kind: "impulse",
+    id: status,
+    status,
+  }));
+  current.entities.push({
+    ...current.entities[1],
+    id: "invalid-unclear",
+    evidence: [{ sourceId: "s_current", quote: "Not in the original" }],
+  });
+  expect(
+    meetingAnswers(current, "questions", "").items.map(({ id }) => id),
+  ).toEqual(["open", "unclear"]);
+});

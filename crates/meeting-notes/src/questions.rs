@@ -10,7 +10,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 
 pub const MAX_QUESTION_CHARS: usize = 400;
-pub const MAX_PASSAGES: usize = 8;
+pub const DEFAULT_PASSAGES: usize = 8;
+pub const MAX_PASSAGES: usize = 12;
 const MAX_PASSAGE_CHARS: usize = 520;
 
 #[derive(Serialize)]
@@ -95,28 +96,41 @@ fn keyword_score(text: &str, terms: &[String]) -> usize {
         .count()
 }
 
-/// Choose a contiguous window from the authoritative section. Overlap keeps
-/// relevant words near a window boundary together with surrounding evidence.
+/// Rank contiguous, complete sentences from the original section. A sentence
+/// too long for the evidence budget is never sent as a partial claim.
 pub fn excerpt<'a>(text: &'a str, terms: &[String]) -> &'a str {
-    let offsets: Vec<_> = text
-        .char_indices()
-        .map(|(offset, _)| offset)
-        .chain([text.len()])
-        .collect();
-    let length = offsets.len() - 1;
-    if length <= MAX_PASSAGE_CHARS {
-        return text.trim();
+    let text = text.trim();
+    if text.chars().take(MAX_PASSAGE_CHARS + 1).count() <= MAX_PASSAGE_CHARS {
+        return text;
     }
-    let last = length - MAX_PASSAGE_CHARS;
-    let mut best = (0, 0);
-    for start in (0..last).step_by(MAX_PASSAGE_CHARS / 2).chain([last]) {
-        let slice = &text[offsets[start]..offsets[start + MAX_PASSAGE_CHARS]];
-        let score = keyword_score(slice, terms);
-        if score > best.1 {
-            best = (start, score);
+    let mut offset = 0;
+    let bounds: Vec<_> = crate::workspace::evidence_sentences(text)
+        .map(|sentence| {
+            let start = offset + text[offset..].find(sentence).expect("original sentence");
+            offset = start + sentence.len();
+            start..offset
+        })
+        .collect();
+    let mut best = ("", 0);
+    for (index, start) in bounds.iter().enumerate() {
+        let mut length = 0;
+        let mut end = start.start;
+        for sentence in &bounds[index..] {
+            let available = MAX_PASSAGE_CHARS - length;
+            let added = text[end..sentence.end].chars().take(available + 1).count();
+            if added > available {
+                break;
+            }
+            length += added;
+            end = sentence.end;
+        }
+        let passage = &text[start.start..end];
+        let score = keyword_score(passage, terms);
+        if score > best.1 || (score > 0 && score == best.1 && passage.len() > best.0.len()) {
+            best = (passage, score);
         }
     }
-    text[offsets[best.0]..offsets[best.0 + MAX_PASSAGE_CHARS]].trim()
+    best.0
 }
 
 pub fn answer(client: &TextClient, question: &str, passages: &[Passage]) -> Result<Vec<Quote>> {
@@ -153,7 +167,7 @@ pub fn answer_with_control(
     }
     let schema = json!({
         "type":"object", "additionalProperties":false, "required":["matches"],
-        "properties":{"matches":{"type":"array", "maxItems":6, "items":{
+        "properties":{"matches":{"type":"array", "maxItems":quote_limit(passages), "items":{
             "type":"object", "additionalProperties":false, "required":["source","quote"],
             "properties":{"source":{"type":"integer","enum":passages.iter().map(|p|p.id).collect::<Vec<_>>()},
             "quote":{"type":"string","minLength":8,"maxLength":360}}
@@ -166,7 +180,7 @@ pub fn answer_with_control(
         &user,
         "meeting_history_answer",
         schema,
-        1200,
+        1200 + 180 * (passages.len().saturating_sub(DEFAULT_PASSAGES) as u32),
         control,
     )?;
     checked_quotes(&reply, passages)
@@ -174,7 +188,10 @@ pub fn answer_with_control(
 
 fn checked_quotes(reply: &str, passages: &[Passage]) -> Result<Vec<Quote>> {
     let response: Response = serde_json::from_str(reply).context("Invalid answer format.")?;
-    ensure!(response.matches.len() <= 6, "Too many evidence quotes.");
+    ensure!(
+        response.matches.len() <= quote_limit(passages),
+        "Too many evidence quotes."
+    );
     let mut checked = Vec::new();
     for mut item in response.matches {
         item.quote = item.quote.trim().to_owned();
@@ -206,6 +223,10 @@ fn checked_quotes(reply: &str, passages: &[Passage]) -> Result<Vec<Quote>> {
         }
     }
     Ok(checked)
+}
+
+fn quote_limit(passages: &[Passage]) -> usize {
+    passages.len().clamp(6, MAX_PASSAGES)
 }
 
 #[cfg(test)]
@@ -265,5 +286,44 @@ mod tests {
         )
         .unwrap();
         assert_eq!(checked[0].quote, passages[0].text);
+    }
+
+    #[test]
+    fn ranked_passage_keeps_a_qualifier_and_rejects_an_oversized_sentence() {
+        let terms = keywords("When will Orion deliver?");
+        let qualified =
+            "We cannot, without an approval we have yet to receive, deliver Orion on Friday.";
+        let prefix = "A separate topic was discussed. ".repeat(33);
+        let text = format!("{prefix}{qualified} The decision is still open.");
+        let selected = excerpt(&text, &terms);
+        assert!(selected.contains(qualified));
+        assert!(selected.ends_with('.'));
+        assert!(selected.starts_with("A separate topic") || selected.starts_with("We cannot"));
+        assert!(selected.chars().count() <= MAX_PASSAGE_CHARS);
+
+        let too_long = format!(
+            "{prefix}We cannot, {} deliver Orion on Friday.",
+            "while waiting for approval, ".repeat(30)
+        );
+        assert_eq!(excerpt(&too_long, &terms), "");
+    }
+
+    #[test]
+    fn quotes_can_cover_every_meeting_in_a_twelve_meeting_selection() {
+        let passages: Vec<_> = (1..=MAX_PASSAGES as u32)
+            .map(|id| Passage {
+                id,
+                meeting: format!("Synthetic {id}"),
+                text: format!("The confirmed launch date is May {id}."),
+            })
+            .collect();
+        let mut matches: Vec<_> = passages
+            .iter()
+            .map(|p| json!({"source": p.id, "quote": p.text}))
+            .collect();
+        let reply = json!({"matches":matches}).to_string();
+        assert_eq!(checked_quotes(&reply, &passages).unwrap().len(), 12);
+        matches.push(matches[0].clone());
+        assert!(checked_quotes(&json!({"matches":matches}).to_string(), &passages).is_err());
     }
 }

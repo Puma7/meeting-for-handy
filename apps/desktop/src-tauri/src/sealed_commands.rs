@@ -100,10 +100,6 @@ fn create_backup(
     choose_destination: impl FnOnce() -> AppResult<Option<PathBuf>>,
 ) -> AppResult<Option<BackupReceipt>> {
     crate::validate_id(meeting_id)?;
-    // The detail view retains the store's writer lease. Drop it and fence reopens
-    // until the encrypted backup releases its own session lease.
-    let _admission = crate::retention_commands::reserve(service)?;
-    let operation = service.sealed_backups.begin()?;
     let Some(mut path) = choose_destination()? else {
         return Ok(None);
     };
@@ -118,6 +114,10 @@ fn create_backup(
             "Bitte die Dateiendung .hmvault verwenden. / Use the .hmvault extension.".into(),
         );
     }
+    // The detail view retains the store's writer lease. Drop it and fence reopens
+    // after destination selection, until the backup releases its own session lease.
+    let _admission = crate::retention_commands::reserve(service)?;
+    let operation = service.sealed_backups.begin()?;
     let (summary, recovery_key) = sealed::create(
         &service.root,
         meeting_id,
@@ -143,29 +143,49 @@ pub(crate) async fn recover_encrypted_backup(
     let service = Arc::clone(service.inner());
     let credential = Zeroizing::new(credential);
     blocking(move || {
-        let recovery_key;
-        let unlock = match kind {
-            CredentialKind::Passphrase => sealed::Unlock::Passphrase(credential.as_bytes()),
-            CredentialKind::RecoveryKey => {
-                recovery_key = sealed::RecoveryKey::parse(&credential).map_err(|e| e.to_string())?;
-                sealed::Unlock::RecoveryKey(&recovery_key)
-            }
-        };
-        let _admission = service.reserve_operation(Kind::Maintenance)?;
-        let operation = service.sealed_backups.begin()?;
-        let Some(input) = app.dialog().file()
-            .set_title("Verschlüsselte Sicherung auswählen / Choose encrypted backup")
-            .add_filter("HandyMeeting", &["hmvault"])
-            .blocking_pick_file() else { return Ok(None); };
-        let input = input.into_path().map_err(|_| "Only a local backup file is supported")?;
-        let Some(directory) = app.dialog().file()
-            .set_title("Ordner für separates Wiederherstellungsprofil / Folder for separate recovery profile")
-            .blocking_pick_folder() else { return Ok(None); };
-        let directory = directory.into_path().map_err(|_| "Only a local recovery directory is supported")?;
-        let profile = sealed::recover(&service.root, &input, &directory, unlock, &operation.cancel)
-            .map_err(|e| e.to_string())?;
-        Ok(Some(profile.to_string_lossy().into_owned()))
+        recover_backup(&service, &credential, kind, || {
+            app.dialog().file()
+                .set_title("Verschlüsselte Sicherung auswählen / Choose encrypted backup")
+                .add_filter("HandyMeeting", &["hmvault"])
+                .blocking_pick_file()
+                .map(|input| input.into_path().map_err(|_| "Only a local backup file is supported".into()))
+                .transpose()
+        }, || {
+            app.dialog().file()
+                .set_title("Ordner für separates Wiederherstellungsprofil / Folder for separate recovery profile")
+                .blocking_pick_folder()
+                .map(|directory| directory.into_path().map_err(|_| "Only a local recovery directory is supported".into()))
+                .transpose()
+        })
     }).await
+}
+
+fn recover_backup(
+    service: &Service,
+    credential: &str,
+    kind: CredentialKind,
+    choose_input: impl FnOnce() -> AppResult<Option<PathBuf>>,
+    choose_destination: impl FnOnce() -> AppResult<Option<PathBuf>>,
+) -> AppResult<Option<String>> {
+    let recovery_key;
+    let unlock = match kind {
+        CredentialKind::Passphrase => sealed::Unlock::Passphrase(credential.as_bytes()),
+        CredentialKind::RecoveryKey => {
+            recovery_key = sealed::RecoveryKey::parse(credential).map_err(|e| e.to_string())?;
+            sealed::Unlock::RecoveryKey(&recovery_key)
+        }
+    };
+    let Some(input) = choose_input()? else {
+        return Ok(None);
+    };
+    let Some(directory) = choose_destination()? else {
+        return Ok(None);
+    };
+    let _admission = service.reserve_operation(Kind::Maintenance)?;
+    let operation = service.sealed_backups.begin()?;
+    let profile = sealed::recover(&service.root, &input, &directory, unlock, &operation.cancel)
+        .map_err(|e| e.to_string())?;
+    Ok(Some(profile.to_string_lossy().into_owned()))
 }
 
 #[tauri::command]
@@ -187,6 +207,11 @@ mod tests {
     use crate::test_profile::TestProfile;
     use meeting_core::SessionStore;
 
+    fn begin_recording_during_picker(service: &Service) -> crate::operations::Lease {
+        assert!(service.sealed_backups.0.lock().unwrap().is_none());
+        service.reserve_operation(Kind::Recording).unwrap()
+    }
+
     #[test]
     fn creates_encrypted_backup_from_an_open_meeting_detail() {
         let fixture = TestProfile::new().unwrap();
@@ -203,11 +228,17 @@ mod tests {
         assert!(SessionStore::open(&root.join("sessions").join(&id)).is_err());
         let output = fixture.path().join("selected-backup.hmvault");
         let passphrase = Zeroizing::new(meeting_notes::new_job_id());
+        let mut recording = None;
+        let busy = create_backup(&service, &id, passphrase.as_bytes(), || {
+            recording = Some(begin_recording_during_picker(&service));
+            Ok(Some(output.clone()))
+        });
+        assert!(busy.is_err());
+        assert!(!output.exists());
+        drop(recording);
+
         let receipt = create_backup(&service, &id, passphrase.as_bytes(), || {
-            assert!(
-                service.data(&id).is_err(),
-                "Backup must fence detail reopens"
-            );
+            assert_eq!(service.data(&id).unwrap().id, id);
             Ok(Some(output.clone()))
         })
         .unwrap()
@@ -216,5 +247,43 @@ mod tests {
         assert_eq!(receipt.summary.meeting_id, id);
         assert!(output.is_file());
         assert_eq!(service.data(&id).unwrap().id, id);
+
+        let destination = fixture.path().join("recovery");
+        std::fs::create_dir(&destination).unwrap();
+        let mut recording = None;
+        let busy = recover_backup(
+            &service,
+            &passphrase,
+            CredentialKind::Passphrase,
+            || {
+                let _recording = begin_recording_during_picker(&service);
+                Ok(Some(output.clone()))
+            },
+            || {
+                recording = Some(begin_recording_during_picker(&service));
+                Ok(Some(destination.clone()))
+            },
+        );
+        assert!(busy.is_err());
+        assert!(std::fs::read_dir(&destination).unwrap().next().is_none());
+        drop(recording);
+
+        let restored = recover_backup(
+            &service,
+            &passphrase,
+            CredentialKind::Passphrase,
+            || Ok(Some(output.clone())),
+            || Ok(Some(destination.clone())),
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(
+            SessionStore::open(&PathBuf::from(restored).join("sessions").join(&id))
+                .unwrap()
+                .snapshot()
+                .unwrap()
+                .id,
+            id
+        );
     }
 }

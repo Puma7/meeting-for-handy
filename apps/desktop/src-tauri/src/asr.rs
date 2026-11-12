@@ -4,6 +4,7 @@ use handy_bridge::BridgeError;
 use meeting_core::{
     continues_confirmed_text, read_pcm_samples, AudioPart, SessionStore, TranscriptCheckpoint,
 };
+use meeting_notes::AnalysisControl;
 use serde::{Deserialize, Serialize};
 use std::{
     io::{BufRead, BufReader, BufWriter, Read, Write},
@@ -409,11 +410,24 @@ pub(super) struct Worker {
     stdout_thread: Option<JoinHandle<()>>,
     stderr_thread: Option<JoinHandle<()>>,
     absolute_deadline: Option<Instant>,
-    cancellation: Option<Arc<AtomicBool>>,
+    kind: WorkerKind,
 }
 enum WorkerKind {
     Asr,
     Speaker(Arc<AtomicBool>),
+    Setup(AnalysisControl),
+}
+
+impl WorkerKind {
+    fn check_cancellation(&self) -> Result<(), String> {
+        match self {
+            Self::Speaker(flag) if flag.load(Ordering::Acquire) => {
+                Err("Optional speaker analysis cancelled; recording and original transcripts are unchanged".into())
+            }
+            Self::Setup(control) => crate::setup_probe::check_cancellation(control),
+            _ => Ok(()),
+        }
+    }
 }
 
 /// Exercise the same file and worker protocol on generated samples in a private
@@ -424,6 +438,7 @@ pub(crate) fn setup_signal_probe(
     model: &handy_bridge::HandyModel,
     resolved: &handy_bridge::ResolvedModel,
     backend: &Path,
+    control: &AnalysisControl,
 ) -> Result<(bool, bool), String> {
     struct OwnedScratch(PathBuf);
     impl Drop for OwnedScratch {
@@ -431,6 +446,7 @@ pub(crate) fn setup_signal_probe(
             let _ = std::fs::remove_dir_all(&self.0);
         }
     }
+    crate::setup_probe::check_cancellation(control)?;
     let scratch = root.join(format!(".setup-probe-{}", meeting_notes::new_job_id()));
     std::fs::create_dir(&scratch).map_err(|_| "Die Testablage konnte nicht angelegt werden. / Could not create the setup scratch directory.")?;
     let scratch = OwnedScratch(scratch);
@@ -476,23 +492,26 @@ pub(crate) fn setup_signal_probe(
     if !audio {
         return Ok((false, false));
     }
-    handy_bridge::write_model_snapshot(
+    handy_bridge::write_model_snapshot_cancellable(
         store.folder(),
         model,
         resolved,
         &serde_json::json!({"synthetic":true,"purpose":"setup check"}),
+        || control.is_cancelled(),
     )
     .map_err(|error| error.to_string())?;
     let batch = model.ready_for_batch();
     let worker_check = (|| -> Result<(), String> {
-        let mut worker = Worker::start(
+        let mut worker = Worker::start_mode(
             &resolved.path,
             backend,
             store.folder(),
             if batch { "batch" } else { "system" },
             true,
             Some(Instant::now() + Duration::from_secs(90)),
-        )?;
+            WorkerKind::Setup(control.clone()),
+        )
+        .map_err(|error| error.message)?;
         if batch {
             worker.call(Request::BatchSection {
                 part: part.clone(),
@@ -625,6 +644,7 @@ impl Worker {
         absolute_deadline: Option<Instant>,
         ready_timeout: Duration,
     ) -> Result<Self, StartFailure> {
+        kind.check_cancellation()?;
         let mut child = command
             .spawn()
             .map_err(|_| "Recognition child process could not start")?;
@@ -691,10 +711,7 @@ impl Worker {
             stdout_thread: Some(stdout_thread),
             stderr_thread: Some(stderr_thread),
             absolute_deadline,
-            cancellation: match kind {
-                WorkerKind::Asr => None,
-                WorkerKind::Speaker(flag) => Some(flag),
-            },
+            kind,
         };
         worker
             .receive(ready_timeout)
@@ -712,13 +729,7 @@ impl Worker {
             |end| end.min(Instant::now() + timeout),
         );
         loop {
-            if self
-                .cancellation
-                .as_ref()
-                .is_some_and(|flag| flag.load(Ordering::Acquire))
-            {
-                return Err("Optional speaker analysis cancelled; recording and original transcripts are unchanged".into());
-            }
+            self.kind.check_cancellation()?;
             if Instant::now() >= deadline {
                 self.transient_failure.set(true);
                 return Err("Recognition worker deadline elapsed; saved audio is retained".into());
@@ -763,6 +774,7 @@ impl Worker {
     /// Send one request and read its reply; protocol/provider/storage failures are not treated as transport loss.
     pub(super) fn call(&mut self, request: Request) -> Result<Reply, String> {
         self.transient_failure.set(false);
+        self.kind.check_cancellation()?;
         let timeout = if matches!(
             &request,
             Request::SpeakerIdentity { .. } | Request::BatchSection { .. }
@@ -1985,6 +1997,53 @@ mod tests {
     // These cases test protocol classification, not shell launch latency. Use the
     // same ready budget as production; the dedicated stalled-start case stays at 2s.
     const PROTOCOL_FIXTURE_READY_TIMEOUT: Duration = Duration::from_secs(180);
+
+    #[test]
+    fn setup_worker_cancellation_reaps_its_pending_request_before_recording_admission() {
+        let gate = crate::operations::Gate::default();
+        let lease = gate
+            .try_acquire(crate::operations::Kind::SetupProbe)
+            .unwrap();
+        let control = lease.setup_control().unwrap().clone();
+        let scratch = BatchFixture::new();
+        let received = scratch.root.join("request-received");
+        #[cfg(windows)]
+        let script = r#"[Console]::Out.WriteLine('{"ok":true}');$null=[Console]::In.ReadLine();[IO.File]::WriteAllText($env:HANDYMEETING_TEST_SETUP_REQUEST,'');$null=[Console]::In.ReadLine()"#;
+        #[cfg(not(windows))]
+        let script = r#"printf '%s\n' '{"ok":true}'; IFS= read -r line; : > "$HANDYMEETING_TEST_SETUP_REQUEST"; IFS= read -r line"#;
+        let mut command = protocol_test_child(script);
+        command.env("HANDYMEETING_TEST_SETUP_REQUEST", &received);
+        let mut worker = Worker::start_command(
+            command,
+            WorkerKind::Setup(control),
+            None,
+            PROTOCOL_FIXTURE_READY_TIMEOUT,
+        )
+        .unwrap();
+        let work = thread::spawn(move || {
+            let result = worker.call(Request::Finalize);
+            assert!(worker.child.try_wait().unwrap().is_none());
+            drop(worker);
+            drop(lease);
+            result
+        });
+        let ready_by = Instant::now() + Duration::from_secs(5);
+        while !received.is_file() {
+            if Instant::now() >= ready_by {
+                // Release the fixture even when its acknowledgement is unexpectedly missing.
+                let _ = gate.acquire_recording();
+                let _ = work.join();
+                panic!("Setup fixture did not receive the request");
+            }
+            thread::sleep(Duration::from_millis(10));
+        }
+        let recording = gate.acquire_recording().unwrap();
+        assert_eq!(
+            work.join().unwrap().unwrap_err(),
+            crate::operations::SETUP_CANCELLED
+        );
+        drop(recording);
+    }
 
     #[test]
     fn batch_retries_transient_startup_but_not_protocol_or_model_failures() {

@@ -182,6 +182,17 @@ export default function EncryptedBackup({
           <code className="storage-path">{result.file}</code>
         </p>
       )}
+      {restore && result && (
+        <p>
+          {de
+            ? "Das Profil enthält lesbare Sitzungsdateien. Setze zum Öffnen im Terminal "
+            : "This profile contains readable session files. To open it, set "}
+          <code>HANDYMEETING_DATA_DIR</code>
+          {de
+            ? " auf den angezeigten Profilordner und starte Meeting for Handy aus demselben Terminal."
+            : " to the displayed profile folder in your terminal, then launch Meeting for Handy from that terminal."}
+        </p>
+      )}
       {result?.recoveryKey && (
         <div>
           <p>

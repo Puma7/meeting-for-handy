@@ -1,7 +1,10 @@
 //! Long-running work shares one admission policy. A lease is held until its work
 //! really finishes, including cancellation and unwinding, rather than until spawn.
 use meeting_notes::AnalysisControl;
-use std::sync::{Arc, Mutex, TryLockError};
+use std::{
+    sync::{Arc, Condvar, Mutex, TryLockError},
+    time::Duration,
+};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Kind {
@@ -15,6 +18,7 @@ pub(crate) enum Kind {
     Maintenance,
     Installation,
     Selection,
+    SetupProbe,
     /// Live notes write into one session folder; archive and installation must wait for them.
     LiveNotes,
 }
@@ -23,7 +27,7 @@ impl Kind {
     pub(crate) fn exclusive(self) -> bool {
         matches!(
             self,
-            Self::Maintenance | Self::Installation | Self::Selection
+            Self::Maintenance | Self::Installation | Self::Selection | Self::SetupProbe
         )
     }
     /// History questions yield to capture and retain the ordinary analysis exclusion.
@@ -41,24 +45,42 @@ impl Kind {
 
 const BUSY: &str = "Another operation is still running. Wait for it to finish or cancel it first. / Ein anderer Vorgang läuft noch. Bitte zuerst abschließen oder abbrechen.";
 const QUESTION_CANCELLING: &str = "The meeting question is stopping for recording. Try again shortly. / Die Meetingfrage wird für die Aufnahme beendet. Bitte gleich erneut versuchen.";
+const SETUP_CANCELLING: &str = "The setup check is stopping for recording. Try again shortly. / Die Funktionsprobe wird für die Aufnahme beendet. Bitte gleich erneut versuchen.";
+pub(crate) const SETUP_CANCELLED: &str = "Recording and transcription have priority. Run the setup check again after they finish. / Aufnahme und Transkription haben Vorrang. Starte die Funktionsprobe danach erneut.";
 pub(crate) const RECORDING_PRIORITY: &str = "Recording and transcription have priority. Ask again when they finish. / Aufnahme und Transkription haben Vorrang. Stelle die Frage danach erneut.";
+const UNAVAILABLE: &str = "Operation control is unavailable; saved work is preserved. / Vorgangssteuerung ist gesperrt; gesicherte Daten bleiben erhalten.";
+const SETUP_CLEANUP_WAIT: Duration = Duration::from_secs(3);
 
 struct Active {
     kind: Kind,
-    history_control: Option<AnalysisControl>,
+    control: Option<AnalysisControl>,
 }
 
 #[derive(Default)]
-pub(crate) struct Gate(Arc<Mutex<Vec<Active>>>);
+struct Admission {
+    active: Mutex<Vec<Active>>,
+    released: Condvar,
+}
+
+#[derive(Default)]
+pub(crate) struct Gate(Arc<Admission>);
 pub(crate) struct Lease {
-    gate: Arc<Mutex<Vec<Active>>>,
+    gate: Arc<Admission>,
     kind: Kind,
-    history_control: Option<AnalysisControl>,
+    control: Option<AnalysisControl>,
 }
 
 impl Lease {
     pub(crate) fn history_control(&self) -> Option<&AnalysisControl> {
-        self.history_control.as_ref()
+        self.control
+            .as_ref()
+            .filter(|_| self.kind == Kind::HistoryQuestion)
+    }
+
+    pub(crate) fn setup_control(&self) -> Option<&AnalysisControl> {
+        self.control
+            .as_ref()
+            .filter(|_| self.kind == Kind::SetupProbe)
     }
 }
 
@@ -66,14 +88,49 @@ impl Gate {
     /// Reserve admission without waiting for mutex contention or conflicting work. The returned
     /// lease must span actual work, cancellation and cleanup.
     pub(crate) fn try_acquire(&self, kind: Kind) -> Result<Lease, String> {
-        let mut active = self.0.try_lock().map_err(|error| match error {
+        self.acquire(kind, Duration::ZERO)
+    }
+
+    /// Recording can cancel the optional probe and wait briefly for its owned resources to close.
+    /// All other admission conflicts keep their existing immediate response.
+    pub(crate) fn acquire_recording(&self) -> Result<Lease, String> {
+        self.acquire(Kind::Recording, SETUP_CLEANUP_WAIT)
+    }
+
+    fn acquire(&self, kind: Kind, setup_wait: Duration) -> Result<Lease, String> {
+        let mut active = self.0.active.try_lock().map_err(|error| match error {
             TryLockError::WouldBlock => BUSY.to_owned(),
-            TryLockError::Poisoned(_) => "Operation control is unavailable; saved work is preserved. / Vorgangssteuerung ist gesperrt; gesicherte Daten bleiben erhalten.".into(),
+            TryLockError::Poisoned(_) => UNAVAILABLE.into(),
         })?;
         if kind == Kind::Recording {
-            if let Some(control) = active.iter().find_map(|work| work.history_control.as_ref()) {
+            if !setup_wait.is_zero() {
+                if let Some(control) = active
+                    .iter()
+                    .find(|work| work.kind == Kind::SetupProbe)
+                    .and_then(|work| work.control.as_ref())
+                {
+                    control.cancel();
+                    let (remaining, _) = self
+                        .0
+                        .released
+                        .wait_timeout_while(active, setup_wait, |active| {
+                            active.iter().any(|work| work.kind == Kind::SetupProbe)
+                        })
+                        .map_err(|_| UNAVAILABLE)?;
+                    active = remaining;
+                }
+            }
+            if let Some((work, control)) = active
+                .iter()
+                .find_map(|work| work.control.as_ref().map(|control| (work, control)))
+            {
                 control.cancel();
-                return Err(QUESTION_CANCELLING.into());
+                return Err(if work.kind == Kind::SetupProbe {
+                    SETUP_CANCELLING
+                } else {
+                    QUESTION_CANCELLING
+                }
+                .into());
             }
         }
         if kind == Kind::HistoryQuestion && active.iter().any(|work| work.kind == Kind::Recording) {
@@ -82,24 +139,26 @@ impl Gate {
         if active.iter().any(|work| kind.conflicts(work.kind)) {
             return Err(BUSY.into());
         }
-        let history_control = (kind == Kind::HistoryQuestion).then(AnalysisControl::default);
+        let control =
+            matches!(kind, Kind::HistoryQuestion | Kind::SetupProbe).then(AnalysisControl::default);
         active.push(Active {
             kind,
-            history_control: history_control.clone(),
+            control: control.clone(),
         });
         Ok(Lease {
             gate: self.0.clone(),
             kind,
-            history_control,
+            control,
         })
     }
 }
 impl Drop for Lease {
     /// Release only this lease kind while keeping other admitted operations reserved.
     fn drop(&mut self) {
-        if let Ok(mut active) = self.gate.lock() {
+        if let Ok(mut active) = self.gate.active.lock() {
             if let Some(index) = active.iter().position(|work| work.kind == self.kind) {
                 active.swap_remove(index);
+                self.gate.released.notify_all();
             }
         }
     }
@@ -123,6 +182,7 @@ mod tests {
             Kind::Maintenance,
             Kind::Installation,
             Kind::Selection,
+            Kind::SetupProbe,
             Kind::LiveNotes,
         ] {
             let gate = Gate::default();
@@ -148,7 +208,7 @@ mod tests {
         let speakers = gate.try_acquire(Kind::Speakers).unwrap();
         let index = gate.try_acquire(Kind::Index).unwrap();
         assert!(gate.try_acquire(Kind::Recording).is_err());
-        let locked = gate.0.lock().unwrap();
+        let locked = gate.0.active.lock().unwrap();
         assert!(gate
             .try_acquire(Kind::Maintenance)
             .err()
@@ -193,6 +253,50 @@ mod tests {
         let ordinary_analysis = gate.try_acquire(Kind::Analysis).unwrap();
         drop((recording, ordinary_analysis));
         assert!(gate.try_acquire(Kind::HistoryQuestion).is_ok());
+    }
+
+    #[test]
+    fn recording_cancels_setup_and_waits_until_its_cleanup_releases_admission() {
+        use std::{sync::mpsc, thread, time::Instant};
+
+        let gate = Arc::new(Gate::default());
+        let setup = gate.try_acquire(Kind::SetupProbe).unwrap();
+        let control = setup.setup_control().unwrap().clone();
+        let (noticed, cancellation_seen) = mpsc::channel();
+        let (finish_cleanup, release) = mpsc::channel();
+        let worker = thread::spawn(move || {
+            let deadline = Instant::now() + Duration::from_secs(2);
+            while !control.is_cancelled() {
+                assert!(Instant::now() < deadline);
+                thread::sleep(Duration::from_millis(5));
+            }
+            noticed.send(()).unwrap();
+            release.recv_timeout(Duration::from_secs(2)).unwrap();
+            drop(setup);
+        });
+        let request_gate = Arc::clone(&gate);
+        let request = thread::spawn(move || request_gate.acquire_recording());
+        cancellation_seen
+            .recv_timeout(Duration::from_secs(2))
+            .unwrap();
+        assert!(!request.is_finished());
+        assert!(gate.try_acquire(Kind::Recording).is_err());
+        assert!(gate.try_acquire(Kind::Maintenance).is_err());
+        finish_cleanup.send(()).unwrap();
+        worker.join().unwrap();
+
+        let recording = request.join().unwrap().unwrap();
+        assert!(gate.try_acquire(Kind::SetupProbe).is_err());
+        drop(recording);
+        let next = gate.try_acquire(Kind::SetupProbe).unwrap();
+        assert!(!next.setup_control().unwrap().is_cancelled());
+        assert_eq!(
+            gate.acquire(Kind::Recording, Duration::from_millis(10))
+                .err()
+                .unwrap(),
+            SETUP_CANCELLING,
+        );
+        assert!(next.setup_control().unwrap().is_cancelled());
     }
 
     /// Verify unwinding releases synthetic analysis admission without releasing concurrent

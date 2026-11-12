@@ -42,7 +42,8 @@ export function meetingAnswers(
               return item.kind === "task" && item.status === filter;
             return filter === "decisions"
               ? item.kind === "decision" && item.status === "recorded"
-              : item.kind === "impulse" && item.status === "open";
+              : item.kind === "impulse" &&
+                  (item.status === "open" || item.status === "unclear");
           })
           .map((item) => ({
             id: item.id,
