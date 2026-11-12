@@ -33,6 +33,8 @@ mod speaker_commands;
 mod speaker_jobs;
 mod system_load;
 mod template_commands;
+#[cfg(test)]
+mod test_profile;
 mod update_commands;
 mod updater;
 

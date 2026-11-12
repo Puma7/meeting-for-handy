@@ -184,31 +184,13 @@ pub(crate) fn cancel_encrypted_backup(service: State<'_, Arc<Service>>) -> AppRe
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_profile::TestProfile;
     use meeting_core::SessionStore;
-    use std::fs;
-
-    struct Fixture(PathBuf);
-
-    impl Drop for Fixture {
-        fn drop(&mut self) {
-            if self
-                .0
-                .canonicalize()
-                .as_ref()
-                .is_ok_and(|path| path == &self.0)
-            {
-                let _ = fs::remove_dir_all(&self.0);
-            }
-        }
-    }
 
     #[test]
     fn creates_encrypted_backup_from_an_open_meeting_detail() {
-        let temp = std::env::temp_dir().canonicalize().unwrap();
-        let fixture = temp.join(format!("hm-sealed-detail-{}", meeting_notes::new_job_id()));
-        fs::create_dir(&fixture).unwrap();
-        let fixture = Fixture(fixture);
-        let root = fixture.0.join("profile");
+        let fixture = TestProfile::new().unwrap();
+        let root = fixture.path().join("profile");
         let service = Arc::new(Service::new(root.clone()).unwrap());
         let store =
             SessionStore::create(&root.join("sessions"), "Synthetic meeting", "m", "s", None)
@@ -219,7 +201,7 @@ mod tests {
 
         assert_eq!(service.data(&id).unwrap().id, id);
         assert!(SessionStore::open(&root.join("sessions").join(&id)).is_err());
-        let output = fixture.0.join("selected-backup.hmvault");
+        let output = fixture.path().join("selected-backup.hmvault");
         let passphrase = Zeroizing::new(meeting_notes::new_job_id());
         let receipt = create_backup(&service, &id, passphrase.as_bytes(), || {
             assert!(

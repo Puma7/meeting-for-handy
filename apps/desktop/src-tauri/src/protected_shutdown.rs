@@ -139,10 +139,11 @@ fn finish(service: &Service, app: &AppHandle, code: i32, exit: Exit) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_profile::TestProfile;
 
     #[test]
     fn preparing_shutdown_holds_admission_through_teardown() {
-        let directory = tempfile::tempdir().unwrap();
+        let directory = TestProfile::new().unwrap();
         let service = Service::new(directory.path().to_owned()).unwrap();
         let existing = service.reserve_operation(operations::Kind::Index).unwrap();
         assert!(prepare(&service).is_err());
@@ -157,7 +158,7 @@ mod tests {
 
     #[test]
     fn shutdown_releases_the_cached_session_and_its_mirror() {
-        let directory = tempfile::tempdir().unwrap();
+        let directory = TestProfile::new().unwrap();
         let service = Service::new(directory.path().to_owned()).unwrap();
         let store = meeting_core::SessionStore::create(
             &service.root.join("sessions"),
