@@ -8,6 +8,7 @@ import {
 import type { DesktopApi, Meeting } from "../types";
 import { LiveWorkspace } from "./shell/LiveWorkspace.jsx";
 import { createPortal } from "react-dom";
+import { getVersion } from "@tauri-apps/api/app";
 import workspaceCss from "./shell/workspace.css?inline";
 import overviewCss from "./shell/overview.css?inline";
 import densityCss from "./shell/density.css?inline";
@@ -51,6 +52,10 @@ export interface WorkspaceState {
     status: string;
     evidence: { sourceId: string; quote: string }[];
   }[];
+  inheritedConfirmations?: Record<
+    string,
+    { revision: number; eventId: string | null }
+  >;
   overviewRefs: string[];
   contextExcludedIds?: string[];
   supersededSources?: string[];
@@ -132,6 +137,9 @@ export default function WorkspaceBridge({
         ? (id: string, runId: string, version: string) =>
             api.readWorkspaceHistory!(id, runId, version)
         : undefined,
+      exportResults: api.exportWorkspaceResults
+        ? (runId: string) => api.exportWorkspaceResults!(meeting.id, runId)
+        : undefined,
       start: (
         request: Parameters<NonNullable<DesktopApi["startLiveNotes"]>>[0],
       ) =>
@@ -148,8 +156,11 @@ export default function WorkspaceBridge({
       context: (context: WorkspaceContext, runId: string) =>
         api.setWorkspaceContext!(meeting.id, runId, context),
       models: () => api.localModelSetup!(),
+      version: getVersion,
+      copy: (text: string) => api.copyText(text),
       sourceAudio: api.getSourceAudio
-        ? (file: string) => api.getSourceAudio!(meeting.id, file)
+        ? (sourceId: string, runId: string) =>
+            api.getSourceAudio!(meeting.id, runId, sourceId)
         : undefined,
     }),
     [api, meeting.id, apiKey, useSavedKey, outputLanguage, workspacePrompt],

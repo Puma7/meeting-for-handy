@@ -26,7 +26,7 @@ pub use model::{
 pub use pcm::{read_pcm_samples, PcmWriter, SAMPLE_RATE};
 pub use storage::{
     continues_confirmed_text, inspect_journals, inspect_manifest, list_sessions, read_closed_audio,
-    read_closed_audio_preview, read_legacy, SessionStore,
+    read_closed_audio_preview, read_closed_audio_preview_at, read_legacy, SessionStore,
 };
 
 pub type Result<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;

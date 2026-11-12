@@ -3,6 +3,23 @@ import type {
   WorkspaceState,
 } from "./workspace/WorkspaceBridge";
 export type Locale = "de" | "en";
+export type BackupCredential = "passphrase" | "recoveryKey";
+
+export type ProtectedProfileProvider =
+  | "windowsEfs"
+  | "macosImage"
+  | "linuxGocryptfs";
+export type ProtectedProfileStatus = {
+  supported: boolean;
+  active: boolean;
+  provider: ProtectedProfileProvider;
+  migration?: "copying" | "cancelling" | null;
+};
+export type ProtectedProfileReceipt = {
+  path: string;
+  files: number;
+  bytes: number;
+};
 export type Theme = "light" | "dark" | "system";
 export type Track = "system" | "microphone";
 export interface HandyModel {
@@ -100,6 +117,32 @@ export interface SearchPage {
   total: number;
   offset: number;
   limit: number;
+}
+export interface SearchScope {
+  fromMs?: number;
+  beforeMs?: number;
+  pinnedOnly?: boolean;
+  transcriptOnly?: boolean;
+}
+export interface HistoryQuestionRequest {
+  question: string;
+  scope?: SearchScope;
+  meetingIds?: string[];
+  endpoint: string;
+  model: string;
+  apiKey?: string;
+  useSavedKey?: boolean;
+}
+export interface HistoryCitation {
+  meetingId: string;
+  meetingTitle: string;
+  sourceId: string;
+  startMs: number;
+  quote: string;
+}
+export interface HistoryAnswer {
+  searchedPassages: number;
+  citations: HistoryCitation[];
 }
 export interface LibraryProgress {
   jobId: string;
@@ -307,6 +350,8 @@ export interface LiveView {
       finish: "stop" | "length" | "filtered" | "other" | null;
       elapsedMs: number;
       outputLimit: number;
+      promptTokens?: number | null;
+      completionTokens?: number | null;
     };
   } | null;
   /** Independent coverage and timestamp of the rolling overview; older backends omit them. */
@@ -332,6 +377,9 @@ export interface LiveView {
   damagedRuns: number;
 }
 export interface LiveNotesStatus {
+  /** Workspace entries whose literal evidence matches the current transcript. */
+  confirmableWorkspaceEntries?: string[];
+  preparingModel?: boolean;
   updateElapsedMs?: number;
   responseBytes?: number;
   responseIdleMs?: number;
@@ -339,6 +387,7 @@ export interface LiveNotesStatus {
   /** Native worker has acknowledged a manual request, including while ASR has priority. */
   refreshRequested?: boolean;
   waitingForTranscript?: boolean;
+  waitingForMemory?: boolean;
   meetingId: string;
   status:
     | "off"
@@ -528,7 +577,37 @@ export interface DesktopApi {
     query: string,
     offset: number,
     limit: number,
+    scope?: SearchScope,
   ): Promise<SearchPage>;
+  askMeetingHistory?(request: HistoryQuestionRequest): Promise<HistoryAnswer>;
+  createEncryptedBackup?(
+    meetingId: string,
+    passphrase: string,
+  ): Promise<{
+    file: string;
+    summary: { meetingId: string; files: number; bytes: number };
+    recoveryKey: string;
+  } | null>;
+  recoverEncryptedBackup?(
+    credential: string,
+    kind: BackupCredential,
+  ): Promise<string | null>;
+  cancelEncryptedBackup?(): Promise<boolean>;
+  protectedProfileStatus?(): Promise<ProtectedProfileStatus>;
+  createProtectedProfile?(
+    passphrase?: string,
+  ): Promise<ProtectedProfileReceipt | null>;
+  cancelProtectedProfileMigration?(): Promise<boolean>;
+  openProtectedProfile?(passphrase?: string): Promise<boolean | null>;
+  checkMeetingSetup?(request: {
+    modelId: string;
+    text?: Omit<HistoryQuestionRequest, "question" | "scope" | "meetingIds">;
+  }): Promise<{
+    audioRoundtrip: boolean;
+    transcriptionWorker: boolean;
+    textAnswer: boolean | null;
+  }>;
+  cancelMeetingSetup?(): Promise<boolean>;
   rebuildSearchIndex?(): Promise<string>;
   getLibraryProgress?(): Promise<LibraryProgress | null>;
   cancelLibraryJob?(jobId: string): Promise<boolean>;
@@ -563,13 +642,19 @@ export interface DesktopApi {
   listTextModels(endpoint: string): Promise<string[]>;
   getNotesProgress(): Promise<NotesProgress | null>;
   cancelNotes(jobId: string): Promise<boolean>;
-  getSourceAudio?(id: string, file: string): Promise<ArrayBuffer>;
+  getSourceAudio?(
+    id: string,
+    runId: string,
+    sourceId: string,
+  ): Promise<ArrayBuffer>;
+  getTranscriptAudio?(id: string, sourceId: string): Promise<ArrayBuffer>;
   listWorkspaceHistory?(meetingId: string): Promise<WorkspaceHistoryListing>;
   readWorkspaceHistory?(
     meetingId: string,
     runId: string,
     promptVersion: string,
   ): Promise<SavedWorkspace>;
+  exportWorkspaceResults?(meetingId: string, runId: string): Promise<string>;
   setWorkspaceContext?(
     meetingId: string,
     runId: string,

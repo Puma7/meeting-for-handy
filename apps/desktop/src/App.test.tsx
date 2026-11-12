@@ -9,6 +9,7 @@ import {
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import App from "./App";
+import * as MeetingView from "./views/MeetingView";
 import { testServices } from "./test-services";
 import { defaultTemplate, renderTranscript, validateLibrary } from "./domain";
 import { de, en } from "./i18n";
@@ -452,6 +453,47 @@ async function ready() {
   );
 }
 beforeEach(() => localStorage.clear());
+
+it.each(["session", "saved"] as const)(
+  "changes the setup probe identity for the %s credential choice without exposing the key",
+  async (choice) => {
+    const api = fakeApi();
+    api.credentialStatus = vi.fn().mockResolvedValue({
+      state: "stored",
+      provider: "synthetic",
+      message: null,
+    });
+    api.checkMeetingSetup = vi.fn();
+    const view = vi.spyOn(MeetingView, "default");
+    const probeKey = () => view.mock.lastCall?.[0].textModelCheck?.probeKey;
+    const syntheticKey = "synthetic-session-secret";
+    try {
+      render(<App api={api} />);
+      await screen.findByRole("button", { name: de.settings });
+      const first = probeKey();
+      expect(first).toBeTruthy();
+      await userEvent.click(screen.getByRole("button", { name: de.settings }));
+      await userEvent.click(screen.getByText(de.apiKey));
+      const saved = await screen.findByRole("checkbox", {
+        name: de.useSavedKey,
+      });
+      if (choice === "saved") await userEvent.click(saved);
+      else {
+        await userEvent.type(
+          screen.getByLabelText(de.sessionKey),
+          syntheticKey,
+        );
+      }
+      await userEvent.click(screen.getByRole("button", { name: de.meeting }));
+      const latest = probeKey();
+      expect(latest).toBeTruthy();
+      expect(latest).not.toBe(first);
+      expect(latest).not.toContain(syntheticKey);
+    } finally {
+      view.mockRestore();
+    }
+  },
+);
 
 it.each(
   (["de", "en"] as const).flatMap((locale) =>
@@ -2009,6 +2051,400 @@ describe("template structure", () => {
 });
 
 describe("workspace navigation (synthetic IPC)", () => {
+  async function openMeetingBackup(title: string) {
+    await userEvent.click(screen.getByRole("button", { name: "Historie" }));
+    const row = (await screen.findByText(title)).closest(
+      ".session-row",
+    ) as HTMLElement;
+    await userEvent.click(within(row).getByRole("button", { name: "Öffnen" }));
+    await userEvent.click(
+      await screen.findByText("Verschlüsselte Kopie erstellen", {
+        selector: "summary",
+      }),
+    );
+  }
+
+  async function submitMeetingBackup() {
+    fireEvent.change(screen.getByLabelText("Passphrase"), {
+      target: { value: "synthetic passphrase" },
+    });
+    fireEvent.change(screen.getByLabelText("Passphrase wiederholen"), {
+      target: { value: "synthetic passphrase" },
+    });
+    await userEvent.click(
+      screen.getByRole("button", { name: "Verschlüsselte Kopie erstellen" }),
+    );
+  }
+
+  it("preserves a delayed backup error only for its meeting until a valid retry", async () => {
+    const other = {
+      ...meeting,
+      id: "other-synthetic-session",
+      title: "Another meeting",
+    };
+    const api = fakeApi();
+    api.listMeetings = vi.fn().mockResolvedValue([meeting, other]);
+    api.getMeeting = vi.fn(async (id: string) =>
+      id === meeting.id ? meeting : other,
+    );
+    let rejectBackup!: (message: string) => void;
+    const pending = new Promise<never>((_, reject) => {
+      rejectBackup = reject;
+    });
+    let cancelRetry!: () => void;
+    const retry = new Promise<null>((resolve) => {
+      cancelRetry = () => resolve(null);
+    });
+    api.createEncryptedBackup = vi
+      .fn()
+      .mockReturnValueOnce(pending)
+      .mockReturnValueOnce(retry);
+    const path = "D:/synthetic/uncertain.hmvault";
+    const message = `Could not synchronize the selected folder.\nThe app could not confirm the backup's durability at ${path}. If the file is present, verify it with the passphrase before relying on it. A recovery key was not delivered.`;
+    render(<App api={api} />);
+    await ready();
+    await openMeetingBackup(meeting.title);
+    await submitMeetingBackup();
+    await openMeetingBackup(other.title);
+    await act(async () => rejectBackup(message));
+    expect(screen.queryByText(/uncertain\.hmvault/)).toBeNull();
+    await openMeetingBackup(meeting.title);
+    const alert = await screen.findByText(/uncertain\.hmvault/);
+    expect(alert.getAttribute("role")).toBe("alert");
+    expect(alert.textContent).toBe(message);
+    await submitMeetingBackup();
+    expect(screen.queryByText(/uncertain\.hmvault/)).toBeNull();
+    await act(async () => cancelRetry());
+    await openMeetingBackup(other.title);
+    await openMeetingBackup(meeting.title);
+    expect(screen.queryByText(/uncertain\.hmvault/)).toBeNull();
+    expect(api.createEncryptedBackup).toHaveBeenCalledTimes(2);
+  });
+
+  it.each([false, true])(
+    "prioritizes final backup failure when cancellation rejects last: %s",
+    async (cancelLast) => {
+      const api = fakeApi();
+      let failBackup!: (message: string) => void;
+      let failCancellation!: (message: string) => void;
+      api.createEncryptedBackup = vi.fn(
+        () =>
+          new Promise<never>((_, reject) => {
+            failBackup = reject;
+          }),
+      );
+      api.cancelEncryptedBackup = vi.fn(
+        () =>
+          new Promise<never>((_, reject) => {
+            failCancellation = reject;
+          }),
+      );
+      const cancellationError = "Synthetic cancellation IPC failure";
+      const backupError =
+        "The app could not confirm the backup's durability at D:/synthetic/uncertain.hmvault. A recovery key was not delivered.";
+      render(<App api={api} />);
+      await ready();
+      await openMeetingBackup(meeting.title);
+      await submitMeetingBackup();
+      await userEvent.click(screen.getByRole("button", { name: "Abbrechen" }));
+      expect(api.cancelEncryptedBackup).toHaveBeenCalledOnce();
+      if (cancelLast) {
+        await act(async () => failBackup(backupError));
+        expect(await screen.findByText(backupError)).toBeTruthy();
+        await act(async () => failCancellation(cancellationError));
+      } else {
+        await act(async () => failCancellation(cancellationError));
+        expect(await screen.findByText(cancellationError)).toBeTruthy();
+        await act(async () => failBackup(backupError));
+      }
+      expect(screen.getByRole("alert").textContent).toBe(backupError);
+      expect(screen.queryByText(cancellationError)).toBeNull();
+    },
+  );
+
+  it("preserves a completed backup receipt only for its meeting after navigating away", async () => {
+    const other = {
+      ...meeting,
+      id: "other-synthetic-session",
+      title: "Another meeting",
+    };
+    const api = fakeApi();
+    api.listMeetings = vi.fn().mockResolvedValue([meeting, other]);
+    api.getMeeting = vi.fn(async (id: string) =>
+      id === meeting.id ? meeting : other,
+    );
+    type Receipt = NonNullable<
+      Awaited<ReturnType<NonNullable<DesktopApi["createEncryptedBackup"]>>>
+    >;
+    let finish!: (receipt: Receipt) => void;
+    const pending = new Promise<Receipt>((resolve) => {
+      finish = resolve;
+    });
+    api.createEncryptedBackup = vi.fn(() => pending);
+    let finishCancel!: (accepted: boolean) => void;
+    const cancelling = new Promise<boolean>((resolve) => {
+      finishCancel = resolve;
+    });
+    api.cancelEncryptedBackup = vi.fn(() => cancelling);
+    const key = "af".repeat(32);
+    const file = "synthetic-a.hmvault";
+    render(<App api={api} />);
+    await ready();
+    await openMeetingBackup(meeting.title);
+    await submitMeetingBackup();
+    expect(api.createEncryptedBackup).toHaveBeenCalledExactlyOnceWith(
+      meeting.id,
+      "synthetic passphrase",
+    );
+    await openMeetingBackup(other.title);
+    expect(screen.queryByText("Vorgang läuft …")).toBeNull();
+    await openMeetingBackup(meeting.title);
+    expect(screen.getByText("Vorgang läuft …")).toBeTruthy();
+    expect(
+      screen
+        .getByRole("button", { name: "Verschlüsselte Kopie erstellen" })
+        .matches(":disabled"),
+    ).toBe(true);
+    await userEvent.click(screen.getByRole("button", { name: "Abbrechen" }));
+    expect(api.cancelEncryptedBackup).toHaveBeenCalledOnce();
+    await openMeetingBackup(other.title);
+    await openMeetingBackup(meeting.title);
+    expect(screen.getByText("Abbruch angefordert …")).toBeTruthy();
+    await act(async () => finishCancel(false));
+    expect(screen.getByRole("button", { name: "Abbrechen" })).toHaveProperty(
+      "disabled",
+      false,
+    );
+    await openMeetingBackup(other.title);
+    await act(async () =>
+      finish({
+        file,
+        recoveryKey: key,
+        summary: { meetingId: meeting.id, files: 1, bytes: 1 },
+      }),
+    );
+    expect(screen.queryByDisplayValue(key)).toBeNull();
+    expect(screen.queryByText(file)).toBeNull();
+    await openMeetingBackup(meeting.title);
+    expect(screen.getByDisplayValue(key)).toBeTruthy();
+    expect(screen.getByText(file)).toBeTruthy();
+    await userEvent.click(
+      screen.getByRole("button", { name: "Schlüssel ausblenden" }),
+    );
+    await openMeetingBackup(other.title);
+    await openMeetingBackup(meeting.title);
+    expect(screen.queryByDisplayValue(key)).toBeNull();
+    expect(screen.getByText(file)).toBeTruthy();
+    expect(Object.values(localStorage).join(" ")).not.toContain(key);
+  });
+
+  it.each([false, true])(
+    "discards a VIP-only answer after unpinning (return before save: %s)",
+    async (returnBeforeSave) => {
+      localStorage.setItem(
+        "handymeeting.rust.live-notes.v1",
+        JSON.stringify({
+          endpoint: "http://127.0.0.1:1235/v1/",
+          model: "synthetic-text-model",
+        }),
+      );
+      let labelled = {
+        ...meeting,
+        userMetadata: {
+          revision: 0,
+          title: null,
+          pinned: true,
+          audioRemoved: false,
+        },
+      };
+      const api = fakeApi();
+      api.listMeetings = vi.fn(async () => [labelled]);
+      api.getMeeting = vi.fn(async () => labelled);
+      api.searchMeetings = vi.fn();
+      let finishUnpin = () => {};
+      const saveReady = returnBeforeSave
+        ? new Promise<void>((resolve) => {
+            finishUnpin = resolve;
+          })
+        : Promise.resolve();
+      api.editMeetingMetadata = vi.fn(async (_id, revision, _title, pinned) => {
+        await saveReady;
+        labelled = {
+          ...labelled,
+          userMetadata: {
+            ...labelled.userMetadata,
+            revision: revision + 1,
+            pinned,
+          },
+        };
+        return labelled.userMetadata;
+      });
+      api.askMeetingHistory = vi
+        .fn()
+        .mockResolvedValueOnce({
+          searchedPassages: 1,
+          citations: [
+            {
+              meetingId: meeting.id,
+              meetingTitle: meeting.title,
+              sourceId: meeting.parts[0].file,
+              startMs: 0,
+              quote: meeting.parts[0].text,
+            },
+          ],
+        })
+        .mockResolvedValue({ searchedPassages: 0, citations: [] });
+      render(<App api={api} />);
+      await ready();
+      const user = userEvent.setup();
+      await user.click(screen.getByRole("button", { name: "Historie" }));
+      await user.click(
+        screen.getByRole("checkbox", { name: "Nur VIP-Meetings" }),
+      );
+      await user.click(screen.getByText("Meetings befragen"));
+      await user.click(
+        screen.getByText("Alle Meetings im gewählten Zeitraum und VIP-Filter"),
+      );
+      await user.click(
+        screen.getByRole("checkbox", { name: /Synthetic meeting/ }),
+      );
+      await user.type(
+        screen.getByLabelText("Frage an deine Meetings"),
+        "Was wurde entschieden?",
+      );
+      await user.click(
+        screen.getByRole("button", { name: "Lokal beantworten" }),
+      );
+      await user.click(
+        await screen.findByRole("button", { name: "Originalstelle öffnen" }),
+      );
+      await user.click(
+        await screen.findByRole("button", {
+          name: "VIP · vor Aufräumen geschützt",
+        }),
+      );
+      await waitFor(() =>
+        expect(api.editMeetingMetadata).toHaveBeenCalledWith(
+          meeting.id,
+          0,
+          null,
+          false,
+        ),
+      );
+      await user.click(screen.getByRole("button", { name: "Historie" }));
+      expect(
+        screen.getByRole("checkbox", { name: "Nur VIP-Meetings" }),
+      ).toHaveProperty("checked", true);
+      if (returnBeforeSave) {
+        expect(
+          await screen.findByRole("button", { name: "Originalstelle öffnen" }),
+        ).toBeTruthy();
+        await act(async () => finishUnpin());
+        await waitFor(() =>
+          expect(
+            screen.queryByRole("button", { name: "Originalstelle öffnen" }),
+          ).toBeNull(),
+        );
+        await user.click(
+          screen.getByRole("button", { name: "Lokal beantworten" }),
+        );
+        expect(api.askMeetingHistory).toHaveBeenCalledTimes(2);
+        expect(
+          vi.mocked(api.askMeetingHistory!).mock.lastCall?.[0],
+        ).not.toHaveProperty("meetingIds");
+        return;
+      }
+      expect(
+        screen.queryByRole("button", { name: "Originalstelle öffnen" }),
+      ).toBeNull();
+      await user.click(screen.getByText("Meetings befragen"));
+      expect(screen.getByLabelText("Frage an deine Meetings")).toHaveProperty(
+        "value",
+        "",
+      );
+    },
+  );
+
+  it("keeps calendar preparation discoverable beside the closed capture setup", async () => {
+    render(<App api={fakeApi(meeting)} />);
+    await ready();
+    const setup = document.querySelector<HTMLDetailsElement>(
+      "details.setup-details",
+    )!;
+    if (setup.open) await userEvent.click(setup.querySelector("summary")!);
+    expect(setup.open).toBe(false);
+    const calendar = await screen.findByText(
+      "Meeting aus Kalenderdatei vorbereiten",
+      { selector: "summary" },
+    );
+    expect(calendar.closest(".setup-details")).toBeNull();
+    await userEvent.click(calendar);
+    expect(screen.getByLabelText("Kalenderdatei (.ics)")).toBeTruthy();
+    expect(setup.open).toBe(false);
+  });
+
+  it("opens the verified original and keeps the answer when returning to check other citations", async () => {
+    localStorage.setItem(
+      "handymeeting.rust.live-notes.v1",
+      JSON.stringify({
+        endpoint: "http://127.0.0.1:1235/v1/",
+        model: "synthetic-text-model",
+      }),
+    );
+    const api = fakeApi(meeting);
+    api.searchMeetings = vi.fn();
+    api.askMeetingHistory = vi.fn().mockResolvedValue({
+      searchedPassages: 1,
+      citations: [
+        {
+          meetingId: meeting.id,
+          meetingTitle: meeting.title,
+          sourceId: meeting.parts[0].file,
+          startMs: 0,
+          quote: meeting.parts[0].text!,
+        },
+        {
+          meetingId: meeting.id,
+          meetingTitle: meeting.title,
+          sourceId: meeting.parts[0].file,
+          startMs: 0,
+          quote: "Ein alter Wortlaut aus einem früheren Transkriptstand.",
+        },
+      ],
+    });
+    render(<App api={api} />);
+    await ready();
+    await userEvent.click(screen.getByRole("button", { name: "Historie" }));
+    await userEvent.click(screen.getByText("Meetings befragen"));
+    await userEvent.type(
+      screen.getByLabelText("Frage an deine Meetings"),
+      "Was wurde entschieden?",
+    );
+    await userEvent.click(
+      screen.getByRole("button", { name: "Lokal beantworten" }),
+    );
+    const links = await screen.findAllByRole("button", {
+      name: "Originalstelle öffnen",
+    });
+    await userEvent.click(links[0]);
+    await screen.findByRole("heading", { name: "Sitzungsdetails" });
+    expect(document.querySelector("[data-highlighted]")?.textContent).toContain(
+      meeting.parts[0].text,
+    );
+    await userEvent.click(screen.getByRole("button", { name: "Historie" }));
+    const retained = screen.getAllByRole("button", {
+      name: "Originalstelle öffnen",
+    });
+    await userEvent.click(retained[1]);
+    expect(api.askMeetingHistory).toHaveBeenCalledTimes(1);
+    await screen.findByText(
+      "Die Originalstelle hat sich geändert. Stelle die Frage erneut.",
+    );
+    expect(
+      screen.queryByRole("heading", { name: "Sitzungsdetails" }),
+    ).toBeNull();
+  });
+
   it("keeps an explicit search source visible after resetting the previous page", async () => {
     const consoleError = vi.spyOn(console, "error");
     const api = fakeApi(meeting);
@@ -2044,6 +2480,17 @@ describe("workspace navigation (synthetic IPC)", () => {
       await userEvent.type(screen.getByRole("searchbox"), "Quelle");
       await screen.findByText(meeting.parts[0].text!);
       expect(api.searchMeetings).toHaveBeenCalledWith("Quelle", 0, 25);
+      await userEvent.click(
+        screen.getByRole("checkbox", { name: "Nur Treffer im Transkript" }),
+      );
+      await waitFor(() =>
+        expect(api.searchMeetings).toHaveBeenLastCalledWith(
+          "Quelle",
+          0,
+          25,
+          expect.objectContaining({ pinnedOnly: false, transcriptOnly: true }),
+        ),
+      );
       const main = screen.getByRole("main");
       main.scrollTop = 747;
       await userEvent.click(
@@ -2055,6 +2502,17 @@ describe("workspace navigation (synthetic IPC)", () => {
         meeting.parts[0].text,
       );
       expect(main.scrollTop).toBe(300);
+      await userEvent.click(screen.getByRole("button", { name: "Historie" }));
+      expect((screen.getByRole("searchbox") as HTMLInputElement).value).toBe(
+        "Quelle",
+      );
+      expect(
+        (
+          screen.getByRole("checkbox", {
+            name: "Nur Treffer im Transkript",
+          }) as HTMLInputElement
+        ).checked,
+      ).toBe(true);
       expect(consoleError).not.toHaveBeenCalled();
     } finally {
       Element.prototype.scrollIntoView = previousScroll;

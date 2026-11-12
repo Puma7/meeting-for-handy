@@ -1,6 +1,7 @@
 use crate::{Evidence, Source};
 use anyhow::{ensure, Result};
 use serde::{Deserialize, Serialize};
+use std::collections::{BTreeMap, HashMap};
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -108,6 +109,15 @@ pub struct Event {
     pub status: String,
     pub evidence: Vec<Evidence>,
 }
+
+/// Associate a destination revision with its immutable source confirmation, if any.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct InheritedConfirmation {
+    pub(crate) revision: u64,
+    pub(crate) event_id: Option<String>,
+}
+
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct WorkspaceState {
@@ -131,6 +141,8 @@ pub struct WorkspaceState {
     pub context: WorkspaceContext,
     pub entities: Vec<Entity>,
     pub events: Vec<Event>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub(crate) inherited_confirmations: BTreeMap<String, InheritedConfirmation>,
     pub overview_refs: Vec<String>,
     pub originals: Vec<Source>,
     #[serde(skip_serializing)]
@@ -139,6 +151,62 @@ pub struct WorkspaceState {
     pub(crate) inherited_sources: Vec<crate::live::LiveSource>,
 }
 impl WorkspaceState {
+    /// Resolve only exact, current human confirmations. Inherited revisions use the
+    /// original event identity, while older journals retain their direct revision match.
+    pub fn current_confirmations(&self) -> HashMap<&str, &Event> {
+        let entries: HashMap<_, _> = self
+            .entities
+            .iter()
+            .filter(|entry| {
+                entry.human_locked
+                    && !self.context_excluded_ids.contains(&entry.id)
+                    && !entry.evidence.is_empty()
+                    && entry
+                        .evidence
+                        .iter()
+                        .all(|evidence| !self.superseded_sources.contains(&evidence.source_id))
+            })
+            .map(|entry| (entry.id.as_str(), entry))
+            .collect();
+        self.events
+            .iter()
+            .filter(|event| event.human && event.status == "confirmed")
+            .filter_map(|event| {
+                let entry = entries.get(event.entity_id.as_str())?;
+                let exact_revision = self
+                    .inherited_confirmations
+                    .get(&entry.id)
+                    .filter(|binding| binding.revision == entry.revision)
+                    .map_or(event.revision == entry.revision, |binding| {
+                        binding.event_id.as_ref() == Some(&event.id)
+                    });
+                (exact_revision && event.text == entry.text && event.evidence == entry.evidence)
+                    .then_some((entry.id.as_str(), event))
+            })
+            .collect()
+    }
+
+    /// Resolve a current original to its internal transcript chunk without exposing its file key.
+    pub fn audio_source(&self, id: &str) -> Option<&crate::live::LiveSource> {
+        if self.superseded_sources.iter().any(|old| old == id) {
+            return None;
+        }
+        let original = self.originals.iter().find(|source| source.id == id)?;
+        let mut candidates =
+            self.processed
+                .iter()
+                .chain(&self.inherited_sources)
+                .filter(|source| {
+                    source.source == original.source
+                        && source.start_ms == original.start_ms
+                        && source.end_ms == original.end_ms
+                        && source.text == original.text
+                        && super::source_id(source) == id
+                });
+        let source = candidates.next()?;
+        candidates.all(|other| other == source).then_some(source)
+    }
+
     /// Preserve the exact prompt generation of immutable historical revisions.
     pub fn prompt_version(&self) -> &str {
         self.stored_prompt_version
@@ -209,8 +277,16 @@ impl WorkspaceState {
                 .iter_mut()
                 .find(|e| e.id == action.id)
                 .ok_or_else(|| anyhow::anyhow!("Der manuell geänderte Eintrag fehlt."))?;
+            let confirmation = action.status == "confirmed";
+            // A confirmation is separate from the task or decision's lifecycle.
+            use sha2::{Digest, Sha256};
+            let event_id = format!("h_{:x}", Sha256::digest(key.as_bytes()));
+            if confirmation && self.events.iter().any(|event| event.id == event_id) {
+                self.applied_overrides.push(key);
+                continue;
+            }
             if e.human_locked
-                && e.revision == action.expected_revision + 1
+                && Some(e.revision) == action.expected_revision.checked_add(1)
                 && e.status == action.status
             {
                 self.applied_overrides.push(key);
@@ -218,18 +294,34 @@ impl WorkspaceState {
             }
             ensure!(
                 e.revision == action.expected_revision
-                    && ["open", "discussed", "completed"].contains(&action.status.as_str()),
+                    && (confirmation
+                        || ["open", "discussed", "completed"].contains(&action.status.as_str())),
                 "Der Eintrag wurde inzwischen geändert. Bitte den aktuellen Stand verwenden."
             );
-            e.status = action.status.clone();
+            if confirmation {
+                ensure!(
+                    !self.context_excluded_ids.contains(&e.id)
+                        && !e.evidence.is_empty()
+                        && e.evidence.iter().all(|evidence| {
+                            !evidence.quote.trim().is_empty()
+                                && !self.superseded_sources.contains(&evidence.source_id)
+                                && self.originals.iter().any(|source| {
+                                    source.id == evidence.source_id
+                                        && source.text.contains(&evidence.quote)
+                                })
+                        }),
+                    "Zum Bestätigen wird ein aktueller Originalbeleg benötigt."
+                );
+            } else {
+                e.status = action.status.clone();
+            }
             e.revision += 1;
             e.human_locked = true;
             // The persisted override identifies this event deterministically even when
             // a context journal is replayed before its next model-state checkpoint.
-            use sha2::{Digest, Sha256};
             self.events.push(Event {
                 human: true,
-                id: format!("h_{:x}", Sha256::digest(key.as_bytes())),
+                id: event_id,
                 entity_id: e.id.clone(),
                 revision: e.revision,
                 at_ms: self
@@ -239,8 +331,16 @@ impl WorkspaceState {
                     .max()
                     .unwrap_or(0),
                 text: e.text.clone(),
-                status: e.status.clone(),
-                evidence: vec![],
+                status: if confirmation {
+                    "confirmed".into()
+                } else {
+                    e.status.clone()
+                },
+                evidence: if confirmation {
+                    e.evidence.clone()
+                } else {
+                    vec![]
+                },
             });
             self.applied_overrides.push(key);
         }
@@ -276,6 +376,69 @@ impl WorkspaceState {
         self.context = context.clone();
         Ok(())
     }
+}
+
+#[test]
+fn content_confirmation_is_revision_bound_and_replays_with_its_exact_evidence() {
+    let quote = "Robin will send the final agenda on Friday.";
+    let evidence = Evidence {
+        source_id: "C1".into(),
+        quote: quote.into(),
+    };
+    let mut state = WorkspaceState {
+        originals: vec![Source {
+            id: "C1".into(),
+            source: "system".into(),
+            start_ms: 0,
+            end_ms: 1_000,
+            text: quote.into(),
+        }],
+        entities: vec![Entity {
+            id: "task1".into(),
+            revision: 1,
+            kind: "task".into(),
+            text: "Send the final agenda.".into(),
+            status: "open".into(),
+            attention: "normal".into(),
+            owner: None,
+            due: None,
+            evidence: vec![evidence.clone()],
+            human_locked: false,
+        }],
+        ..Default::default()
+    };
+    let context = WorkspaceContext {
+        revision: 1,
+        overrides: vec![Override {
+            id: "task1".into(),
+            expected_revision: 1,
+            status: "confirmed".into(),
+            saved: false,
+        }],
+        ..Default::default()
+    };
+    let mut replaced = state.clone();
+    replaced.superseded_sources.push("C1".into());
+    assert!(replaced.apply_context(&context).is_err());
+    assert!(replaced.events.is_empty());
+    state.apply_context(&context).unwrap();
+    assert_eq!(state.entities[0].status, "open");
+    assert_eq!(state.entities[0].revision, 2);
+    assert!(state.entities[0].human_locked);
+    assert_eq!(state.events[0].status, "confirmed");
+    assert_eq!(state.events[0].evidence, vec![evidence]);
+    state.applied_overrides.clear();
+    state.apply_context(&context).unwrap();
+    assert_eq!(state.events.len(), 1);
+    let stale = WorkspaceContext {
+        overrides: vec![Override {
+            saved: true,
+            ..context.overrides[0].clone()
+        }],
+        ..context
+    };
+    assert!(state.apply_context(&stale).is_err());
+    assert_eq!(state.entities[0].revision, 2);
 }
 
 #[derive(Serialize)]

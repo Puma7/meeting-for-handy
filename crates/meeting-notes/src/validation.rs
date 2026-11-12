@@ -281,29 +281,7 @@ pub(crate) fn starts_named_month(text: &str) -> bool {
         .split(|c: char| !c.is_alphabetic())
         .next()
         .unwrap_or_default();
-    matches!(
-        word.to_lowercase().as_str(),
-        "januar"
-            | "februar"
-            | "märz"
-            | "april"
-            | "mai"
-            | "juni"
-            | "juli"
-            | "august"
-            | "september"
-            | "oktober"
-            | "november"
-            | "dezember"
-            | "january"
-            | "february"
-            | "march"
-            | "may"
-            | "june"
-            | "july"
-            | "october"
-            | "december"
-    )
+    named_month(word).is_some()
 }
 
 /// Recover only an unambiguous literal weekday attached to this binding sentence.
@@ -366,6 +344,272 @@ pub(crate) fn explicit_task_weekday(quote: &str) -> Option<&str> {
     });
     let weekday = weekdays.next()?;
     weekdays.next().is_none().then_some(weekday)
+}
+
+/// Recover a calendar date only when a single binding deadline ends the quote.
+/// Keep the literal phrase, including any stated year, for the existing evidence
+/// validation and locale-specific presentation.
+pub(crate) fn explicit_task_calendar_date(quote: &str) -> Option<&str> {
+    if new_task_commitment(quote) != Commitment::Binding {
+        return None;
+    }
+    let spans = commitment_word_spans(quote);
+    if spans.iter().any(|(_, word)| {
+        matches!(
+            word.to_lowercase().as_str(),
+            "and" | "or" | "und" | "oder" | "then" | "dann"
+        )
+    }) {
+        return None;
+    }
+    let mut markers = spans
+        .iter()
+        .filter(|(_, word)| word.eq_ignore_ascii_case("by") || word.eq_ignore_ascii_case("bis"));
+    let &(start, marker) = markers.next()?;
+    if markers.next().is_some() {
+        return None;
+    }
+    let german = marker.eq_ignore_ascii_case("bis");
+    let after = quote[start + marker.len()..].trim_end();
+    let after = after.trim_end_matches('!').trim_end();
+    // In German, the terminal point of a numeric month belongs to the date.
+    let numeric_month = german
+        && after
+            .strip_suffix('.')
+            .and_then(|date| date.split_whitespace().next_back())
+            .is_some_and(|token| {
+                (1..=2).contains(&token.len()) && token.bytes().all(|byte| byte.is_ascii_digit())
+            });
+    let after = if numeric_month {
+        after
+    } else {
+        after.trim_end_matches('.').trim_end()
+    };
+    if !after.starts_with(char::is_whitespace) {
+        return None;
+    }
+    let mut date = after.trim_start();
+    let mut words = date.split_whitespace();
+    let mut first = words.next()?;
+    if german && first.eq_ignore_ascii_case("zum") {
+        date = date[first.len()..].trim_start();
+        first = words.next()?;
+    }
+    let mut second = words.next()?;
+    if !german && second.eq_ignore_ascii_case("the") {
+        second = words.next()?;
+    }
+    let trailing = words.next();
+    let stated_year =
+        trailing.filter(|word| word.len() == 4 && word.bytes().all(|value| value.is_ascii_digit()));
+    let (day, month) = if german {
+        (
+            german_day(first)?,
+            named_month(second).or_else(|| german_day(second))?,
+        )
+    } else {
+        if let Some(day) = second.strip_suffix(',') {
+            stated_year?;
+            second = day;
+        }
+        (english_day(second)?, named_month(first)?)
+    };
+    let particle = if stated_year.is_some() {
+        words.next()
+    } else {
+        trailing
+    };
+    if words.next().is_some()
+        || particle.is_some_and(|word| {
+            !german
+                || !matches!(
+                    word,
+                    "ab" | "an" | "auf" | "ein" | "mit" | "vor" | "zu" | "fertig"
+                )
+        })
+    {
+        return None;
+    }
+    let year = stated_year
+        .and_then(|word| word.parse().ok())
+        .unwrap_or(2000);
+    if year == 0 {
+        return None;
+    }
+    chrono::NaiveDate::from_ymd_opt(year, month, day)?;
+    match particle {
+        Some(particle) => date.strip_suffix(particle).map(str::trim_end),
+        None => Some(date),
+    }
+}
+
+#[test]
+fn literal_calendar_deadlines_reject_uncertainty_and_calendar_overflow() {
+    for (quote, expected) in [
+        (
+            "Jana holt die Technik bis zum dreiundzwanzigsten neunten ab.",
+            Some("dreiundzwanzigsten neunten"),
+        ),
+        (
+            "Jana will collect the equipment by September twenty-third.",
+            Some("September twenty-third"),
+        ),
+        (
+            "I will finish the guide by September 23rd 2026.",
+            Some("September 23rd 2026"),
+        ),
+        (
+            "I will finish the guide by September 23rd, 2026.",
+            Some("September 23rd, 2026"),
+        ),
+        ("I will finish the guide by September 23rd, 0000.", None),
+        ("I will finish the guide by September 23rd, 26.", None),
+        (
+            "Ich bringe die Unterlagen bis zum 23. September 2026 mit.",
+            Some("23. September 2026"),
+        ),
+        ("Jana bringt die Unterlagen bis zum 23. 9.", Some("23. 9.")),
+        ("Jana bringt die Unterlagen bis zum 23. 13.", None),
+        (
+            "I will write the guide, maybe by September twenty-third.",
+            None,
+        ),
+        (
+            "Maybe I will write the guide by September twenty-third.",
+            None,
+        ),
+        ("I will write the guide by September thirty-first.", None),
+        (
+            "I will write the guide by February twenty-ninth 2025.",
+            None,
+        ),
+        (
+            "I will write the guide by September twenty-third or twenty-fourth.",
+            None,
+        ),
+        ("I will write the guide by September 23th.", None),
+        ("Jana holt die Technik am dritten September ab.", None),
+    ] {
+        assert_eq!(explicit_task_calendar_date(quote), expected, "{quote}");
+    }
+}
+
+fn named_month(word: &str) -> Option<u32> {
+    const MONTHS: [(&str, &str); 12] = [
+        ("januar", "january"),
+        ("februar", "february"),
+        ("märz", "march"),
+        ("april", "april"),
+        ("mai", "may"),
+        ("juni", "june"),
+        ("juli", "july"),
+        ("august", "august"),
+        ("september", "september"),
+        ("oktober", "october"),
+        ("november", "november"),
+        ("dezember", "december"),
+    ];
+    let lower = word.to_lowercase();
+    MONTHS
+        .iter()
+        .position(|&(de, en)| lower == de || lower == en)
+        .map(|index| index as u32 + 1)
+}
+
+fn german_day(word: &str) -> Option<u32> {
+    const STEMS: [&str; 31] = [
+        "erst",
+        "zweit",
+        "dritt",
+        "viert",
+        "fünft",
+        "sechst",
+        "siebt",
+        "acht",
+        "neunt",
+        "zehnt",
+        "elft",
+        "zwölft",
+        "dreizehnt",
+        "vierzehnt",
+        "fünfzehnt",
+        "sechzehnt",
+        "siebzehnt",
+        "achtzehnt",
+        "neunzehnt",
+        "zwanzigst",
+        "einundzwanzigst",
+        "zweiundzwanzigst",
+        "dreiundzwanzigst",
+        "vierundzwanzigst",
+        "fünfundzwanzigst",
+        "sechsundzwanzigst",
+        "siebenundzwanzigst",
+        "achtundzwanzigst",
+        "neunundzwanzigst",
+        "dreißigst",
+        "einunddreißigst",
+    ];
+    if let Some(number) = word.strip_suffix('.') {
+        return number.parse().ok();
+    }
+    let lower = word.to_lowercase();
+    let stem = ["en", "er", "em", "es", "e"]
+        .iter()
+        .find_map(|ending| lower.strip_suffix(ending))?;
+    STEMS
+        .iter()
+        .position(|&value| value == stem)
+        .map(|index| index as u32 + 1)
+}
+
+fn english_day(word: &str) -> Option<u32> {
+    const ORDINALS: [&str; 31] = [
+        "first",
+        "second",
+        "third",
+        "fourth",
+        "fifth",
+        "sixth",
+        "seventh",
+        "eighth",
+        "ninth",
+        "tenth",
+        "eleventh",
+        "twelfth",
+        "thirteenth",
+        "fourteenth",
+        "fifteenth",
+        "sixteenth",
+        "seventeenth",
+        "eighteenth",
+        "nineteenth",
+        "twentieth",
+        "twenty-first",
+        "twenty-second",
+        "twenty-third",
+        "twenty-fourth",
+        "twenty-fifth",
+        "twenty-sixth",
+        "twenty-seventh",
+        "twenty-eighth",
+        "twenty-ninth",
+        "thirtieth",
+        "thirty-first",
+    ];
+    let lower = word.to_lowercase();
+    if let Some(index) = ORDINALS.iter().position(|&value| value == lower) {
+        return Some(index as u32 + 1);
+    }
+    let suffix = lower.trim_start_matches(|value: char| value.is_ascii_digit());
+    let number: u32 = lower.strip_suffix(suffix)?.parse().ok()?;
+    let expected = match number {
+        1 | 21 | 31 => "st",
+        2 | 22 => "nd",
+        3 | 23 => "rd",
+        _ => "th",
+    };
+    (suffix.is_empty() || suffix == expected).then_some(number)
 }
 
 /// Whether the words after a hedge form a date ("bis Freitag", "am 3. Mai", "next week").

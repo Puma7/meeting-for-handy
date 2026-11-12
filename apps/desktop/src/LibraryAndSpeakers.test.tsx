@@ -1,9 +1,18 @@
 import { expect, it, vi } from "vitest";
-import { render, screen, waitFor, act } from "@testing-library/react";
+import {
+  render,
+  screen,
+  waitFor,
+  act,
+  fireEvent,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import MeetingLabels from "./views/MeetingLabels";
 import SpeakerLabels from "./views/SpeakerLabels";
-import HistorySearch from "./views/HistorySearch";
+import HistorySearch, { initialHistorySearch } from "./views/HistorySearch";
+import HistoryQuestions, {
+  type HistoryQuestionResult,
+} from "./views/HistoryQuestions";
 import type { DesktopApi, Meeting, SearchPage } from "./types";
 it.each([
   [
@@ -245,6 +254,422 @@ it("ignores late search responses and opens the source section of the current hi
   await userEvent.click(screen.getByRole("button", { name: "Open" }));
   expect(open).toHaveBeenCalledWith(meeting.id, "audio/system-0.wav");
 });
+
+it("returns to a valid indexed page when deletion empties the last page", async () => {
+  let matches: SearchPage["items"] = Array.from({ length: 26 }, (_, index) => ({
+    ...meeting,
+    id: `synthetic-search-${index + 1}`,
+    title: `Indexed hit ${index + 1}`,
+    pinned: false,
+    audioRemoved: false,
+    metadataRevision: 0,
+    sourceId: "audio/system-0.wav",
+    startMs: 0,
+    endMs: 30000,
+    excerpt: "synthetic report",
+  }));
+  const search = vi.fn(
+    async (_query: string, offset: number, limit: number) => ({
+      items: matches.slice(offset, offset + limit),
+      total: matches.length,
+      offset,
+      limit,
+    }),
+  );
+  const onStateChange = vi.fn();
+  render(
+    <HistorySearch
+      api={{ searchMeetings: search } as unknown as DesktopApi}
+      locale="en"
+      initialState={{ ...initialHistorySearch, query: "report" }}
+      onStateChange={onStateChange}
+      onOpen={vi.fn()}
+      onErase={(target) => {
+        matches = matches.filter((item) => item.id !== target.id);
+        window.dispatchEvent(new Event("library-index-updated"));
+      }}
+    />,
+  );
+  await screen.findByText("Indexed hit 25");
+  await userEvent.click(screen.getByRole("button", { name: "Next" }));
+  await screen.findByText("Indexed hit 26");
+  await userEvent.click(
+    screen.getByRole("button", {
+      name: "Permanently delete meeting: Indexed hit 26",
+    }),
+  );
+  expect(await screen.findByText("Indexed hit 1")).toBeTruthy();
+  expect(screen.queryByText("Indexed hit 26")).toBeNull();
+  expect(search.mock.calls).toEqual([
+    ["report", 0, 25],
+    ["report", 25, 25],
+    ["report", 25, 25],
+    ["report", 0, 25],
+  ]);
+  expect(onStateChange).toHaveBeenLastCalledWith(
+    expect.objectContaining({ offset: 0 }),
+  );
+});
+
+it("applies local day and VIP filters to the history and forwards the same scope to transcript search", async () => {
+  const inRange = {
+    ...meeting,
+    title: "VIP within range",
+    startedAt: new Date(2026, 9, 25, 23, 30).toISOString(),
+    userMetadata: {
+      revision: 1,
+      title: null,
+      pinned: true,
+      audioRemoved: false,
+    },
+  };
+  const outside = {
+    ...inRange,
+    id: "other",
+    title: "Following day",
+    startedAt: new Date(2026, 9, 26, 0, 0).toISOString(),
+  };
+  const notVip = {
+    ...inRange,
+    id: "not-vip",
+    title: "Regular meeting",
+    userMetadata: { ...inRange.userMetadata, pinned: false },
+  };
+  const search = vi.fn().mockResolvedValue({
+    items: [],
+    total: 0,
+    offset: 0,
+    limit: 25,
+  });
+  render(
+    <HistorySearch
+      api={{ searchMeetings: search } as unknown as DesktopApi}
+      locale="en"
+      nativeMeetings={[inRange, outside, notVip]}
+      onOpen={vi.fn()}
+    />,
+  );
+  fireEvent.change(screen.getByLabelText("From"), {
+    target: { value: "2026-10-25" },
+  });
+  fireEvent.change(screen.getByLabelText("Through"), {
+    target: { value: "2026-10-25" },
+  });
+  await userEvent.click(
+    screen.getByRole("checkbox", { name: "VIP meetings only" }),
+  );
+  expect(screen.getByText("VIP within range")).toBeTruthy();
+  expect(screen.queryByText("Following day")).toBeNull();
+  expect(screen.queryByText("Regular meeting")).toBeNull();
+  expect(search).not.toHaveBeenCalled();
+
+  await userEvent.type(screen.getByRole("searchbox"), "report");
+  await userEvent.click(
+    screen.getByRole("checkbox", { name: "Transcript matches only" }),
+  );
+  await waitFor(() =>
+    expect(search).toHaveBeenLastCalledWith("report", 0, 25, {
+      fromMs: new Date(2026, 9, 25).getTime(),
+      beforeMs: new Date(2026, 9, 26).getTime(),
+      pinnedOnly: true,
+      transcriptOnly: true,
+    }),
+  );
+  await screen.findByText(/No matches/);
+  search.mockClear();
+  fireEvent.change(screen.getByLabelText("From"), {
+    target: { value: "2026-10-26" },
+  });
+  expect(screen.getByRole("alert").textContent).toBe(
+    "Choose a valid date range.",
+  );
+  expect(screen.queryByText(/No matches/)).toBeNull();
+  expect(search).not.toHaveBeenCalled();
+});
+
+it("runs history questions explicitly with the local scope and opens the quoted meeting and section", async () => {
+  const citation = {
+    meetingId: meeting.id,
+    meetingTitle: "Other meeting",
+    sourceId: "system-000000016000.wav",
+    startMs: 1000,
+    quote: "The delivery is scheduled for Wednesday.",
+  };
+  const ask = vi
+    .fn()
+    .mockResolvedValue({ searchedPassages: 2, citations: [citation] });
+  const open = vi.fn();
+  render(
+    <HistorySearch
+      api={{ askMeetingHistory: ask } as unknown as DesktopApi}
+      locale="en"
+      onOpen={vi.fn()}
+      nativeMeetings={[
+        {
+          ...meeting,
+          userMetadata: {
+            revision: 0,
+            title: null,
+            pinned: true,
+            audioRemoved: false,
+          },
+        },
+      ]}
+      onOpenCitation={open}
+      historyModel={{
+        endpoint: "http://127.0.0.1:1235/v1/",
+        model: "synthetic",
+      }}
+    />,
+  );
+  await userEvent.click(
+    screen.getByRole("checkbox", { name: "VIP meetings only" }),
+  );
+  await userEvent.click(screen.getByText("Ask your meetings"));
+  await userEvent.click(
+    screen.getByText("All meetings in the date and VIP filters"),
+  );
+  await userEvent.click(
+    screen.getByRole("checkbox", { name: /Original name/ }),
+  );
+  await userEvent.type(
+    screen.getByLabelText("Question for your meetings"),
+    "When is delivery?",
+  );
+  expect(ask).not.toHaveBeenCalled();
+  await userEvent.click(screen.getByRole("button", { name: "Answer locally" }));
+  await screen.findByText(citation.quote);
+  expect(ask).toHaveBeenCalledWith({
+    endpoint: "http://127.0.0.1:1235/v1/",
+    model: "synthetic",
+    question: "When is delivery?",
+    meetingIds: [meeting.id],
+    scope: expect.objectContaining({ pinnedOnly: true }),
+  });
+  await userEvent.click(
+    screen.getByRole("button", { name: "Open original passage" }),
+  );
+  expect(open).toHaveBeenCalledWith(
+    citation,
+    expect.objectContaining({ question: "When is delivery?" }),
+  );
+});
+
+it("discards an in-flight answer when the transcript-only scope changes", async () => {
+  const citation = {
+    meetingId: meeting.id,
+    meetingTitle: "Synthetic meeting",
+    sourceId: meeting.parts[0].file,
+    startMs: 0,
+    quote: "Old-scope reply",
+  };
+  const oldResult = { searchedPassages: 1, citations: [citation] };
+  let finishOld!: (result: typeof oldResult) => void;
+  const pending = new Promise<typeof oldResult>((resolve) => {
+    finishOld = resolve;
+  });
+  const ask = vi
+    .fn()
+    .mockReturnValueOnce(pending)
+    .mockResolvedValueOnce({ searchedPassages: 0, citations: [] });
+  render(
+    <HistorySearch
+      api={{ askMeetingHistory: ask } as unknown as DesktopApi}
+      locale="en"
+      onOpen={vi.fn()}
+      onOpenCitation={vi.fn()}
+      historyModel={{
+        endpoint: "http://127.0.0.1:1235/v1/",
+        model: "synthetic",
+      }}
+    />,
+  );
+  await userEvent.type(screen.getByRole("searchbox"), "delivery");
+  await userEvent.click(screen.getByText("Ask your meetings"));
+  const question = "When is delivery?";
+  await userEvent.type(
+    screen.getByLabelText("Question for your meetings"),
+    question,
+  );
+  await userEvent.click(screen.getByRole("button", { name: "Answer locally" }));
+  expect(ask).toHaveBeenCalledWith(
+    expect.objectContaining({ question, scope: undefined }),
+  );
+
+  await userEvent.click(
+    screen.getByRole("checkbox", { name: "Transcript matches only" }),
+  );
+  await act(async () => {
+    finishOld(oldResult);
+    await pending;
+  });
+  expect(screen.queryByText(citation.quote)).toBeNull();
+  await userEvent.click(screen.getByText("Ask your meetings"));
+  await userEvent.type(
+    screen.getByLabelText("Question for your meetings"),
+    question,
+  );
+  await userEvent.click(screen.getByRole("button", { name: "Answer locally" }));
+  expect(ask).toHaveBeenLastCalledWith(
+    expect.objectContaining({
+      question,
+      scope: expect.objectContaining({ transcriptOnly: true }),
+    }),
+  );
+  expect(await screen.findByText(/contain no supported answer/)).toBeTruthy();
+});
+
+it("shows a retained transcript-only filter while the search field is empty", async () => {
+  const search = vi
+    .fn()
+    .mockResolvedValue({ items: [], total: 0, offset: 0, limit: 25 });
+  render(
+    <HistorySearch
+      api={{ searchMeetings: search } as unknown as DesktopApi}
+      locale="en"
+      nativeMeetings={[]}
+      onOpen={vi.fn()}
+      initialState={{ ...initialHistorySearch, query: "report" }}
+    />,
+  );
+  const input = screen.getByRole("searchbox");
+  const filter = screen.getByRole("checkbox", {
+    name: "Transcript matches only",
+  });
+  await userEvent.click(filter);
+  fireEvent.change(input, { target: { value: "" } });
+  expect(filter).toHaveProperty("disabled", true);
+  expect(filter).toHaveProperty("checked", true);
+  fireEvent.change(input, { target: { value: "delivery" } });
+  expect(filter).toHaveProperty("disabled", false);
+  expect(filter).toHaveProperty("checked", true);
+  await waitFor(() =>
+    expect(search).toHaveBeenLastCalledWith(
+      "delivery",
+      0,
+      25,
+      expect.objectContaining({ transcriptOnly: true }),
+    ),
+  );
+});
+
+it("clears an answer and removes an erased selected meeting even when that meeting was not cited", async () => {
+  const other = { ...meeting, id: "uncited", title: "Uncited meeting" };
+  const hidden = new Set<string>();
+  const initialResult: HistoryQuestionResult = {
+    question: "When is delivery?",
+    meetingIds: [meeting.id, other.id],
+    answer: {
+      searchedPassages: 2,
+      citations: [
+        {
+          meetingId: meeting.id,
+          meetingTitle: meeting.title,
+          sourceId: "audio/system-0.wav",
+          startMs: 0,
+          quote: "Delivery was confirmed in the first meeting.",
+        },
+      ],
+    },
+  };
+  const ask = vi.fn().mockResolvedValue({ searchedPassages: 0, citations: [] });
+  const props = {
+    ask,
+    locale: "en" as const,
+    model: { endpoint: "http://127.0.0.1:1235/v1/", model: "synthetic" },
+    invalidDates: false,
+    hiddenMeetingIds: hidden,
+    initialResult,
+    choices: [meeting, other],
+    onOpen: vi.fn(),
+  };
+  const view = render(<HistoryQuestions {...props} />);
+  expect(
+    screen.getByText(initialResult.answer.citations[0].quote),
+  ).toBeTruthy();
+  hidden.add(other.id);
+  view.rerender(<HistoryQuestions {...props} />);
+  expect(
+    screen.queryByText(initialResult.answer.citations[0].quote),
+  ).toBeNull();
+  hidden.delete(other.id);
+  view.rerender(<HistoryQuestions {...props} />);
+  expect(
+    screen.queryByText(initialResult.answer.citations[0].quote),
+  ).toBeNull();
+  await userEvent.click(screen.getByRole("button", { name: "Answer locally" }));
+  expect(ask).toHaveBeenCalledExactlyOnceWith(
+    expect.objectContaining({ meetingIds: [meeting.id] }),
+  );
+});
+
+it("keeps explicit meeting selection when a non-VIP choice list refreshes", async () => {
+  const answer = { searchedPassages: 0, citations: [] };
+  const ask = vi.fn().mockResolvedValue(answer);
+  const props = {
+    ask,
+    locale: "en" as const,
+    model: { endpoint: "http://127.0.0.1:1235/v1/", model: "synthetic" },
+    invalidDates: false,
+    initialResult: {
+      question: "When is delivery?",
+      meetingIds: [meeting.id],
+      answer,
+    },
+    onOpen: vi.fn(),
+  };
+  const view = render(<HistoryQuestions {...props} choices={[meeting]} />);
+  view.rerender(<HistoryQuestions {...props} choices={[]} />);
+  await userEvent.click(screen.getByRole("button", { name: "Answer locally" }));
+  expect(ask).toHaveBeenCalledExactlyOnceWith(
+    expect.objectContaining({ meetingIds: [meeting.id] }),
+  );
+});
+
+it("loads verified audio only after a user requests the exact history result", async () => {
+  const sourceId = meeting.parts[0].file;
+  const getTranscriptAudio = vi
+    .fn()
+    .mockRejectedValue(new Error("unavailable"));
+  const searchMeetings = vi.fn().mockResolvedValue({
+    items: [
+      {
+        ...meeting,
+        sourceId,
+        excerpt: "Read the report",
+        startMs: 0,
+        endMs: 75_000,
+      },
+    ],
+    total: 1,
+    limit: 25,
+    offset: 0,
+  });
+  render(
+    <HistorySearch
+      api={{ getTranscriptAudio, searchMeetings } as unknown as DesktopApi}
+      locale="en"
+      onOpen={vi.fn()}
+    />,
+  );
+  await userEvent.type(screen.getByRole("searchbox"), "report");
+  await screen.findByText("Read the report");
+  expect(
+    screen.getByText(/Audio preview plays the first 30 seconds of the section/),
+  ).toBeTruthy();
+  expect(getTranscriptAudio).not.toHaveBeenCalled();
+  await userEvent.click(
+    screen.getByRole("button", { name: "Load audio preview" }),
+  );
+  expect(getTranscriptAudio).toHaveBeenCalledExactlyOnceWith(
+    meeting.id,
+    sourceId,
+  );
+  expect(
+    await screen.findByText(/Local audio preview is unavailable/),
+  ).toBeTruthy();
+});
+
 it("shows enabled confirmed labels beside unchanged sections only", async () => {
   const doc = {
     revision: 2,

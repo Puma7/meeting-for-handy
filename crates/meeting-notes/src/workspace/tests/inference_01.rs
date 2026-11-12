@@ -1113,6 +1113,110 @@ fn inheritance_uses_per_item_human_chronology_and_keeps_revisions_monotone() {
 }
 
 #[test]
+fn rebase_preserves_exact_confirmation_across_runs_and_never_refreshes_a_stale_one() {
+    let (mut seed, request, answer) = setup();
+    validate::apply(&mut seed, &request, &answer.to_string()).unwrap();
+    seed.originals = request.transcript_sources;
+    let id = seed.entities[0].id.clone();
+    let mut source = seed.clone();
+    let mut source_context = source.context.clone();
+    source_context.overrides.push(Override {
+        id: id.clone(),
+        expected_revision: source.entities[0].revision,
+        status: "confirmed".into(),
+        saved: false,
+    });
+    source.apply_context(&source_context).unwrap();
+    source.human_activity.insert(
+        id.clone(),
+        chrono::DateTime::parse_from_rfc3339("2026-01-01T00:00:03Z").unwrap(),
+    );
+    let event = source.current_confirmations()[id.as_str()].clone();
+    let original_event = serde_json::to_vec(&event).unwrap();
+    let open_at = |folder: &Path, revision| {
+        let mut runner = WorkspaceRunner::open(folder).unwrap();
+        runner.set_context(Default::default()).unwrap();
+        let context = runner.state.context.clone();
+        let mut state = seed.clone();
+        state.entities[0].revision = revision;
+        // The same immutable event may already exist in another run's history.
+        state.events.push(event.clone());
+        runner
+            .commit(
+                state,
+                seed.originals.clone(),
+                vec![],
+                &AnalysisControl::default(),
+                &context,
+            )
+            .unwrap();
+        runner
+    };
+
+    let root = tempfile::tempdir().unwrap();
+    let first = root.path().join("first");
+    let mut runner = open_at(&first, 8);
+    runner.inherit_manual(&source).unwrap();
+    drop(runner);
+    let inherited = read_state(&first).unwrap();
+    assert_eq!(inherited.entities[0].revision, 9);
+    assert_eq!(
+        serde_json::to_vec(inherited.current_confirmations()[id.as_str()]).unwrap(),
+        original_event
+    );
+
+    let second = root.path().join("second");
+    let mut runner = open_at(&second, 16);
+    runner.inherit_manual(&inherited).unwrap();
+    drop(runner);
+    let inherited = read_state(&second).unwrap();
+    assert_eq!(inherited.entities[0].revision, 17);
+    assert_eq!(
+        inherited
+            .events
+            .iter()
+            .filter(|old| old.id == event.id)
+            .count(),
+        1
+    );
+    assert_eq!(
+        serde_json::to_vec(inherited.current_confirmations()[id.as_str()]).unwrap(),
+        original_event
+    );
+
+    let mut edited_context = inherited.context;
+    edited_context.overrides.push(Override {
+        id: id.clone(),
+        expected_revision: 17,
+        status: "completed".into(),
+        saved: false,
+    });
+    update_context(&second, &edited_context).unwrap();
+    let edited = read_state(&second).unwrap();
+    assert_eq!(edited.entities[0].revision, 18);
+    assert!(edited.current_confirmations().is_empty());
+
+    let third = root.path().join("third");
+    let mut runner = open_at(&third, 24);
+    runner.inherit_manual(&edited).unwrap();
+    drop(runner);
+    let inherited = read_state(&third).unwrap();
+    assert_eq!(inherited.entities[0].revision, 25);
+    assert!(inherited.current_confirmations().is_empty());
+    assert_eq!(
+        serde_json::to_vec(
+            inherited
+                .events
+                .iter()
+                .find(|old| old.id == event.id)
+                .unwrap()
+        )
+        .unwrap(),
+        original_event
+    );
+}
+
+#[test]
 fn malformed_inherited_human_timestamps_preserve_the_unreadable_revision() {
     let (mut previous, req, answer) = setup();
     validate::apply(&mut previous, &req, &answer.to_string()).unwrap();

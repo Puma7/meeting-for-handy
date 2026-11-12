@@ -37,8 +37,12 @@ export const desktopApi: DesktopApi = {
       runId,
       promptVersion,
     }),
-  getSourceAudio: (id, file) =>
-    desktopInvoke<ArrayBuffer>("get_source_audio", { id, file }),
+  exportWorkspaceResults: (meetingId, runId) =>
+    jobInvoke("export_workspace_results", { meetingId, runId }),
+  getSourceAudio: (id, runId, sourceId) =>
+    desktopInvoke<ArrayBuffer>("get_source_audio", { id, runId, sourceId }),
+  getTranscriptAudio: (id, sourceId) =>
+    desktopInvoke<ArrayBuffer>("get_transcript_audio", { id, sourceId }),
   setWorkspaceContext: (meetingId, runId, context) =>
     jobInvoke("set_workspace_context", { meetingId, runId, context }),
   previewMeetingErasure: (meetingId) =>
@@ -101,8 +105,30 @@ export const desktopApi: DesktopApi = {
       title,
       pinned,
     }),
-  searchMeetings: (query, offset, limit) =>
-    desktopInvoke("search_meetings", { query, offset, limit }),
+  searchMeetings: (query, offset, limit, scope) =>
+    desktopInvoke("search_meetings", { query, offset, limit, scope }),
+  askMeetingHistory: (request) =>
+    desktopInvoke("ask_meeting_history", { request }),
+  createEncryptedBackup: (meetingId, passphrase) =>
+    jobInvoke("create_encrypted_backup", { meetingId, passphrase }),
+  recoverEncryptedBackup: (credential, kind) =>
+    jobInvoke("recover_encrypted_backup", { credential, kind }),
+  cancelEncryptedBackup: () => desktopInvoke("cancel_encrypted_backup"),
+  protectedProfileStatus: () => desktopInvoke("protected_profile_status"),
+  createProtectedProfile: (passphrase) =>
+    jobInvoke(
+      "create_protected_profile",
+      passphrase === undefined ? undefined : { passphrase },
+    ),
+  cancelProtectedProfileMigration: () =>
+    desktopInvoke("cancel_protected_profile_migration"),
+  openProtectedProfile: (passphrase) =>
+    desktopInvoke(
+      "open_protected_profile",
+      passphrase === undefined ? undefined : { passphrase },
+    ),
+  checkMeetingSetup: (request) => jobInvoke("check_meeting_setup", { request }),
+  cancelMeetingSetup: () => desktopInvoke("cancel_meeting_setup"),
   rebuildSearchIndex: () => jobInvoke("rebuild_search_index"),
   getLibraryProgress: () => desktopInvoke("get_library_progress"),
   cancelLibraryJob: (jobId) => desktopInvoke("cancel_library_job", { jobId }),

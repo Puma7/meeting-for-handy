@@ -143,6 +143,7 @@ impl WorkspaceRunner {
             .cloned()
             .collect();
         let mut selected = HashSet::new();
+        let confirmations = previous.current_confirmations();
         for mut entity in candidates {
             let incoming = previous.human_activity.get(&entity.id);
             let current = next.human_activity.get(&entity.id);
@@ -166,6 +167,15 @@ impl WorkspaceRunner {
             if let Some(at) = incoming {
                 next.human_activity.insert(entity.id.clone(), *at);
             }
+            next.inherited_confirmations.insert(
+                entity.id.clone(),
+                InheritedConfirmation {
+                    revision: entity.revision,
+                    event_id: confirmations
+                        .get(entity.id.as_str())
+                        .map(|event| event.id.clone()),
+                },
+            );
             selected.insert(entity.id.clone());
             // Journal replay replaces existing IDs in place. Keep the same
             // order in memory; only genuinely new inherited IDs are appended.
@@ -1072,7 +1082,7 @@ fn quote_options(text: &str) -> Vec<String> {
 }
 
 /// Keep decimal points and spoken ordinal dates inside their literal sentence.
-fn evidence_sentences(text: &str) -> impl Iterator<Item = &str> {
+pub(crate) fn evidence_sentences(text: &str) -> impl Iterator<Item = &str> {
     let mut start = 0;
     text.char_indices()
         .chain(std::iter::once((text.len(), '\n')))
@@ -1182,10 +1192,22 @@ pub fn update_context(
     folder: &Path,
     context: &WorkspaceContext,
 ) -> Result<(WorkspaceContext, WorkspaceState)> {
+    update_context_checked(folder, context, |_, _, commit| commit())
+}
+
+pub type ContextCommit<'a> = Box<dyn FnOnce() -> Result<()> + 'a>;
+
+/// Verify the new events and call `commit` while their external evidence is stable.
+/// Returning an error without calling `commit` leaves the saved context unchanged.
+pub fn update_context_checked(
+    folder: &Path,
+    context: &WorkspaceContext,
+    verify: impl FnOnce(&WorkspaceState, &[Event], ContextCommit<'_>) -> Result<()>,
+) -> Result<(WorkspaceContext, WorkspaceState)> {
     let state = store::read(folder)?;
     ensure!(state.prompt_version() == PROMPT_VERSION,
         "Diese Auswertung verwendet ältere Prompts und bleibt unverändert lesbar. Eine neue lokale Auswertung starten, um mit der aktuellen Fassung weiterzuarbeiten.");
-    context_store::update(folder, context)
+    context_store::update_checked(folder, context, verify)
 }
 
 /// Keep the last processed revision independently for each transcript key and chunk.

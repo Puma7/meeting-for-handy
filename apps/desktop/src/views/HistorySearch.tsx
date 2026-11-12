@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   FolderClock,
   RefreshCw,
@@ -8,8 +8,65 @@ import {
   Trash2,
 } from "lucide-react";
 import { errorMessage } from "../api";
-import { clock } from "../domain";
-import type { DesktopApi, Locale, MeetingSummary, SearchPage } from "../types";
+import { clock, trackName } from "../domain";
+import SourceAudioPreview from "../workspace/SourceAudioPreview";
+import HistoryQuestions, {
+  type HistoryModel,
+  type HistoryQuestionResult,
+} from "./HistoryQuestions";
+import type {
+  DesktopApi,
+  HistoryCitation,
+  Locale,
+  MeetingSummary,
+  SearchPage,
+  SearchScope,
+} from "../types";
+
+type HistorySearchState = {
+  query: string;
+  from: string;
+  through: string;
+  pinnedOnly: boolean;
+  transcriptOnly: boolean;
+  offset: number;
+};
+
+export type HistoryQuestionReturn = HistoryQuestionResult & { key: string };
+
+const PAGE_SIZE = 25;
+
+export const initialHistorySearch: HistorySearchState = {
+  query: "",
+  from: "",
+  through: "",
+  pinnedOnly: false,
+  transcriptOnly: false,
+  offset: 0,
+};
+
+function lastPageOffset(total: number) {
+  return Math.floor(Math.max(0, total - 1) / PAGE_SIZE) * PAGE_SIZE;
+}
+
+/** Use local calendar days, including the shorter or longer days around a clock change. */
+function dayBoundary(value: string, nextDay = false) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return NaN;
+  const date = new Date(`${value}T00:00:00`);
+  if (nextDay) date.setDate(date.getDate() + 1);
+  return date.getUTCFullYear() >= 1 && date.getUTCFullYear() <= 9999
+    ? date.getTime()
+    : NaN;
+}
+
+function inScope(meeting: MeetingSummary, scope: SearchScope | undefined) {
+  if (scope?.pinnedOnly && !meeting.userMetadata?.pinned) return false;
+  const started = Date.parse(meeting.startedAt);
+  return (
+    (scope?.fromMs === undefined || started >= scope.fromMs) &&
+    (scope?.beforeMs === undefined || started < scope.beforeMs)
+  );
+}
 
 /** Preserve SQLite's pinned-descending, stored-date-descending, ID-ascending
  * order without locale-dependent collation or changing the supplied summaries. */
@@ -32,6 +89,11 @@ export default function HistorySearch({
   onRefresh,
   onErase,
   hiddenMeetingIds,
+  initialState = initialHistorySearch,
+  onStateChange,
+  historyModel,
+  questionReturn,
+  onOpenCitation,
 }: {
   api: DesktopApi;
   onErase?: (meeting: MeetingSummary) => void;
@@ -43,42 +105,111 @@ export default function HistorySearch({
   /** Authoritative native summaries remain complete when the derived search cache is not. */
   nativeMeetings?: MeetingSummary[];
   onRefresh?: () => void;
+  initialState?: HistorySearchState;
+  onStateChange?: (state: HistorySearchState) => void;
+  historyModel?: HistoryModel;
+  questionReturn?: HistoryQuestionReturn;
+  onOpenCitation?: (
+    citation: HistoryCitation,
+    result: HistoryQuestionReturn,
+  ) => void;
 }) {
   const de = locale === "de";
-  const [query, setQuery] = useState(""),
-    [offset, setOffset] = useState(0),
-    [page, setPage] = useState<SearchPage | null>(null),
+  const [state, setState] = useState(initialState);
+  const { query, from, through, pinnedOnly, transcriptOnly, offset } = state;
+  function updateSearch(patch: Partial<HistorySearchState>) {
+    const next = { ...state, offset: 0, ...patch };
+    setState(next);
+    onStateChange?.(next);
+  }
+  const [result, setResult] = useState<{
+      key: string;
+      page: SearchPage;
+    } | null>(null),
     [error, setError] = useState<string | null>(null),
     [busy, setBusy] = useState(false),
     [refresh, setRefresh] = useState(0);
   const generation = useRef(0);
-  const authoritative = !query.trim() && nativeMeetings !== undefined;
+  const hasQuery = Boolean(query.trim());
+  const fromMs = from ? dayBoundary(from) : undefined;
+  const beforeMs = through ? dayBoundary(through, true) : undefined;
+  const invalidDates =
+    Number.isNaN(fromMs) ||
+    Number.isNaN(beforeMs) ||
+    (fromMs !== undefined && beforeMs !== undefined && fromMs >= beforeMs);
+  const evidenceOnly = transcriptOnly && hasQuery;
+  const scope = useMemo(
+    () =>
+      fromMs !== undefined ||
+      beforeMs !== undefined ||
+      pinnedOnly ||
+      evidenceOnly
+        ? { fromMs, beforeMs, pinnedOnly, transcriptOnly: evidenceOnly }
+        : undefined,
+    [fromMs, beforeMs, pinnedOnly, evidenceOnly],
+  );
+  const requestKey = JSON.stringify([query, offset, scope]);
+  const questionKey = JSON.stringify([
+    from,
+    through,
+    pinnedOnly,
+    evidenceOnly,
+    historyModel?.endpoint,
+    historyModel?.model,
+  ]);
+  const authoritative = !hasQuery && nativeMeetings !== undefined;
   const native = authoritative
     ? (nativeMeetings ?? [])
-        .filter((item) => !hiddenMeetingIds?.has(item.id))
+        .filter(
+          (item) => !hiddenMeetingIds?.has(item.id) && inScope(item, scope),
+        )
         .sort(historyOrder)
     : [];
   const viewOffset = authoritative
-    ? Math.min(offset, Math.max(0, Math.floor((native.length - 1) / 25) * 25))
+    ? Math.min(offset, lastPageOffset(native.length))
     : offset;
-  const visiblePage: SearchPage | null = authoritative
-    ? {
-        items: native.slice(viewOffset, viewOffset + 25).map((item) => ({
-          ...item,
-          pinned: item.userMetadata?.pinned ?? false,
-          audioRemoved: item.userMetadata?.audioRemoved ?? false,
-          metadataRevision: item.userMetadata?.revision ?? 0,
-          sourceId: null,
-          startMs: null,
-          endMs: null,
-          excerpt: "",
-        })),
-        total: native.length,
-        offset: viewOffset,
-        limit: 25,
-      }
-    : page;
-  const loading = !authoritative && busy;
+  const indexedPage = result?.key === requestKey ? result.page : null;
+  const indexedLastOffset = indexedPage
+    ? lastPageOffset(indexedPage.total)
+    : offset;
+  const recoveringPage =
+    !authoritative && !invalidDates && !busy && offset > indexedLastOffset;
+  const visiblePage: SearchPage | null =
+    invalidDates || recoveringPage
+      ? null
+      : authoritative
+        ? {
+            items: native
+              .slice(viewOffset, viewOffset + PAGE_SIZE)
+              .map((item) => ({
+                ...item,
+                pinned: item.userMetadata?.pinned ?? false,
+                audioRemoved: item.userMetadata?.audioRemoved ?? false,
+                metadataRevision: item.userMetadata?.revision ?? 0,
+                sourceId: null,
+                startMs: null,
+                endMs: null,
+                excerpt: "",
+              })),
+            total: native.length,
+            offset: viewOffset,
+            limit: PAGE_SIZE,
+          }
+        : indexedPage;
+  const visibleImports =
+    !hasQuery && !invalidDates
+      ? imported.filter(
+          (item) => !hiddenMeetingIds?.has(item.id) && inScope(item, scope),
+        )
+      : [];
+  const loading = !authoritative && !invalidDates && (busy || recoveringPage);
+  useEffect(() => {
+    if (!recoveringPage) return;
+    // Deletion or an index refresh can remove the current last page.
+    const next = { ...state, offset: indexedLastOffset };
+    setState(next);
+    onStateChange?.(next);
+  }, [recoveringPage, indexedLastOffset, state, onStateChange]);
   useEffect(() => {
     const update = () => setRefresh((v) => v + 1);
     window.addEventListener("library-index-updated", update);
@@ -86,7 +217,8 @@ export default function HistorySearch({
   }, []);
   useEffect(() => {
     const current = ++generation.current;
-    if (authoritative) {
+    const searchMeetings = api.searchMeetings;
+    if (authoritative || invalidDates || !searchMeetings) {
       setBusy(false);
       setError(null);
       return () => {
@@ -97,10 +229,13 @@ export default function HistorySearch({
     setError(null);
     const timer = setTimeout(
       () => {
-        void api
-          .searchMeetings?.(query, offset, 25)
+        const search = scope
+          ? searchMeetings.call(api, query, offset, PAGE_SIZE, scope)
+          : searchMeetings.call(api, query, offset, PAGE_SIZE);
+        void search
           .then((value) => {
-            if (generation.current === current) setPage(value);
+            if (generation.current === current)
+              setResult({ key: requestKey, page: value });
           })
           .catch((e) => {
             if (generation.current === current) setError(errorMessage(e));
@@ -115,7 +250,16 @@ export default function HistorySearch({
       generation.current++;
       clearTimeout(timer);
     };
-  }, [api, query, offset, refresh, authoritative]);
+  }, [
+    api,
+    query,
+    offset,
+    refresh,
+    authoritative,
+    invalidDates,
+    scope,
+    requestKey,
+  ]);
   return (
     <section className="history-search">
       <div className="section-heading">
@@ -154,16 +298,75 @@ export default function HistorySearch({
               : "Search titles and saved transcripts."
           }
           type="search"
+          maxLength={200}
           value={query}
-          onChange={(e) => {
-            setQuery(e.target.value);
-            setOffset(0);
-          }}
+          onChange={(e) => updateSearch({ query: e.target.value })}
           placeholder={
             de ? "Begriff, Name oder Thema …" : "Word, name or topic …"
           }
         />
       </label>
+      <fieldset className="search-filters">
+        <legend>{de ? "Suche eingrenzen" : "Narrow the search"}</legend>
+        <label>
+          {de ? "Von" : "From"}
+          <input
+            type="date"
+            value={from}
+            onChange={(e) => updateSearch({ from: e.target.value })}
+          />
+        </label>
+        <label>
+          {de ? "Bis einschließlich" : "Through"}
+          <input
+            type="date"
+            value={through}
+            onChange={(e) => updateSearch({ through: e.target.value })}
+          />
+        </label>
+        <label className="search-filter-check">
+          <input
+            type="checkbox"
+            checked={pinnedOnly}
+            onChange={(e) => updateSearch({ pinnedOnly: e.target.checked })}
+          />
+          {de ? "Nur VIP-Meetings" : "VIP meetings only"}
+        </label>
+        <label className="search-filter-check">
+          <input
+            type="checkbox"
+            checked={transcriptOnly}
+            disabled={!hasQuery}
+            onChange={(e) => updateSearch({ transcriptOnly: e.target.checked })}
+          />
+          {de ? "Nur Treffer im Transkript" : "Transcript matches only"}
+        </label>
+      </fieldset>
+      {api.askMeetingHistory && onOpenCitation && (
+        <HistoryQuestions
+          key={questionKey}
+          ask={api.askMeetingHistory}
+          locale={locale}
+          model={historyModel}
+          choices={nativeMeetings
+            ?.filter((item) => inScope(item, scope))
+            .sort(historyOrder)}
+          scope={scope}
+          invalidDates={invalidDates}
+          hiddenMeetingIds={hiddenMeetingIds}
+          initialResult={
+            questionReturn?.key === questionKey ? questionReturn : undefined
+          }
+          onOpen={(citation, result) =>
+            onOpenCitation(citation, { ...result, key: questionKey })
+          }
+        />
+      )}
+      {invalidDates && (
+        <p role="alert" className="inline-error">
+          {de ? "Wähle einen gültigen Zeitraum." : "Choose a valid date range."}
+        </p>
+      )}
       <div className="search-state" role="status">
         {loading
           ? de
@@ -173,7 +376,7 @@ export default function HistorySearch({
             ? `${visiblePage.total.toLocaleString(locale)} ${authoritative ? "Meetings" : de ? "Treffer" : "results"}`
             : ""}
       </div>
-      {!authoritative && error && (
+      {!authoritative && !invalidDates && error && (
         <p role="alert" className="inline-error">
           {error}
         </p>
@@ -202,10 +405,33 @@ export default function HistorySearch({
                   <small>
                     {de ? "Originalabschnitt" : "Original section"}:{" "}
                     {clock(item.startMs ?? 0)}–{clock(item.endMs ?? 0)}
+                    {/(?:^|[/\\])system-/.test(item.sourceId) &&
+                      ` · ${trackName("system", locale)}`}
+                    {/(?:^|[/\\])microphone-/.test(item.sourceId) &&
+                      ` · ${trackName("microphone", locale)}`}
+                    {api.getTranscriptAudio &&
+                      !item.audioRemoved &&
+                      item.startMs !== null &&
+                      item.endMs !== null &&
+                      item.endMs - item.startMs > 30_000 &&
+                      (de
+                        ? " · Die Audiovorschau spielt die ersten 30 Sekunden des Abschnitts."
+                        : " · Audio preview plays the first 30 seconds of the section.")}
                   </small>
                 )}
               </div>
               <div className="session-row-actions">
+                {api.getTranscriptAudio &&
+                  item.sourceId &&
+                  !item.audioRemoved && (
+                    <SourceAudioPreview
+                      sourceId={item.sourceId}
+                      locale={locale}
+                      load={(sourceId) =>
+                        api.getTranscriptAudio!(item.id, sourceId)
+                      }
+                    />
+                  )}
                 {onErase && !item.id.startsWith("legacy-") && (
                   <button
                     type="button"
@@ -239,9 +465,13 @@ export default function HistorySearch({
         {!loading && visiblePage?.total === 0 && (
           <p className="empty">
             {authoritative
-              ? de
-                ? "Keine Meetings vorhanden."
-                : "No meetings yet."
+              ? scope
+                ? de
+                  ? "Keine Meetings für diese Filter."
+                  : "No meetings match these filters."
+                : de
+                  ? "Keine Meetings vorhanden."
+                  : "No meetings yet."
               : query
                 ? de
                   ? "Keine Treffer. Prüfe bei Bedarf den Suchindex unter Einstellungen."
@@ -252,14 +482,14 @@ export default function HistorySearch({
           </p>
         )}
       </div>
-      {!query.trim() && imported.length > 0 && (
+      {visibleImports.length > 0 && (
         <div className="session-list">
           <h3>
             {de
               ? "Importierte ältere Meetings · nicht durchsuchbar"
               : "Imported earlier meetings · not searchable"}
           </h3>
-          {imported.map((item) => (
+          {visibleImports.map((item) => (
             <article className="session-row" key={item.id}>
               <div>
                 <strong>{item.title}</strong>
@@ -284,7 +514,7 @@ export default function HistorySearch({
           ))}
         </div>
       )}
-      {visiblePage && visiblePage.total > 25 && (
+      {visiblePage && visiblePage.total > PAGE_SIZE && (
         <div className="search-pages">
           <button
             className="secondary"
@@ -292,18 +522,21 @@ export default function HistorySearch({
             title={
               de ? "Die vorherige Seite anzeigen." : "Show the previous page."
             }
-            onClick={() => setOffset(Math.max(0, viewOffset - 25))}
+            onClick={() =>
+              updateSearch({ offset: Math.max(0, viewOffset - PAGE_SIZE) })
+            }
           >
             {de ? "Zurück" : "Previous"}
           </button>
           <span>
-            {viewOffset + 1}–{Math.min(viewOffset + 25, visiblePage.total)}
+            {viewOffset + 1}–
+            {Math.min(viewOffset + PAGE_SIZE, visiblePage.total)}
           </span>
           <button
             className="secondary"
-            disabled={loading || viewOffset + 25 >= visiblePage.total}
+            disabled={loading || viewOffset + PAGE_SIZE >= visiblePage.total}
             title={de ? "Die nächste Seite anzeigen." : "Show the next page."}
-            onClick={() => setOffset(viewOffset + 25)}
+            onClick={() => updateSearch({ offset: viewOffset + PAGE_SIZE })}
           >
             {de ? "Weiter" : "Next"}
           </button>

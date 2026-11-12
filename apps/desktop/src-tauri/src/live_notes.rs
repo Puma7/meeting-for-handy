@@ -1,11 +1,14 @@
 //! Live notes worker: reads only the confirmed transcript that the UI also reads and sends text
 //! to the chosen model. It never holds the recording transition, a capture handle or audio.
 use crate::{valid_legacy_id, validate_id, AppResult, Service};
-use meeting_core::SessionData;
+use meeting_core::{AudioPart, SessionData, SessionStore};
 use meeting_notes::live::{self, LiveRunner, LiveText, LiveView, Trigger};
+use meeting_notes::workspace::WorkspaceState;
 use meeting_notes::AnalysisControl;
 use serde::{Deserialize, Serialize};
 use std::{
+    collections::HashMap,
+    path::Path,
     sync::{
         atomic::{AtomicBool, AtomicU64, Ordering},
         Arc, Mutex,
@@ -28,6 +31,7 @@ const OVERVIEW_RETRY: Duration = Duration::from_secs(60);
 const MAX_OVERVIEW_FAILURES: u32 = 3;
 /// Shown while live notes yield to recognition for more than two minutes.
 const RECOGNITION_WAIT: &str = "Die Live-Auswertung wartet seit mehr als zwei Minuten auf die Erkennung. Aufnahme und gespeicherte Daten bleiben erhalten. Erkennungsfortschritt prüfen; die Live-Auswertung kann beendet und später erneuert werden. / Live notes have waited over two minutes for recognition. Recording and saved data are retained; check recognition progress or stop and retry live notes later.";
+const CONFIRMATION_NEEDS_SOURCE: &str = "Zum Bestätigen wird ein aktueller Originalbeleg benötigt. / Confirmation requires current original evidence.";
 pub(crate) const DEFAULT_INTERVAL_MS: u64 = 3 * 60_000;
 
 #[derive(Deserialize)]
@@ -56,6 +60,8 @@ pub(crate) struct LiveNotesRequest {
 #[serde(rename_all = "camelCase")]
 pub(crate) struct LiveNotesStatus {
     workspace_context: Option<meeting_notes::workspace::WorkspaceContext>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    confirmable_workspace_entries: Option<Vec<String>>,
     response_bytes: u64,
     response_idle_ms: u64,
     update_elapsed_ms: u64,
@@ -65,18 +71,21 @@ pub(crate) struct LiveNotesStatus {
     running: bool,
     refresh_requested: bool,
     waiting_for_transcript: bool,
+    waiting_for_memory: bool,
+    preparing_model: bool,
     error: Option<String>,
     pending_chars: usize,
     interval_ms: u64,
     next_update_in_ms: Option<u64>,
     last_trigger: Option<Trigger>,
-    view: Option<LiveView>,
+    pub(crate) view: Option<LiveView>,
 }
 
 struct Shared {
     status: String,
     update_started: Option<Instant>,
     waiting_for_transcript: bool,
+    waiting_for_memory: bool,
     error: Option<String>,
     pending_chars: usize,
     last_update: Instant,
@@ -132,6 +141,7 @@ impl Job {
         });
         LiveNotesStatus {
             workspace_context: input_context,
+            confirmable_workspace_entries: None,
             response_bytes: self.control.response_bytes(),
             response_idle_ms: self.control.response_idle_ms(),
             update_elapsed_ms: if shared.status == "updating" {
@@ -146,6 +156,8 @@ impl Job {
             running,
             refresh_requested: running && self.manual.load(Ordering::Acquire),
             waiting_for_transcript: running && shared.waiting_for_transcript,
+            waiting_for_memory: running && shared.waiting_for_memory,
+            preparing_model: running && self.control.preparing_model(),
             error: shared.error.clone(),
             pending_chars: shared.pending_chars,
             interval_ms,
@@ -161,6 +173,7 @@ fn off(meeting_id: &str, view: Option<LiveView>, error: Option<String>) -> LiveN
         workspace_context: view
             .as_ref()
             .and_then(|v| v.workspace.as_ref().map(|w| w.context.clone())),
+        confirmable_workspace_entries: None,
         response_bytes: 0,
         response_idle_ms: 0,
         update_elapsed_ms: 0,
@@ -169,6 +182,8 @@ fn off(meeting_id: &str, view: Option<LiveView>, error: Option<String>) -> LiveN
         running: false,
         refresh_requested: false,
         waiting_for_transcript: false,
+        waiting_for_memory: false,
+        preparing_model: false,
         error,
         pending_chars: 0,
         interval_ms: DEFAULT_INTERVAL_MS,
@@ -184,6 +199,53 @@ pub(crate) struct LiveNotes(Mutex<Option<Job>>);
 fn clamp_interval(ms: Option<u64>) -> u64 {
     ms.unwrap_or(DEFAULT_INTERVAL_MS)
         .clamp(live::MIN_INTERVAL_MS, live::MAX_INTERVAL_MS)
+}
+
+/// Pause admission of new local workspace requests below 512 MiB of physical
+/// RAM. Resume at 1 GiB to avoid flipping phases around a single threshold.
+fn low_memory(previous: bool, available_bytes: Option<u64>) -> bool {
+    const MIB: u64 = 1024 * 1024;
+    available_bytes
+        .is_some_and(|available| available < if previous { 1024 * MIB } else { 512 * MIB })
+}
+
+/// Keep the standard six-second cooldown, giving the recorder more recovery
+/// time only when a local update exceeded its interval under scarce RAM.
+fn recording_cooldown(elapsed: Duration, interval_ms: u64, available: Option<u64>) -> Duration {
+    if elapsed > Duration::from_millis(interval_ms)
+        && available.is_some_and(|bytes| bytes < 2 * 1024 * 1024 * 1024)
+    {
+        return WORKSPACE_COOLDOWN * 2;
+    }
+    WORKSPACE_COOLDOWN
+}
+
+#[test]
+fn measured_slow_updates_back_off_only_under_recording_memory_pressure() {
+    let slow = Duration::from_secs(121);
+    assert_eq!(
+        recording_cooldown(slow, 120_000, Some(1 << 30)),
+        Duration::from_secs(12)
+    );
+    assert_eq!(
+        recording_cooldown(slow, 120_000, Some(2 << 30)),
+        WORKSPACE_COOLDOWN
+    );
+    assert_eq!(recording_cooldown(slow, 120_000, None), WORKSPACE_COOLDOWN);
+    assert_eq!(
+        recording_cooldown(Duration::from_secs(120), 120_000, Some(1 << 30)),
+        WORKSPACE_COOLDOWN
+    );
+}
+
+#[test]
+fn memory_wait_has_separate_entry_and_exit_thresholds() {
+    const MIB: u64 = 1024 * 1024;
+    assert!(low_memory(false, Some(511 * MIB)));
+    assert!(!low_memory(false, Some(512 * MIB)));
+    assert!(low_memory(true, Some(700 * MIB)));
+    assert!(!low_memory(true, Some(1024 * MIB)));
+    assert!(!low_memory(true, None));
 }
 
 fn live_root(service: &Service, meeting_id: &str) -> std::path::PathBuf {
@@ -216,6 +278,61 @@ pub(crate) fn live_texts(data: &SessionData) -> (Vec<LiveText>, bool) {
         .collect();
     let active = ["recording", "streaming", "catching-up"].contains(&data.status.as_str());
     (texts, !active)
+}
+
+/// Check saved workspace evidence against the exact current transcript chunk and track.
+pub(super) struct CurrentWorkspaceEvidence<'a> {
+    workspace: &'a WorkspaceState,
+    parts: HashMap<&'a str, Option<&'a AudioPart>>,
+    verified: HashMap<&'a str, Option<&'a live::LiveSource>>,
+}
+
+impl<'a> CurrentWorkspaceEvidence<'a> {
+    pub(super) fn new(workspace: &'a WorkspaceState, data: &'a SessionData) -> Self {
+        let mut parts = HashMap::with_capacity(data.parts.len());
+        for part in &data.parts {
+            parts
+                .entry(part.file.as_str())
+                .and_modify(|part| *part = None)
+                .or_insert(Some(part));
+        }
+        Self {
+            workspace,
+            parts,
+            verified: HashMap::new(),
+        }
+    }
+
+    pub(super) fn supports(&mut self, evidence: &'a [meeting_notes::Evidence]) -> bool {
+        !evidence.is_empty()
+            && evidence.iter().all(|evidence| {
+                if evidence.quote.trim().is_empty() {
+                    return false;
+                }
+                self.verified
+                    .entry(evidence.source_id.as_str())
+                    .or_insert_with(|| {
+                        let saved = self.workspace.audio_source(&evidence.source_id)?;
+                        let part = self.parts.get(saved.key.as_str()).copied().flatten()?;
+                        let rate = u64::from(meeting_core::SAMPLE_RATE);
+                        (part.status == "complete"
+                            && part.source == saved.source
+                            && part.start_sample.saturating_mul(1000) / rate == saved.start_ms
+                            && part
+                                .start_sample
+                                .saturating_add(part.sample_count)
+                                .saturating_mul(1000)
+                                / rate
+                                == saved.end_ms
+                            && part
+                                .text
+                                .as_deref()
+                                .is_some_and(|text| saved.matches_transcript(text)))
+                        .then_some(saved)
+                    })
+                    .is_some_and(|source| source.text.contains(&evidence.quote))
+            })
+    }
 }
 
 /// One meeting state as seen by the live worker.
@@ -360,6 +477,65 @@ impl Service {
             batch_recognition: false,
         })
     }
+
+    fn held_transcript_store(&self, folder: &Path) -> AppResult<Option<SessionStore>> {
+        let inner = self.lock()?;
+        Ok(inner
+            .active
+            .iter()
+            .map(|active| &active.store)
+            .chain(inner.view.iter())
+            .find(|store| store.folder() == folder)
+            .cloned())
+    }
+
+    /// Polling only needs current text evidence. Reopening a cold session also
+    /// verifies its PCM and can write recovery metadata, which belongs to an
+    /// explicit operation rather than every status request.
+    fn confirmation_preview(&self, id: &str) -> AppResult<SessionData> {
+        let folder = self.root.join("sessions").join(id);
+        if let Some(store) = self.held_transcript_store(&folder)? {
+            return store.snapshot().map_err(|error| error.to_string());
+        }
+        if let Some(data) = meeting_core::archive::read_archived_transcript(&folder)
+            .map_err(|error| error.to_string())?
+        {
+            return Ok(data);
+        }
+        meeting_core::inspect_journals(&folder).map_err(|error| error.to_string())
+    }
+
+    /// Read and publish under the native transcript writer lock or against an
+    /// immutable archive. The caller holds the source publication lease.
+    fn with_confirmation_transcript<T>(
+        &self,
+        id: &str,
+        read: impl FnOnce(&SessionData) -> anyhow::Result<T>,
+    ) -> anyhow::Result<T> {
+        let folder = self.root.join("sessions").join(id);
+        let stored = self
+            .held_transcript_store(&folder)
+            .map_err(|_| anyhow::anyhow!(CONFIRMATION_NEEDS_SOURCE))?;
+        let check = |data: &SessionData| {
+            anyhow::ensure!(data.id == id, CONFIRMATION_NEEDS_SOURCE);
+            read(data)
+        };
+        let store = match stored {
+            Some(store) => store,
+            None => {
+                if let Some(data) = meeting_core::archive::read_archived_transcript(&folder)
+                    .map_err(|_| anyhow::anyhow!(CONFIRMATION_NEEDS_SOURCE))?
+                {
+                    return check(&data);
+                }
+                SessionStore::open(&folder)
+                    .map_err(|_| anyhow::anyhow!(CONFIRMATION_NEEDS_SOURCE))?
+            }
+        };
+        store
+            .with_transcript_snapshot(check)
+            .map_err(|_| anyhow::anyhow!(CONFIRMATION_NEEDS_SOURCE))?
+    }
 }
 
 impl LiveNotes {
@@ -419,6 +595,49 @@ impl LiveNotes {
     #[cfg(test)]
     pub(crate) fn status(&self, service: &Service, meeting_id: &str) -> AppResult<LiveNotesStatus> {
         self.status_with_preference(service, meeting_id, false)
+    }
+
+    /// Give the renderer the IDs it can confirm without sending another transcript.
+    pub(super) fn workspace_status(
+        &self,
+        service: &Service,
+        meeting_id: &str,
+    ) -> AppResult<LiveNotesStatus> {
+        let mut status = self.status_with_preference(service, meeting_id, true)?;
+        let Some(workspace) = status
+            .view
+            .as_ref()
+            .and_then(|view| view.workspace.as_ref())
+        else {
+            return Ok(status);
+        };
+        let mut entries = Vec::new();
+        if workspace
+            .entities
+            .iter()
+            .any(|entry| !entry.evidence.is_empty())
+        {
+            if let Ok(_publication) = meeting_core::archive::source_publication_lease(&service.root)
+            {
+                if let Ok(data) = service.confirmation_preview(meeting_id) {
+                    if data.id == meeting_id {
+                        let mut current = CurrentWorkspaceEvidence::new(workspace, &data);
+                        entries.extend(
+                            workspace
+                                .entities
+                                .iter()
+                                .filter(|entry| {
+                                    !workspace.context_excluded_ids.contains(&entry.id)
+                                        && current.supports(&entry.evidence)
+                                })
+                                .map(|entry| entry.id.clone()),
+                        );
+                    }
+                }
+            }
+        }
+        status.confirmable_workspace_entries = Some(entries);
+        Ok(status)
     }
 
     /// Expose current job controls together with the requested saved analysis view without changing job ownership.
@@ -533,7 +752,28 @@ impl LiveNotes {
         {
             return Ok(false);
         }
-        let (next, projected) = match meeting_notes::workspace::update_context(&folder, &context) {
+        let update = meeting_notes::workspace::update_context_checked(
+            &folder,
+            &context,
+            |workspace, events, commit| {
+                let mut confirmations = events
+                    .iter()
+                    .filter(|event| event.human && event.status == "confirmed")
+                    .peekable();
+                if confirmations.peek().is_none() {
+                    return commit();
+                }
+                service.with_confirmation_transcript(meeting_id, |data| {
+                    let mut current = CurrentWorkspaceEvidence::new(workspace, data);
+                    anyhow::ensure!(
+                        confirmations.all(|event| current.supports(&event.evidence)),
+                        CONFIRMATION_NEEDS_SOURCE
+                    );
+                    commit()
+                })
+            },
+        );
+        let (next, projected) = match update {
             Ok(value) => value,
             Err(error) => {
                 if let (Some(current), Ok(saved)) = (
@@ -691,6 +931,7 @@ impl LiveNotes {
             status: "starting".into(),
             update_started: None,
             waiting_for_transcript: false,
+            waiting_for_memory: false,
             error: None,
             pending_chars: live::pending_chars(&runner.pending(&texts)),
             last_update: Instant::now(),
@@ -863,6 +1104,7 @@ impl Worker {
         let mut workspace_started = false;
         let mut finished_state: Option<SessionData> = None;
         let mut deferred_since: Option<Instant> = None;
+        let mut memory_deferred = false;
         self.set(|s| s.status = "waiting".into());
         while !self.control.is_cancelled() {
             let snapshot = match self
@@ -900,22 +1142,29 @@ impl Worker {
                 .unwrap_or((Duration::ZERO, None));
             self.set(|s| s.pending_chars = pending_chars);
             let recognition_defer = snapshot.recognition_needs_priority();
-            // Local-model load admission verifies current memory at the actual load.
-            // A model already resident can process text without waiting for load headroom.
-            let defer = recognition_defer;
-            self.set(|s| s.waiting_for_transcript = recognition_defer);
-            if defer {
+            memory_deferred = workspace
+                && snapshot.active
+                && runner.run().mode == "local"
+                && low_memory(
+                    memory_deferred,
+                    crate::system_load::available_memory_bytes(),
+                );
+            self.set(|s| {
+                s.waiting_for_transcript = recognition_defer;
+                s.waiting_for_memory = memory_deferred;
+            });
+            if recognition_defer {
                 let since = deferred_since.get_or_insert_with(Instant::now);
-                if recognition_defer && since.elapsed() >= Duration::from_secs(120) {
+                if since.elapsed() >= Duration::from_secs(120) {
                     self.set(|s| s.error = Some(RECOGNITION_WAIT.into()));
                 }
-                // Keep manual requests queued, but never busy-spin on them while ASR
-                // catches up. No new model request competes with the recording worker.
+            } else if deferred_since.take().is_some() {
+                self.set(|s| clear_recognition_wait(&mut s.error));
+            }
+            if recognition_defer || memory_deferred {
+                // Leave manual work queued and allow an in-flight update to finish.
                 self.wait_with_manual(false);
                 continue;
-            }
-            if deferred_since.take().is_some() {
-                self.set(|s| clear_recognition_wait(&mut s.error));
             }
             let backing_off = retry_at.is_some_and(|at| Instant::now() < at);
             let manual = self.manual.swap(false, Ordering::AcqRel);
@@ -984,7 +1233,17 @@ impl Worker {
                     };
                     let result = runner.update(&input, trigger, &self.control);
                     let completed = Instant::now();
-                    let cooldown = workspace.then_some(completed + WORKSPACE_COOLDOWN);
+                    let interval_pause =
+                        if workspace && snapshot.active && runner.run().mode == "local" {
+                            recording_cooldown(
+                                completed.saturating_duration_since(update_started),
+                                interval,
+                                crate::system_load::available_memory_bytes(),
+                            )
+                        } else {
+                            WORKSPACE_COOLDOWN
+                        };
+                    let cooldown = workspace.then_some(completed + interval_pause);
                     if self.control.is_cancelled() {
                         break;
                     }
@@ -1015,6 +1274,7 @@ impl Worker {
                                         if workspace { completed } else { update_started };
                                     s.last_trigger = Some(trigger);
                                 }
+                                s.waiting_for_memory = interval_pause > WORKSPACE_COOLDOWN;
                                 s.retry_at = cooldown;
                                 s.view = Some(view);
                             });
@@ -1144,6 +1404,7 @@ mod tests {
             status: "starting".into(),
             update_started: None,
             waiting_for_transcript: false,
+            waiting_for_memory: false,
             error: None,
             pending_chars: 0,
             last_update: Instant::now(),
@@ -1285,6 +1546,7 @@ mod tests {
                 status: "updating".into(),
                 update_started: Some(Instant::now()),
                 waiting_for_transcript: false,
+                waiting_for_memory: false,
                 error: None,
                 pending_chars: 200,
                 last_update: Instant::now(),
@@ -1415,6 +1677,7 @@ mod tests {
                 status: "waiting".into(),
                 update_started: None,
                 waiting_for_transcript: false,
+                waiting_for_memory: false,
                 error: None,
                 pending_chars: 200,
                 last_update: Instant::now(),
@@ -1507,6 +1770,7 @@ mod tests {
                 status: "stopped".into(),
                 update_started: None,
                 waiting_for_transcript: false,
+                waiting_for_memory: false,
                 error: None,
                 pending_chars: 0,
                 last_update: Instant::now(),
@@ -1540,11 +1804,194 @@ mod tests {
         remove_fixture_root(root);
     }
     #[test]
+    fn native_confirmation_rejects_changed_transcript_before_workspace_refresh() {
+        use meeting_core::{PcmWriter, SessionStore, TranscriptCheckpoint, SAMPLE_RATE};
+        use meeting_notes::workspace::{read_state, Override};
+        use sha2::{Digest, Sha256};
+
+        let fixture = crate::test_profile::TestProfile::new().unwrap();
+        let root = fixture.path();
+        let service = Arc::new(Service::new(root.to_owned()).unwrap());
+        let store =
+            SessionStore::create(&root.join("sessions"), "Synthetic", "test", "system", None)
+                .unwrap();
+        let mut audio = PcmWriter::new(store.clone(), "system").unwrap();
+        audio.append(&vec![1000; SAMPLE_RATE as usize]).unwrap();
+        audio.finish().unwrap();
+        drop(audio);
+        let snapshot = store.snapshot().unwrap();
+        let part = &snapshot.parts[0];
+        let write_text = |text: &str, revision_after_restart| {
+            store
+                .append_transcript(TranscriptCheckpoint {
+                    sequence: 0,
+                    at: String::new(),
+                    file: part.file.clone(),
+                    model_id: "test".into(),
+                    full: text.into(),
+                    committed: text.into(),
+                    tentative: String::new(),
+                    processed_samples: part.confirmed_sample_count,
+                    final_text: true,
+                    revision_after_restart,
+                })
+                .unwrap();
+        };
+        let original = "We selected the blue room.";
+        write_text(original, false);
+        let source = live::pending(&[], &live_texts(&store.snapshot().unwrap()).0).remove(0);
+        let hash = Sha256::digest(format!("{}\0{}", source.id, source.text));
+        let proof = meeting_notes::Source {
+            id: format!("s_{}", &format!("{hash:x}")[..16]),
+            ..source.as_source()
+        };
+        let meeting_id = &snapshot.id;
+        let runner = LiveRunner::start(
+            &live_root(&service, meeting_id),
+            meeting_id,
+            meeting_notes::Connection {
+                endpoint: "http://127.0.0.1:9/v1/".into(),
+                model: "synthetic".into(),
+                mode: "local".into(),
+                cloud_consent: false,
+                api_key: String::new(),
+            },
+            "en",
+        )
+        .unwrap()
+        .with_workspace(Default::default())
+        .unwrap();
+        let folder = runner.workspace_folder().unwrap();
+        let run_id = runner.run().id.clone();
+        let entities: Vec<_> = ["e_first", "e_second"].into_iter().map(|id| serde_json::json!({
+            "id":id,"revision":1,"kind":"decision","text":original,"status":"recorded","attention":"normal","owner":null,"due":null,
+            "evidence":[{"sourceId":proof.id,"quote":original}],"humanLocked":false,
+        })).collect();
+        let saved = serde_json::json!({
+            "schema":meeting_notes::workspace::PROMPT_VERSION,"revision":1,"updatedAt":null,"context":*runner.workspace_context().unwrap().lock().unwrap(),
+            "entities":entities,"events":[],"overviewRefs":[],"originals":[proof],"processed":[source],
+        });
+        std::fs::write(
+            folder.join("revision-00000001.json"),
+            serde_json::to_vec(&saved).unwrap(),
+        )
+        .unwrap();
+        drop(runner);
+        let admission = service
+            .reserve_operation(crate::operations::Kind::Recording)
+            .unwrap();
+        let (finish, wait) = std::sync::mpsc::channel();
+        let worker = thread::spawn(move || {
+            let _ = wait.recv();
+        });
+        service.lock().unwrap().active = Some(crate::Active {
+            _operation: Some(admission),
+            owner: None,
+            store: store.clone(),
+            capture: None,
+            stop: Arc::new(AtomicBool::new(false)),
+            workers: vec![crate::asr::RecognitionWorker {
+                source: "system".into(),
+                handle: worker,
+            }],
+        });
+        let confirm = |id: &str| {
+            let mut context = read_state(&folder).unwrap().context;
+            context.overrides.push(Override {
+                id: id.into(),
+                expected_revision: 1,
+                status: "confirmed".into(),
+                saved: false,
+            });
+            service
+                .live_notes
+                .set_workspace_context(&service, meeting_id, &run_id, context)
+        };
+        let (first, committed_while_transcript_was_locked) = thread::scope(|scope| {
+            let (started, starting) = std::sync::mpsc::channel();
+            let (completed, completion) = std::sync::mpsc::channel();
+            let confirm = &confirm;
+            let (worker, early) = store
+                .with_transcript_snapshot(|_| {
+                    let worker = scope.spawn(move || {
+                        started.send(()).unwrap();
+                        let result = confirm("e_first");
+                        let _ = completed.send(());
+                        result
+                    });
+                    starting.recv_timeout(Duration::from_secs(5)).unwrap();
+                    let early = completion.recv_timeout(Duration::from_millis(500)).is_ok();
+                    (worker, early)
+                })
+                .unwrap();
+            (worker.join().unwrap(), early)
+        });
+        assert!(first.unwrap());
+        assert_eq!(
+            service
+                .live_notes
+                .workspace_status(&service, meeting_id)
+                .unwrap()
+                .confirmable_workspace_entries,
+            Some(vec!["e_first".into(), "e_second".into()])
+        );
+        store.set_status("complete").unwrap();
+        let owned = service.lock().unwrap().active.take().unwrap();
+        let cold_preview = service
+            .live_notes
+            .workspace_status(&service, meeting_id)
+            .unwrap()
+            .confirmable_workspace_entries;
+        service.lock().unwrap().active = Some(owned);
+        write_text("We selected the red room.", true);
+        assert_eq!(
+            service
+                .live_notes
+                .workspace_status(&service, meeting_id)
+                .unwrap()
+                .confirmable_workspace_entries,
+            Some(vec![])
+        );
+        let rejected = confirm("e_second");
+        let saved = read_state(&folder).unwrap();
+        let owned = service.lock().unwrap().active.take().unwrap();
+        let revised_cold_preview = service
+            .live_notes
+            .workspace_status(&service, meeting_id)
+            .unwrap()
+            .confirmable_workspace_entries;
+        finish.send(()).unwrap();
+        for worker in owned.workers {
+            worker.handle.join().unwrap();
+        }
+
+        assert!(
+            !committed_while_transcript_was_locked,
+            "Confirmation committed without waiting for the transcript writer"
+        );
+        assert_eq!(
+            cold_preview,
+            Some(vec!["e_first".into(), "e_second".into()]),
+            "Status must read original text without acquiring a PCM recovery lease"
+        );
+        assert_eq!(revised_cold_preview, Some(vec![]));
+        assert!(
+            rejected.is_err(),
+            "The second confirmation used superseded transcript text"
+        );
+        assert!(saved.current_confirmations().contains_key("e_first"));
+        assert!(!saved.current_confirmations().contains_key("e_second"));
+        assert_eq!(saved.context.overrides.len(), 1);
+        assert!(saved.superseded_sources.is_empty());
+    }
+
+    #[test]
     fn terminal_status_never_reports_waiting_for_transcript() {
         let shared = Arc::new(Mutex::new(Shared {
             update_started: None,
             status: "waiting".into(),
             waiting_for_transcript: true,
+            waiting_for_memory: false,
             error: None,
             pending_chars: 250,
             last_update: Instant::now(),

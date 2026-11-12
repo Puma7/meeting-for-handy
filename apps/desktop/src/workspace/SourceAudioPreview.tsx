@@ -1,4 +1,4 @@
-import { useWorkspaceText } from "./shell/workspaceLocale.jsx";
+import { useWorkspaceText, workspaceText } from "./shell/workspaceLocale.jsx";
 import { useEffect, useRef, useState } from "react";
 
 type PreviewState =
@@ -6,28 +6,65 @@ type PreviewState =
   | { status: "ready"; bytes: ArrayBuffer };
 
 type PreviewProps = {
-  file: string;
-  load: (file: string) => Promise<ArrayBuffer>;
-  offsetSeconds: number;
+  sourceId: string;
+  runId?: string;
+  load: (sourceId: string, runId?: string) => Promise<ArrayBuffer>;
+  loadOnOpen?: boolean;
+  locale?: "de" | "en";
 };
 
-/** Reset the complete preview lifetime when its source file changes. */
+/** Reset the complete preview lifetime when its source or analysis run changes. */
 export default function SourceAudioPreview(props: PreviewProps) {
-  return <FileAudioPreview key={props.file} {...props} />;
+  return (
+    <FileAudioPreview
+      key={`${props.runId ?? ""}:${props.sourceId}`}
+      {...props}
+    />
+  );
 }
 
 /** Request one bounded verified excerpt on demand and ignore stale results without cancelling transport. */
-function FileAudioPreview({ file, load, offsetSeconds }: PreviewProps) {
-  const t = useWorkspaceText();
-  const [preview, setPreview] = useState<PreviewState>({ status: "idle" });
+function FileAudioPreview({
+  sourceId,
+  runId,
+  load,
+  loadOnOpen,
+  locale,
+}: PreviewProps) {
+  const translate = useWorkspaceText();
+  const t = locale
+    ? (value: string) => workspaceText(locale, value)
+    : translate;
+  const [preview, setPreview] = useState<PreviewState>({
+    status: loadOnOpen ? "loading" : "idle",
+  });
   const [url, setUrl] = useState<string | null>(null);
   const alive = useRef(true);
+  const initialRequest = useRef<Promise<ArrayBuffer> | null>(null);
   useEffect(() => {
     alive.current = true;
     return () => {
       alive.current = false;
     };
   }, []);
+
+  useEffect(() => {
+    if (!loadOnOpen) return;
+    let current = true;
+    // Reuse the initial request across StrictMode's effect replay.
+    initialRequest.current ??= runId ? load(sourceId, runId) : load(sourceId);
+    void initialRequest.current.then(
+      (bytes) => {
+        if (current) setPreview({ status: "ready", bytes });
+      },
+      () => {
+        if (current) setPreview({ status: "unavailable" });
+      },
+    );
+    return () => {
+      current = false;
+    };
+  }, [sourceId, runId, load, loadOnOpen]);
 
   useEffect(() => {
     if (preview.status !== "ready") {
@@ -41,13 +78,6 @@ function FileAudioPreview({ file, load, offsetSeconds }: PreviewProps) {
     return () => URL.revokeObjectURL(next);
   }, [preview]);
 
-  if (offsetSeconds >= 30)
-    return (
-      <p>
-        {t("Diese Stelle liegt hinter der Vorschau der ersten 30 Sekunden.")}
-      </p>
-    );
-
   if (url && preview.status === "ready")
     return (
       <audio
@@ -55,9 +85,6 @@ function FileAudioPreview({ file, load, offsetSeconds }: PreviewProps) {
         preload="metadata"
         aria-label={t("Audiovorschau des Originalabschnitts")}
         src={url}
-        onLoadedMetadata={({ currentTarget: audio }) => {
-          if (offsetSeconds < audio.duration) audio.currentTime = offsetSeconds;
-        }}
         onError={() => setPreview({ status: "unavailable" })}
       />
     );
@@ -68,10 +95,11 @@ function FileAudioPreview({ file, load, offsetSeconds }: PreviewProps) {
         type="button"
         disabled={preview.status === "loading"}
         onClick={async () => {
-          const requestedFile = file;
           setPreview({ status: "loading" });
           try {
-            const bytes = await load(requestedFile);
+            const bytes = runId
+              ? await load(sourceId, runId)
+              : await load(sourceId);
             if (alive.current) setPreview({ status: "ready", bytes });
           } catch {
             if (alive.current) setPreview({ status: "unavailable" });

@@ -44,6 +44,16 @@ struct Snapshot {
 }
 
 fn file_hash(path: &Path) -> Result<(PathBuf, u64, String)> {
+    file_hash_cancellable(path, &|| false)
+}
+
+fn file_hash_cancellable(
+    path: &Path,
+    cancelled: &impl Fn() -> bool,
+) -> Result<(PathBuf, u64, String)> {
+    if cancelled() {
+        return Err(BridgeError::Cancelled);
+    }
     let canonical = path
         .canonicalize()
         .map_err(|_| BridgeError::ModelIdentityChanged)?;
@@ -56,6 +66,9 @@ fn file_hash(path: &Path) -> Result<(PathBuf, u64, String)> {
     let mut buffer = [0_u8; 64 * 1024];
     let mut count = 0_u64;
     loop {
+        if cancelled() {
+            return Err(BridgeError::Cancelled);
+        }
         let read = file.read(&mut buffer)?;
         if read == 0 {
             break;
@@ -80,10 +93,19 @@ pub fn capture_model_identity(
     resolved: &ResolvedModel,
     runtime: RuntimeIdentity,
 ) -> Result<ModelIdentity> {
+    capture_model_identity_cancellable(model, resolved, runtime, &|| false)
+}
+
+fn capture_model_identity_cancellable(
+    model: &HandyModel,
+    resolved: &ResolvedModel,
+    runtime: RuntimeIdentity,
+    cancelled: &impl Fn() -> bool,
+) -> Result<ModelIdentity> {
     if model.id != resolved.model_id || !(model.ready_for_streaming() || model.ready_for_batch()) {
         return Err(BridgeError::ModelUnavailable);
     }
-    capture_optional_model_identity(model, resolved, runtime)
+    capture_optional_model_identity_cancellable(model, resolved, runtime, cancelled)
 }
 /// An experimental role has its own identity and never relaxes the ASR resume gate.
 pub fn capture_optional_model_identity(
@@ -91,10 +113,19 @@ pub fn capture_optional_model_identity(
     resolved: &ResolvedModel,
     runtime: RuntimeIdentity,
 ) -> Result<ModelIdentity> {
+    capture_optional_model_identity_cancellable(model, resolved, runtime, &|| false)
+}
+
+fn capture_optional_model_identity_cancellable(
+    model: &HandyModel,
+    resolved: &ResolvedModel,
+    runtime: RuntimeIdentity,
+    cancelled: &impl Fn() -> bool,
+) -> Result<ModelIdentity> {
     if model.id != resolved.model_id || !model.is_downloaded || model.is_downloading {
         return Err(BridgeError::ModelUnavailable);
     }
-    let (canonical_path, bytes, sha256) = file_hash(&resolved.path)?;
+    let (canonical_path, bytes, sha256) = file_hash_cancellable(&resolved.path, cancelled)?;
     Ok(ModelIdentity {
         canonical_path,
         bytes,
@@ -218,6 +249,30 @@ pub fn write_model_snapshot(
     )
 }
 
+/// The setup probe can abandon a lengthy model hash before creating its snapshot.
+#[cfg(feature = "native-asr")]
+pub fn write_model_snapshot_cancellable(
+    session_dir: &Path,
+    model: &HandyModel,
+    resolved: &ResolvedModel,
+    provenance: &serde_json::Value,
+    cancelled: impl Fn() -> bool,
+) -> Result<ModelIdentity> {
+    if cancelled() {
+        return Err(BridgeError::Cancelled);
+    }
+    let identity = capture_model_identity_cancellable(
+        model,
+        resolved,
+        crate::native::runtime_identity(),
+        &cancelled,
+    )?;
+    if cancelled() {
+        return Err(BridgeError::Cancelled);
+    }
+    write_snapshot(session_dir, identity, provenance)
+}
+
 #[cfg(feature = "native-asr")]
 pub fn verify_model_snapshot(session_dir: &Path, model_path: &Path) -> Result<ModelIdentity> {
     let identity = read_model_snapshot(session_dir)?;
@@ -228,6 +283,28 @@ pub fn verify_model_snapshot(session_dir: &Path, model_path: &Path) -> Result<Mo
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn setup_hash_cancels_before_open_and_between_existing_read_blocks() {
+        assert!(matches!(
+            file_hash_cancellable(Path::new("no-file-required"), &|| true),
+            Err(BridgeError::Cancelled)
+        ));
+        let root = tempfile::tempdir().unwrap();
+        let weights = root.path().join("weights.bin");
+        let expected = vec![7_u8; 128 * 1024];
+        fs::write(&weights, &expected).unwrap();
+        let checks = std::cell::Cell::new(0);
+        let cancelled = || {
+            checks.set(checks.get() + 1);
+            checks.get() == 3
+        };
+        assert!(matches!(
+            file_hash_cancellable(&weights, &cancelled),
+            Err(BridgeError::Cancelled)
+        ));
+        assert_eq!(fs::read(weights).unwrap(), expected);
+    }
     fn runtime() -> RuntimeIdentity {
         RuntimeIdentity {
             compiled_version: "0.4.1".into(),

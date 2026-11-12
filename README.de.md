@@ -38,6 +38,18 @@ Die Pakete sind nicht codesigniert (macOS: ad hoc signiert, nicht notarisiert), 
 
 Jede Aussage einer Zusammenfassung verweist auf einen vorhandenen Transkriptabschnitt und ein wörtliches Zitat; unbekannte Zuständige und Termine bleiben unbekannt. Ergebnisse bleiben KI-Entwürfe zum Prüfen.
 
+Unter **Historie** kannst du Meetingnamen und gespeicherte Transkripte lokal durchsuchen. Zeitraum, VIP-Markierung und „Nur Treffer im Transkript“ grenzen die Suche ein. Ein Transkripttreffer öffnet den Originalabschnitt. Bei der Rückkehr zur Historie bleiben Suchbegriff und Filter erhalten.
+
+Unter **Meetings befragen** kannst du mit dem eingerichteten lokalen Textmodell eine freie Frage über mehrere Meetings stellen. Die App sucht anhand von Begriffen aus der Frage und übergibt höchstens acht passende Transkriptstellen. Zeitraum und VIP-Filter gelten auch hier. Die Antwort besteht aus geprüften wörtlichen Zitaten. **Originalstelle öffnen** springt zur jeweiligen Textstelle. Nach der Rückkehr zur Historie kannst du weitere Belege derselben Antwort öffnen.
+
+Du kannst die Frage auf bis zu zwölf ausgewählte Meetings begrenzen oder sie in den Sitzungsdetails an genau dieses Meeting richten. Bei Transkripttreffern in der Historie kannst du den gespeicherten Originalton als kurze Vorschau laden. Die Vorschau läuft bei direkt anschließenden, verifizierten Abschnitten auf derselben Spur weiter. In der erweiterten Ansicht kannst du belegte Einträge einzeln bestätigen und den Auswertungsstand mit dem Bearbeitungsstatus als JSON speichern.
+
+Die Aufnahme-Einrichtung bietet eine synthetische Funktionsprobe für Audiospeicherung, Transkriptionssoftware und das gewählte lokale Textmodell. Über eine lokale Kalenderdatei kannst du einen Termin zur Vorbereitung wählen und Titel und Vorlage übernehmen. Der Aufnahmestart bleibt eine eigene Handlung.
+
+Über **Einstellungen → Daten und Wartung → Sitzungsspeicher verschlüsseln** erstellst du eine geprüfte Kopie deines nativen Profils. Windows braucht dafür ein lokales NTFS-Laufwerk mit EFS. macOS verwendet ein verschlüsseltes Laufwerksabbild. Linux braucht das systemweit installierte `gocryptfs` und funktionierendes FUSE. Unter macOS und Linux legst du beim Erstellen eine Passphrase fest und gibst sie zum Öffnen erneut ein. Neue Sitzungen und der neu aufgebaute Suchindex liegen im geschützten Speicher. Die vorhandenen Dateien und privaten Arbeitsbereichsentwürfe bleiben im Originalprofil erhalten. [Geschützte Profile und Wiederherstellung](docs/RUST_STORAGE.md#encrypted-session-storage)
+
+Eine **verschlüsselte Kopie** einer einzelnen gespeicherten nativen Sitzung erstellst du in den Sitzungsdetails. Unter **Einstellungen → Daten und Wartung** stellst du sie mit der Passphrase oder dem separat angezeigten Wiederherstellungsschlüssel in einem separaten Profil wieder her. Bewahre beide Zugangsdaten getrennt von der Sicherung auf.
+
 ![Transkript und lokale Dateien in Meeting for Handy](assets/screenshots/transcript-light.png)
 *Echte App-Komponenten mit künstlichen Demo-Inhalten. Deutsch und Englisch sind enthalten.*
 
@@ -68,7 +80,7 @@ Siehe [Anbietervoraussetzungen, Referenzprüfung und Grenzen](docs/validation/lo
 - **Zwei Spuren sind keine Personenerkennung.** Namen werden nur nach deiner Bestätigung zugeordnet; optionale Sprecherexperimente liefern neutrale Kennungen je Abschnitt.
 - **Keine versteckte Aufnahme.** Lokale Agenten brauchen für jede Aufnahme eine sichtbare Freigabe und eine eigene Mikrofonfreigabe ([Agentenprotokoll](docs/RUST_AGENT_PROTOCOL.md)).
 
-Die Daten liegen im lokalen Anwendungsdatenordner `HandyMeeting/RustBeta` (Name aus Kompatibilitätsgründen beibehalten). Dateien sind nicht verschlüsselt; ein Synchronisierungsdienst kann sie hochladen.
+Das Standardprofil speichert lesbare Dateien im lokalen Anwendungsdatenordner `HandyMeeting/RustBeta` (Name aus Kompatibilitätsgründen beibehalten). Ein Synchronisierungsdienst mit Zugriff auf diesen Ordner kann sie hochladen.
 
 ## Im Handy-Ökosystem
 

@@ -2,8 +2,8 @@ pub(super) use super::assertions::{
     completion_quote_allowed, recorded_decision_quote_allowed, withdrawal_quote_allowed,
 };
 use super::matching::{
-    explicit_owned_completion, same_question, shares_topic, task_completion_matches,
-    task_subject_matches,
+    calendar_task_match, explicit_owned_completion, same_question, shares_topic,
+    task_completion_matches, task_subject_matches, CalendarTaskMatch,
 };
 use super::model::*;
 use anyhow::{ensure, Context, Result};
@@ -252,6 +252,7 @@ fn apply_response(
                 "Ungültiger neuer Meetingeintrag."
             );
         }
+        let due_was_omitted = c.due.is_none();
         if c.kind == "task" && old.is_none() {
             ensure!(
                 !c.evidence.iter().any(|e| task_missing_pledge(&e.quote)),
@@ -269,6 +270,13 @@ fn apply_response(
                         if weekdays.all(|other| other.eq_ignore_ascii_case(first)) {
                             c.due = Some(first.to_owned());
                         }
+                    } else if let [witness] = c.evidence.as_slice() {
+                        c.due = crate::validation::explicit_task_calendar_date(&witness.quote)
+                            .filter(|due| {
+                                calendar_task_match(title, &witness.quote, due)
+                                    == CalendarTaskMatch::SameAssignment
+                            })
+                            .map(str::to_owned);
                     }
                 }
             }
@@ -323,6 +331,9 @@ fn apply_response(
             .clone()
             .or_else(|| old.map(|e| e.text.clone()))
             .unwrap_or_default();
+        if let Some(due) = c.due.as_deref().filter(|_| c.kind == "task") {
+            validate_calendar_due_scope(&text, due, &c.evidence)?;
+        }
         if request.purpose == "facts" && c.kind == "decision" && c.status == "recorded" {
             c.evidence = assertion_witnesses(request, &c.evidence, &text, false)?;
         }
@@ -495,7 +506,7 @@ fn apply_response(
                             && (e.owner == c.owner
                                 || ((terminal_identity || same_task_witness) && c.owner.is_none()))
                             && (e.due == c.due
-                                || ((terminal_identity || same_task_witness) && c.due.is_none()))
+                                || ((terminal_identity || same_task_witness) && due_was_omitted))
                             && (e.evidence == c.evidence
                                 || terminal_identity
                                 || same_decision_witness
@@ -782,6 +793,23 @@ pub(super) fn decision_backed_fact(entity: &Entity) -> bool {
             shares_topic(&entity.text, sentence) && recorded_decision_quote_allowed(sentence)
         })
     })
+}
+
+/// A model-supplied date cannot bypass a detected assignment boundary.
+fn validate_calendar_due_scope(title: &str, due: &str, evidence: &[crate::Evidence]) -> Result<()> {
+    let mut competing_assignment = false;
+    for witness in evidence {
+        match calendar_task_match(title, &witness.quote, due) {
+            CalendarTaskMatch::SameAssignment => return Ok(()),
+            CalendarTaskMatch::CompetingAssignment => competing_assignment = true,
+            CalendarTaskMatch::Unverified => {}
+        }
+    }
+    ensure!(
+        !competing_assignment,
+        "Die angegebene Frist benötigt einen Originalbeleg zur selben Aufgabe."
+    );
+    Ok(())
 }
 
 /// A sentence may only witness its own assertion, even when the model cited

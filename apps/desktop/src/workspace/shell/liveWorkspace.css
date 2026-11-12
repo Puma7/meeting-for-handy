@@ -27,15 +27,21 @@
   display: grid;
   gap: 2px;
 }
-.live-evidence > button {
+.evidence-actions {
+  display: flex;
+  gap: 4px;
+  align-items: start;
+}
+.evidence-actions > .quote {
   display: block;
-  width: 100%;
+  flex: 1;
+  min-width: 0;
   text-align: left;
   white-space: normal;
   font-size: 12px;
   line-height: 1.4;
 }
-.live-evidence > button span {
+.evidence-actions > .quote span {
   color: var(--accent);
 }
 .live-workspace .modal-content label {
@@ -360,8 +366,29 @@
 .live-workspace .live-evidence {
   gap: 0;
 }
-.live-workspace .live-evidence > button {
+.live-workspace .evidence-actions > .quote {
   padding-block: 2px;
+}
+.workspace-diagnostics-report {
+  max-width: 100%;
+  overflow: auto;
+  white-space: pre-wrap;
+}
+.meeting-answers {
+  padding-inline-start: 1.25em;
+}
+.meeting-answers li {
+  margin-block: 6px;
+}
+.meeting-answers button {
+  display: block;
+  white-space: normal;
+  text-align: start;
+}
+.result-origin {
+  display: block;
+  font-size: 0.75rem;
+  color: var(--muted);
 }
 .live-workspace .count-select input {
   appearance: textfield;

@@ -46,9 +46,19 @@ pub(crate) async fn search_meetings(
     query: String,
     offset: u64,
     limit: u32,
+    scope: Option<meeting_core::library::SearchScope>,
 ) -> AppResult<meeting_core::library::SearchPage> {
     let service = Arc::clone(&service);
-    blocking(move || library_service::search(&service.root, &query, offset, limit)).await
+    blocking(move || {
+        library_service::search(
+            &service.root,
+            &query,
+            offset,
+            limit,
+            &scope.unwrap_or_default(),
+        )
+    })
+    .await
 }
 // Runs off the UI thread: it may wait on the recording transition lock or on disk.
 /// Reserve indexing admission before starting an explicitly requested local index rebuild.

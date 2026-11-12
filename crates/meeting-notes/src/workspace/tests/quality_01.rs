@@ -32,6 +32,222 @@ fn answer(changes: serde_json::Value) -> String {
 }
 
 #[test]
+fn omitted_calendar_due_is_saved_from_the_literal_task_witness() {
+    for (language, quote, title, expected) in [
+        (
+            "de",
+            "Jana holt die Technik bis zum dreiundzwanzigsten neunten ab.",
+            "Technik abholen",
+            Some("dreiundzwanzigsten neunten"),
+        ),
+        (
+            "en",
+            "Jana will collect the equipment by September twenty-third.",
+            "Collect the equipment",
+            Some("September twenty-third"),
+        ),
+        (
+            "de",
+            "Leon bringt die Unterlagen bis zum vierundzwanzigsten neunten mit.",
+            "Unterlagen mitbringen",
+            Some("vierundzwanzigsten neunten"),
+        ),
+        (
+            "de",
+            "Ich bringe die Unterlagen bis zum 24. September mit.",
+            "Unterlagen mitbringen",
+            Some("24. September"),
+        ),
+        (
+            "de",
+            "Mara besorgt die Getränke bis zum fünfundzwanzigsten neunten.",
+            "Getränke besorgen",
+            Some("fünfundzwanzigsten neunten"),
+        ),
+        (
+            "de",
+            "Leon holt die Unterlagen bis zum vierundzwanzigsten neunten ab.",
+            "Unterlagen mitbringen",
+            None,
+        ),
+        (
+            "en",
+            "I will write the guide, maybe by September twenty-third.",
+            "Write the guide",
+            None,
+        ),
+    ] {
+        let mut state = WorkspaceState::default();
+        let witness = source("s_task", 0, quote);
+        let mut req = request(&state, "tasks", &witness);
+        req.language = language.into();
+        validate::apply(
+            &mut state,
+            &req,
+            &answer(json!([{
+                "proposalId":"p_task","kind":"task","text":title,"due":null,
+                "status":"open","attention":"current",
+                "evidence":[{"sourceId":witness.id,"quote":quote}]
+            }])),
+        )
+        .unwrap();
+        assert_eq!(state.entities[0].due.as_deref(), expected, "{quote}");
+        assert_eq!(state.entities[0].evidence[0].quote, quote);
+    }
+}
+
+#[test]
+fn calendar_due_cannot_cross_a_punctuationless_assignment_with_a_bare_object() {
+    assert_only_undated_guide_task(
+        "I will send the guide Jane sends invoices by September 23rd 2026.",
+    );
+}
+
+#[test]
+fn calendar_due_cannot_cross_a_bare_assignment_with_another_verb() {
+    assert_only_undated_guide_task(
+        "I will send the guide Jane emails invoices by September 23rd 2026.",
+    );
+}
+
+#[test]
+fn calendar_due_cannot_cross_an_explicit_conjunction() {
+    for quote in [
+        "I will send the guide and Jane sends invoices by September 23rd 2026.",
+        "I will send the guide, and Jane emails invoices by September 23rd 2026.",
+    ] {
+        assert_only_undated_guide_task(quote);
+    }
+}
+
+fn assert_only_undated_guide_task(quote: &str) {
+    let witness = source("s_adjacent", 0, quote);
+    let proposal = |due: Option<&str>| {
+        answer(json!([{
+            "proposalId":"p_guide","kind":"task","text":"Send the guide",
+            "due":due,"status":"open","attention":"current",
+            "evidence":[{"sourceId":witness.id,"quote":witness.text}]
+        }]))
+    };
+    for purpose in ["tasks", "live_update"] {
+        let mut state = WorkspaceState::default();
+        let req = request(&state, purpose, &witness);
+        validate::apply(&mut state, &req, &proposal(None)).unwrap();
+        assert_eq!(state.entities.len(), 1);
+        assert_eq!(state.entities[0].due, None, "{purpose}: {quote}");
+        assert!(witness.text.contains(&state.entities[0].evidence[0].quote));
+
+        let mut state = WorkspaceState::default();
+        let req = request(&state, purpose, &witness);
+        assert!(
+            validate::apply(&mut state, &req, &proposal(Some("September 23rd 2026")),).is_err(),
+            "{purpose}: {quote}"
+        );
+        assert!(state.entities.is_empty());
+    }
+}
+
+#[test]
+fn calendar_due_supplied_for_the_first_assignment_ignores_a_later_deadline() {
+    let witness = source(
+        "s_both_due",
+        0,
+        "I will send the guide by Friday and Jane emails invoices by September 23rd 2026.",
+    );
+    let proposal = |due: &str| {
+        answer(json!([{
+            "proposalId":"p_guide","kind":"task","text":"Send the guide",
+            "due":due,"status":"open","attention":"current",
+            "evidence":[{"sourceId":witness.id,"quote":witness.text}]
+        }]))
+    };
+    for purpose in ["tasks", "live_update"] {
+        let mut state = WorkspaceState::default();
+        let req = request(&state, purpose, &witness);
+        validate::apply(&mut state, &req, &proposal("Friday")).unwrap();
+        assert_eq!(state.entities[0].due.as_deref(), Some("Friday"));
+
+        let mut state = WorkspaceState::default();
+        let req = request(&state, purpose, &witness);
+        assert!(validate::apply(&mut state, &req, &proposal("September 23rd 2026")).is_err());
+        assert!(state.entities.is_empty());
+    }
+}
+
+#[test]
+fn calendar_due_preserves_noun_phrases_and_contracted_german_assignments() {
+    for (language, quote, title, expected) in [
+        (
+            "en",
+            "I will send the Customer Success reports by September 23rd 2026.",
+            "Send the Customer Success reports",
+            "September 23rd 2026",
+        ),
+        (
+            "en",
+            "I will send Jane's invoice reviews by September 23rd 2026.",
+            "Send Jane's invoice reviews",
+            "September 23rd 2026",
+        ),
+        (
+            "de",
+            "Ich sammle die Unterlagen bis zum 23. September.",
+            "Unterlagen sammeln",
+            "23. September",
+        ),
+        (
+            "auto",
+            "Ich sammle die Unterlagen bis zum 23. September.",
+            "Unterlagen sammeln",
+            "23. September",
+        ),
+    ] {
+        let mut state = WorkspaceState::default();
+        let witness = source("s_calendar", 0, quote);
+        let mut req = request(&state, "tasks", &witness);
+        req.language = language.into();
+        validate::apply(
+            &mut state,
+            &req,
+            &answer(json!([{
+                "proposalId":"p_calendar","kind":"task","text":title,
+                "due":null,"status":"open","attention":"current",
+                "evidence":[{"sourceId":witness.id,"quote":quote}]
+            }])),
+        )
+        .unwrap_or_else(|error| panic!("{quote}: {error}"));
+        assert_eq!(state.entities[0].due.as_deref(), Some(expected), "{quote}");
+        assert_eq!(state.entities[0].evidence[0].quote, quote);
+    }
+
+    for quote in [
+        "Vielleicht sammle ich die Unterlagen bis zum 23. September.",
+        "Ich sammle die Unterlagen bis zum 23. September, falls wir die Freigabe erhalten.",
+        "Ich sammle die Unterlagen bis zum 23. September nicht.",
+        "Jana sammle die Unterlagen bis zum 23. September.",
+    ] {
+        let mut state = WorkspaceState::default();
+        let witness = source("s_unconfirmed", 0, quote);
+        let mut req = request(&state, "tasks", &witness);
+        req.language = "de".into();
+        assert!(
+            validate::apply(
+                &mut state,
+                &req,
+                &answer(json!([{
+                    "proposalId":"p_unconfirmed","kind":"task","text":"Unterlagen sammeln",
+                    "due":null,"status":"open","attention":"current",
+                    "evidence":[{"sourceId":witness.id,"quote":quote}]
+                }])),
+            )
+            .is_err(),
+            "{quote}"
+        );
+        assert!(state.entities.is_empty());
+    }
+}
+
+#[test]
 fn codex_review_translated_task_closes_from_original_language_evidence() {
     let mut state = WorkspaceState::default();
     let promise = source("s_pickup", 0, "Ich hole das Mikrofon ab.");
@@ -183,6 +399,37 @@ fn a_mixed_german_fact_keeps_its_observation_and_separate_literal_decision() {
     assert_eq!(state.entities[1].kind, "fact");
     assert_eq!(state.entities[1].text, observation);
     assert_eq!(state.entities[1].evidence[0].quote, observation);
+}
+
+#[test]
+fn inferred_deadline_does_not_duplicate_an_existing_undated_task() {
+    let mut state = WorkspaceState::default();
+    let pledge = source(
+        "s_guide",
+        0,
+        "I will send the guide by September 23rd, 2026.",
+    );
+    let proposal = answer(json!([{
+        "proposalId":"p_guide","kind":"task","text":"Send the guide",
+        "status":"open","attention":"current","due":null,
+        "evidence":[{"sourceId":pledge.id,"quote":pledge.text}]
+    }]));
+    let first = request(&state, "live_update", &pledge);
+    validate::apply(&mut state, &first, &proposal).unwrap();
+    let old = state.entities[0].clone();
+    assert_eq!(old.due, None);
+
+    let repeat = request(&state, "tasks", &pledge);
+    let mut fresh = WorkspaceState::default();
+    let first_with_inference = request(&fresh, "tasks", &pledge);
+    validate::apply(&mut fresh, &first_with_inference, &proposal).unwrap();
+    assert_eq!(
+        fresh.entities[0].due.as_deref(),
+        Some("September 23rd, 2026")
+    );
+
+    validate::apply(&mut state, &repeat, &proposal).unwrap();
+    assert_eq!(state.entities, vec![old]);
 }
 
 #[test]

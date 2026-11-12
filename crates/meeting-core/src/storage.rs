@@ -13,18 +13,33 @@ const MAX_MANIFEST_BYTES: u64 = 32 * 1024 * 1024;
 const MAX_JOURNAL_LINE: usize = 2 * 1024 * 1024;
 /// Optional audio analysis may read only a closed, digest-verified bounded section.
 pub fn read_closed_audio(folder: &Path, part: &AudioPart) -> Result<Vec<f32>> {
-    read_closed_audio_bounded(folder, part, 120, u64::from(SAMPLE_RATE) * 120)
+    read_closed_audio_bounded(folder, part, 120, 0, u64::from(SAMPLE_RATE) * 120)
 }
 
 /// Verify the full closed section but allocate only its first thirty seconds.
 pub fn read_closed_audio_preview(folder: &Path, part: &AudioPart) -> Result<Vec<f32>> {
-    read_closed_audio_bounded(folder, part, 300, u64::from(SAMPLE_RATE) * 30)
+    read_closed_audio_preview_at(folder, part, 0)
+}
+
+/// Verify the full closed section before reading up to thirty seconds from an offset.
+pub fn read_closed_audio_preview_at(
+    folder: &Path,
+    part: &AudioPart,
+    offset_ms: u64,
+) -> Result<Vec<f32>> {
+    let sample_rate = u64::from(SAMPLE_RATE);
+    let offset = offset_ms
+        .checked_mul(sample_rate)
+        .ok_or("Audio preview offset is out of range")?
+        / 1_000;
+    read_closed_audio_bounded(folder, part, 300, offset, sample_rate * 30)
 }
 
 fn read_closed_audio_bounded(
     folder: &Path,
     part: &AudioPart,
     max_seconds: u64,
+    offset: u64,
     sample_limit: u64,
 ) -> Result<Vec<f32>> {
     reject_link(folder)?;
@@ -38,19 +53,12 @@ fn read_closed_audio_bounded(
         )
         .into());
     }
-    let path = safe_audio_path(folder, &part.file)?;
-    crate::pcm::verify_confirmed(&path, part)?;
-    let samples = part.confirmed_sample_count.min(sample_limit) as usize;
-    let mut pcm = Vec::with_capacity(samples);
-    while pcm.len() < samples {
-        let count = (samples - pcm.len()).min(SAMPLE_RATE as usize);
-        let next = crate::read_pcm_samples(&path, pcm.len() as u64, count)?;
-        if next.len() != count {
-            return Err("Confirmed audio ended early".into());
-        }
-        pcm.extend(next);
+    if offset >= part.confirmed_sample_count {
+        return Err("Audio preview offset is out of range".into());
     }
-    Ok(pcm)
+    let path = safe_audio_path(folder, &part.file)?;
+    let samples = (part.confirmed_sample_count - offset).min(sample_limit) as usize;
+    crate::pcm::read_verified_pcm_range(&path, part, offset, samples)
 }
 
 struct Inner {
@@ -364,6 +372,17 @@ impl SessionStore {
             .map_err(|_| "Session lock was poisoned")?
             .data
             .clone())
+    }
+
+    /// Keep the current transcript stable through a short evidence publication.
+    /// Audio checkpoints use their own writer lock and can proceed independently.
+    pub fn with_transcript_snapshot<T>(&self, read: impl FnOnce(&SessionData) -> T) -> Result<T> {
+        let _transcript = self
+            .writers
+            .transcript
+            .lock()
+            .map_err(|_| "Transcript journal lock was poisoned")?;
+        Ok(read(&self.snapshot()?))
     }
 
     pub fn model_id(&self) -> Result<String> {
@@ -1608,9 +1627,9 @@ mod preview_regressions {
             SessionStore::create(dir.path(), "Synthetic preview", "m", "out", None).unwrap();
         store.inner.lock().unwrap().data.chunk_seconds = 180;
         let mut writer = crate::PcmWriter::new(store.clone(), "system").unwrap();
-        for _ in 0..36 {
+        for interval in 0..36 {
             writer
-                .append(&vec![1234_i16; SAMPLE_RATE as usize * 5])
+                .append(&vec![1234_i16 + interval; SAMPLE_RATE as usize * 5])
                 .unwrap();
         }
         writer.finish().unwrap();
@@ -1618,7 +1637,12 @@ mod preview_regressions {
         assert!(read_closed_audio(store.folder(), &part).is_err());
         let pcm = read_closed_audio_preview(store.folder(), &part).unwrap();
         assert_eq!(pcm.len(), SAMPLE_RATE as usize * 30);
-        assert!(pcm.iter().all(|sample| *sample == 1234.0 / 32768.0));
+        assert_eq!(pcm[0], 1234.0 / 32768.0);
+        let later = read_closed_audio_preview_at(store.folder(), &part, 155_000).unwrap();
+        assert_eq!(later.len(), SAMPLE_RATE as usize * 25);
+        assert_eq!(later[0], (1234.0 + 31.0) / 32768.0);
+        assert!(read_closed_audio_preview_at(store.folder(), &part, 180_000).is_err());
+        assert!(read_closed_audio_preview_at(store.folder(), &part, u64::MAX).is_err());
         use std::io::{Seek, SeekFrom};
         let mut file = OpenOptions::new()
             .write(true)
@@ -1628,5 +1652,6 @@ mod preview_regressions {
         file.write_all(&4321_i16.to_le_bytes()).unwrap();
         file.sync_all().unwrap();
         assert!(read_closed_audio_preview(store.folder(), &part).is_err());
+        assert!(read_closed_audio_preview_at(store.folder(), &part, 40_000).is_err());
     }
 }

@@ -48,6 +48,10 @@ on:
         description: Build and verify Windows installer/ZIP (false runs source checks only)
         type: boolean
         default: true
+      native_profiles:
+        description: Also test encrypted profile migration on macOS and Linux
+        type: boolean
+        default: false
   workflow_call:
     inputs:
       packages:
@@ -248,6 +252,51 @@ jobs:
             packages/HandyMeeting-*-windows-x64-setup.exe*
           if-no-files-found: error
           retention-days: 14
+  windows-protected-profile:
+    if: github.event_name == 'pull_request'
+    name: Windows protected profile (synthetic)
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          persist-credentials: false
+      - name: Install pinned Rust tooling
+        shell: pwsh
+        run: rustup toolchain install 1.91.1 --profile minimal
+      - name: Exercise EFS migration and new writes in a temporary profile
+        shell: pwsh
+        run: |
+          $env:HANDYMEETING_EFS_TEST_PARENT = (Resolve-Path -LiteralPath $env:RUNNER_TEMP).Path
+          cargo +1.91.1 test -p meeting-core --locked --lib archive::protected_profile::tests::native_efs_inherits_for_new_audio_and_sqlite_index -- --ignored --exact
+  unix-protected-profile:
+    if: github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && inputs.native_profiles)
+    name: Encrypted profile migration (${{ matrix.runner }})
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-24.04, macos-15]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          persist-credentials: false
+      - name: Install the signed Ubuntu packages for the Linux test
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y gocryptfs fuse3
+          test -c /dev/fuse || sudo modprobe fuse
+          test -c /dev/fuse
+          dpkg-query -W gocryptfs fuse3
+      - name: Install pinned Rust tooling
+        run: rustup toolchain install 1.91.1 --profile minimal
+      - name: Migrate synthetic sessions and reopen a detached encrypted copy
+        run: cargo +1.91.1 test -p meeting-core --locked --lib archive::protected_profile::tests::native_volume_migrates_and_recovers_from_a_detached_ciphertext_copy -- --ignored --exact
+      - name: Reject and detach an owned Linux mount with the wrong access mode
+        if: runner.os == 'Linux'
+        run: cargo +1.91.1 test -p meeting-core --locked --lib archive::protected_profile::volume::platform::tests::native_rejected_readonly_mount_is_detached_and_can_be_reopened -- --ignored --exact
   portable-core:
     needs: plan
     if: needs.plan.outputs.packages != 'true'

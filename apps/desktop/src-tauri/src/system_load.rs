@@ -28,6 +28,12 @@ const MAX_SAMPLE_AGE: Duration = Duration::from_secs(10);
 
 static PREVIOUS: Mutex<Option<(Instant, CpuTicks)>> = Mutex::new(None);
 
+/// Available physical RAM without changing the shared CPU sampling baseline.
+pub(crate) fn available_memory_bytes() -> Option<u64> {
+    let (used, total) = platform::memory()?;
+    total.checked_sub(used)
+}
+
 /// Reads the current load. The processor share covers the time since the previous call,
 /// so the first call after start, or after a pause longer than `MAX_SAMPLE_AGE`, reports
 /// no processor value.

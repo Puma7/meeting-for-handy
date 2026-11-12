@@ -83,6 +83,20 @@ export function sharedContextSize(context) {
 }
 /** Describe current inference progress in the chosen UI language without implying recording failure. */
 export function workspaceStatusText(status, language = "de") {
+  if (status?.running && status.preparingModel)
+    return language === "en"
+      ? "Preparing the local model"
+      : "Lokales Modell wird vorbereitet";
+  if (status?.running && status.status === "starting")
+    return language === "en" ? "Starting analysis" : "Auswertung startet";
+  if (
+    status?.running &&
+    status.waitingForMemory &&
+    !status.waitingForTranscript
+  )
+    return language === "en"
+      ? "Analysis waits for free memory · recording takes priority"
+      : "Auswertung wartet auf freien Arbeitsspeicher · Aufnahme hat Vorrang";
   if (language === "en") {
     if (!status) return "Local analysis is off";
     if (status.status === "updating") {

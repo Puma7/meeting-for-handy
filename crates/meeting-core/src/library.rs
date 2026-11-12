@@ -54,6 +54,56 @@ pub struct SearchPage {
     pub offset: u64,
     pub limit: u32,
 }
+
+/// Bound a local search by meeting start time and by the kind of result.
+#[derive(Clone, Debug, Default, Deserialize)]
+#[serde(default, rename_all = "camelCase", deny_unknown_fields)]
+pub struct SearchScope {
+    pub from_ms: Option<i64>,
+    pub before_ms: Option<i64>,
+    pub pinned_only: bool,
+    pub transcript_only: bool,
+}
+
+impl SearchScope {
+    /// Validate date boundaries before either indexed search or its empty-storage fast path.
+    pub fn validate(&self) -> Result<()> {
+        if [self.from_ms, self.before_ms]
+            .into_iter()
+            .flatten()
+            .any(|value| !(-62_135_596_800_000..=253_402_300_799_999).contains(&value))
+            || self
+                .from_ms
+                .zip(self.before_ms)
+                .is_some_and(|(from, before)| from >= before)
+        {
+            return Err("Invalid meeting date range".into());
+        }
+        Ok(())
+    }
+
+    /// Recheck the same boundaries after reading a candidate's current metadata.
+    pub fn permits(&self, started_at: &str, pinned: bool) -> bool {
+        if self.pinned_only && !pinned {
+            return false;
+        }
+        if self.from_ms.is_none() && self.before_ms.is_none() {
+            return true;
+        }
+        let Ok(started) = chrono::DateTime::parse_from_rfc3339(started_at) else {
+            return false;
+        };
+        let started = started.timestamp_millis();
+        self.from_ms.is_none_or(|from| started >= from)
+            && self.before_ms.is_none_or(|before| started < before)
+    }
+}
+
+// The same scope applies to the total and the page. Bind user input as values.
+const MEETING_SCOPE: &str =
+    "(?1 IS NULL OR julianday(m.started) >= julianday(?1 / 1000.0, 'unixepoch'))
+    AND (?2 IS NULL OR julianday(m.started) < julianday(?2 / 1000.0, 'unixepoch'))
+    AND (NOT ?3 OR m.pinned)";
 impl SearchHit {
     pub fn session_summary(&self) -> Result<SessionData> {
         Ok(serde_json::from_value(
@@ -127,7 +177,11 @@ impl LibraryIndex {
         }
         let db = Connection::open(path)?;
         db.busy_timeout(Duration::from_secs(3))?;
-        db.execute_batch("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;")?;
+        // Query sort tables may contain transcript text. Keep them in memory so
+        // SQLite cannot spill them into the system temp folder outside the profile.
+        db.execute_batch(
+            "PRAGMA temp_store=MEMORY; PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;",
+        )?;
         let version: i64 = db.query_row("PRAGMA user_version", [], |r| r.get(0))?;
         if version != SCHEMA_VERSION {
             Self::upgrade(&db)?;
@@ -317,9 +371,20 @@ impl LibraryIndex {
         Ok(())
     }
     pub fn search(&self, query: &str, offset: u64, limit: u32) -> Result<SearchPage> {
+        self.search_scoped(query, offset, limit, &SearchScope::default())
+    }
+
+    pub fn search_scoped(
+        &self,
+        query: &str,
+        offset: u64,
+        limit: u32,
+        scope: &SearchScope,
+    ) -> Result<SearchPage> {
         if query.chars().count() > 200 || !(1..=100).contains(&limit) || offset > i64::MAX as u64 {
             return Err("Invalid search range".into());
         }
+        scope.validate()?;
         let terms = query
             .split_whitespace()
             // A token without letters or digits becomes an empty FTS phrase that matches nothing.
@@ -327,37 +392,151 @@ impl LibraryIndex {
             .take(20)
             .map(|word| format!("\"{}\"*", word.replace('"', "\"\"")))
             .collect::<Vec<_>>();
-        let expression = match_expression(&terms);
-        let (total, items) = if expression.is_empty() {
-            let total = self
-                .db
-                .query_row("SELECT count(*) FROM meetings", [], |r| r.get::<_, i64>(0))?;
-            let mut stmt=self.db.prepare("SELECT id,title,started,duration,status,model,pinned,audio_removed,revision,NULL,NULL,NULL,'' FROM meetings ORDER BY pinned DESC,started DESC,id LIMIT ?1 OFFSET ?2")?;
+        let expression = match_expression(&terms, scope.transcript_only);
+        // Count and page must see the same index while another connection refreshes it.
+        let snapshot = self
+            .db
+            .is_autocommit()
+            .then(|| self.db.unchecked_transaction())
+            .transpose()?;
+        let (total, items) = if expression.is_empty()
+            && (!query.trim().is_empty() || scope.transcript_only)
+        {
+            (0, Vec::new())
+        } else if expression.is_empty() {
+            let total = self.db.query_row(
+                &format!("SELECT count(*) FROM meetings m WHERE {MEETING_SCOPE}"),
+                params![scope.from_ms, scope.before_ms, scope.pinned_only],
+                |r| r.get::<_, i64>(0),
+            )?;
+            let mut stmt = self.db.prepare(&format!(
+                "SELECT id,title,started,duration,status,model,pinned,audio_removed,revision,NULL,NULL,NULL,''
+                 FROM meetings m WHERE {MEETING_SCOPE} ORDER BY pinned DESC,started DESC,id LIMIT ?4 OFFSET ?5"
+            ))?;
             let rows = stmt
-                .query_map(params![limit, offset as i64], hit)?
+                .query_map(
+                    params![
+                        scope.from_ms,
+                        scope.before_ms,
+                        scope.pinned_only,
+                        limit,
+                        offset as i64
+                    ],
+                    hit,
+                )?
                 .collect::<std::result::Result<Vec<_>, _>>()?;
             (total, rows)
         } else {
+            let matched = format!(
+                "FROM transcript_search s JOIN meetings m ON m.id=s.meeting_id
+                 WHERE {MEETING_SCOPE} AND transcript_search MATCH ?4 AND (NOT ?5 OR s.source_id <> '')"
+            );
             let total = self.db.query_row(
-                "SELECT count(*) FROM transcript_search WHERE transcript_search MATCH ?1",
-                [&expression],
+                &format!("SELECT count(*) {matched}"),
+                params![
+                    scope.from_ms,
+                    scope.before_ms,
+                    scope.pinned_only,
+                    expression,
+                    scope.transcript_only
+                ],
                 |r| r.get::<_, i64>(0),
             )?;
-            let mut stmt=self.db.prepare("SELECT m.id,m.title,m.started,m.duration,m.status,m.model,m.pinned,m.audio_removed,m.revision,
-              NULLIF(s.source_id,''),s.start_ms,s.end_ms,snippet(transcript_search,5,'','', ' … ',30)
-              FROM transcript_search s JOIN meetings m ON m.id=s.meeting_id
-              WHERE transcript_search MATCH ?1 ORDER BY m.pinned DESC,m.started DESC,m.id,s.rowid LIMIT ?2 OFFSET ?3")?;
+            let mut stmt = self.db.prepare(&format!(
+                "SELECT m.id,m.title,m.started,m.duration,m.status,m.model,m.pinned,m.audio_removed,m.revision,
+                 NULLIF(s.source_id,''),s.start_ms,s.end_ms,snippet(transcript_search,5,'','', ' … ',30)
+                 {matched} ORDER BY m.pinned DESC,m.started DESC,m.id,s.rowid LIMIT ?6 OFFSET ?7"
+            ))?;
             let rows = stmt
-                .query_map(params![expression, limit, offset as i64], hit)?
+                .query_map(
+                    params![
+                        scope.from_ms,
+                        scope.before_ms,
+                        scope.pinned_only,
+                        expression,
+                        scope.transcript_only,
+                        limit,
+                        offset as i64
+                    ],
+                    hit,
+                )?
                 .collect::<std::result::Result<Vec<_>, _>>()?;
             (total, rows)
         };
+        if let Some(snapshot) = snapshot {
+            snapshot.commit()?;
+        }
         Ok(SearchPage {
             items,
             total: total as u64,
             offset,
             limit,
         })
+    }
+
+    /// Rank native candidate locations for a question. The index is a locator;
+    /// callers must retrieve authoritative text before sending passages to a model.
+    pub fn question_candidates(
+        &self,
+        keywords: &[String],
+        scope: &SearchScope,
+        meeting_ids: &[String],
+    ) -> Result<Vec<SearchHit>> {
+        scope.validate()?;
+        if keywords.len() > 16
+            || keywords.iter().any(|word| {
+                word.is_empty()
+                    || word.chars().count() > 40
+                    || !word.chars().all(char::is_alphanumeric)
+            })
+        {
+            return Err("Invalid question keywords".into());
+        }
+        if keywords.is_empty() {
+            return Ok(Vec::new());
+        }
+        let expression = keywords
+            .iter()
+            .map(|word| format!("body : \"{word}\"*"))
+            .collect::<Vec<_>>()
+            .join(" OR ");
+        // Rank each meeting's first candidate before another meeting's repeats.
+        // Keep transcript content out of the temporary ranking rows.
+        let mut statement = self.db.prepare(&format!(
+            "WITH matches AS MATERIALIZED (
+                SELECT s.rowid AS section_row, m.id, m.started,
+                       bm25(transcript_search, 0, 0, 0, 0, 0, 4, 0) AS relevance
+                FROM transcript_search s JOIN meetings m ON m.id=s.meeting_id
+                WHERE {MEETING_SCOPE} AND s.source_id <> '' AND transcript_search MATCH ?4
+                AND length(m.id) = 32 AND length(CAST(m.id AS BLOB)) = 32
+                AND m.id NOT GLOB '*[^0-9A-Fa-f]*'
+                AND (?5 = '[]' OR m.id IN (SELECT value FROM json_each(?5)))
+             ), candidates AS (
+                SELECT *, row_number() OVER (PARTITION BY id ORDER BY relevance, section_row) AS position
+                FROM matches
+                ORDER BY position, relevance, started DESC, id, section_row
+                LIMIT 48
+             )
+             SELECT m.id,m.title,m.started,m.duration,m.status,m.model,m.pinned,m.audio_removed,m.revision,
+             s.source_id,s.start_ms,s.end_ms,''
+             FROM candidates c
+             JOIN meetings m ON m.id=c.id
+             JOIN transcript_search s ON s.rowid=c.section_row
+             ORDER BY c.position, c.relevance, c.started DESC, c.id, c.section_row"
+        ))?;
+        let rows = statement
+            .query_map(
+                params![
+                    scope.from_ms,
+                    scope.before_ms,
+                    scope.pinned_only,
+                    expression,
+                    serde_json::to_string(meeting_ids)?
+                ],
+                hit,
+            )?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        Ok(rows)
     }
     pub fn transaction_batch(
         &mut self,
@@ -374,11 +553,10 @@ impl LibraryIndex {
         result
     }
 }
-/// Every term must occur in the row. A meeting row matches when all terms are in its title.
-/// A section row matches when all terms are in its text or meeting title and at least one is
-/// in its text, so a title word plus a transcript word finds that section, while a title-only
-/// query still yields the single meeting-level hit instead of one hit per section.
-fn match_expression(terms: &[String]) -> String {
+/// Every term must occur in the row. Transcript-only searches require each term in the text.
+/// Otherwise a title word plus a transcript word finds that section, while a title-only query
+/// yields the single meeting-level hit.
+fn match_expression(terms: &[String], transcript_only: bool) -> String {
     if terms.is_empty() {
         return String::new();
     }
@@ -389,6 +567,9 @@ fn match_expression(terms: &[String]) -> String {
             .collect::<Vec<_>>()
             .join(operator)
     };
+    if transcript_only {
+        return join("body", " AND ");
+    }
     format!(
         "({}) OR (({}) AND ({}))",
         join("title", " AND "),
@@ -455,6 +636,25 @@ mod index_admission_tests {
         atomic::{AtomicBool, Ordering},
         Arc,
     };
+
+    #[test]
+    fn index_connections_keep_query_temporary_storage_in_memory() {
+        let root = tempfile::tempdir().unwrap();
+        let opened = LibraryIndex::open(root.path()).unwrap();
+        let (rebuilt, _) = LibraryIndex::open_for_rebuild(root.path()).unwrap();
+        for index in [opened, rebuilt] {
+            let temporary_storage: i64 = index
+                .db
+                .query_row("PRAGMA temp_store", [], |row| row.get(0))
+                .unwrap();
+            assert_eq!(temporary_storage, 2, "SQLite MEMORY temporary storage");
+            let journal_mode: String = index
+                .db
+                .query_row("PRAGMA journal_mode", [], |row| row.get(0))
+                .unwrap();
+            assert_eq!(journal_mode, "wal");
+        }
+    }
 
     #[test]
     /// Existing caches retain their token; explicit rebuild preserves invalid
@@ -777,6 +977,211 @@ mod tests {
         assert!(index.search("Anna", 0, 101).is_err());
         // Standalone punctuation such as a dash must not empty the whole AND query.
         assert_eq!(index.search("Prüfbericht – /", 0, 20).unwrap().total, 1);
+    }
+
+    #[test]
+    fn question_candidates_exclude_legacy_entries_before_the_ranked_row_limit() {
+        let root = tempfile::tempdir().unwrap();
+        let mut index = LibraryIndex::open(root.path()).unwrap();
+        let native = data("ABCDEF0123456789ABCDEF0123456789");
+        index
+            .upsert(&native, &Default::default(), "synthetic-native")
+            .unwrap();
+        for sequence in 0..48 {
+            let mut legacy = data(&format!("legacy-{sequence:016x}"));
+            legacy.started_at = "2026-10-29T06:00:00Z".into();
+            index
+                .upsert(&legacy, &Default::default(), "synthetic-legacy")
+                .unwrap();
+        }
+        assert_eq!(index.search("Prüfbericht", 0, 25).unwrap().total, 49);
+        let hits = index
+            .question_candidates(&["Prüfbericht".into()], &Default::default(), &[])
+            .unwrap();
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].id, native.id);
+    }
+
+    #[test]
+    fn question_candidates_reserve_space_for_other_meetings() {
+        let root = tempfile::tempdir().unwrap();
+        let mut index = LibraryIndex::open(root.path()).unwrap();
+        let mut repeated = data("0123456789abcdef0123456789abcdef");
+        let template = repeated.parts.pop().unwrap();
+        for position in 0..60 {
+            let mut part = template.clone();
+            part.file = format!("system-{position}.wav");
+            part.text = Some("Prüfbericht Prüfbericht Prüfbericht".into());
+            repeated.parts.push(part);
+        }
+        let other = data("1123456789abcdef0123456789abcdef");
+        for meeting in [&repeated, &other] {
+            index
+                .upsert(meeting, &Default::default(), "fixture")
+                .unwrap();
+        }
+        let hits = index
+            .question_candidates(&["Prüfbericht".into()], &Default::default(), &[])
+            .unwrap();
+        assert_eq!(hits.len(), 48);
+        assert_eq!(hits[0].id, repeated.id);
+        assert_eq!(hits[1].id, other.id);
+    }
+
+    #[test]
+    fn transcript_only_search_and_question_evidence_require_transcript_text() {
+        let root = tempfile::tempdir().unwrap();
+        let mut index = LibraryIndex::open(root.path()).unwrap();
+        let mut meeting = data("0123456789abcdef0123456789abcdef");
+        meeting.title = "Projektname".into();
+        index
+            .upsert(&meeting, &Default::default(), "fixture")
+            .unwrap();
+        assert_eq!(
+            index
+                .search("Projektname Prüfbericht", 0, 25)
+                .unwrap()
+                .total,
+            1
+        );
+        let scope = SearchScope {
+            transcript_only: true,
+            ..Default::default()
+        };
+        assert_eq!(
+            index
+                .search_scoped("Projektname Prüfbericht", 0, 25, &scope)
+                .unwrap()
+                .total,
+            0
+        );
+        assert_eq!(
+            index
+                .search_scoped("Prüfbericht", 0, 25, &scope)
+                .unwrap()
+                .total,
+            1
+        );
+        assert!(index
+            .question_candidates(&["Projektname".into()], &scope, &[])
+            .unwrap()
+            .is_empty());
+    }
+
+    #[test]
+    fn accelerated_four_and_twenty_four_hour_histories_keep_late_sources_after_reopen() {
+        let root = tempfile::tempdir().unwrap();
+        let mut index = LibraryIndex::open(root.path()).unwrap();
+        for (id, hours) in [
+            ("0123456789abcdef0123456789abcdef", 4_u64),
+            ("1123456789abcdef0123456789abcdef", 24),
+        ] {
+            let mut meeting = data(id);
+            let template = meeting.parts.pop().unwrap();
+            for position in 0..hours * 120 {
+                for track in ["system", "microphone"] {
+                    let mut part = template.clone();
+                    part.source = track.into();
+                    part.start_sample = position * 30 * u64::from(crate::SAMPLE_RATE);
+                    part.sample_count = 30 * u64::from(crate::SAMPLE_RATE);
+                    part.confirmed_sample_count = part.sample_count;
+                    part.file = format!("{track}-{:012}.wav", part.start_sample);
+                    part.text = Some(if position + 1 == hours * 120 && track == "microphone" {
+                        "The final synthetic checkpoint says Zirconium is approved.".into()
+                    } else {
+                        "Synthetic section marker for ordinary discussion.".into()
+                    });
+                    meeting.parts.push(part);
+                }
+            }
+            index
+                .upsert(&meeting, &Default::default(), "accelerated-duration")
+                .unwrap();
+        }
+        drop(index);
+        let index = LibraryIndex::open(root.path()).unwrap();
+        let both = index.search("Zirconium", 0, 25).unwrap();
+        assert_eq!(both.total, 2);
+        let selected = index
+            .question_candidates(
+                &["Zirconium".into()],
+                &Default::default(),
+                &["1123456789abcdef0123456789abcdef".into()],
+            )
+            .unwrap();
+        assert_eq!(selected.len(), 1);
+        assert_eq!(selected[0].start_ms, Some(24 * 60 * 60 * 1000 - 30_000));
+        assert!(selected[0]
+            .source_id
+            .as_ref()
+            .unwrap()
+            .starts_with("microphone-"));
+    }
+    #[test]
+    fn scoped_search_counts_and_pages_only_included_meetings_and_evidence() {
+        let root = tempfile::tempdir().unwrap();
+        let mut index = LibraryIndex::open(root.path()).unwrap();
+        let mut first = data("0123456789abcdef0123456789abcdef");
+        first.title = "Prüfbericht".into();
+        let mut second = data("1123456789abcdef0123456789abcdef");
+        let mut excluded = data("2123456789abcdef0123456789abcdef");
+        first.started_at = "2026-10-26T20:00:00-04:00".into();
+        second.started_at = "2026-10-28T01:59:59+02:00".into();
+        excluded.started_at = "2026-10-28T02:00:00+02:00".into();
+        let vip = metadata::Metadata {
+            pinned: true,
+            ..Default::default()
+        };
+        for (meeting, meta) in [
+            (&first, &vip),
+            (&second, &metadata::Metadata::default()),
+            (&excluded, &vip),
+        ] {
+            index.upsert(meeting, meta, "fixture").unwrap();
+        }
+        let instant = |s| {
+            chrono::DateTime::parse_from_rfc3339(s)
+                .unwrap()
+                .timestamp_millis()
+        };
+        let mut scope = SearchScope {
+            from_ms: Some(instant("2026-10-27T00:00:00Z")),
+            before_ms: Some(instant("2026-10-28T00:00:00Z")),
+            transcript_only: true,
+            ..SearchScope::default()
+        };
+        for (offset, expected) in [(0, &first.id), (1, &second.id)] {
+            let page = index
+                .search_scoped("Prüfbericht", offset, 1, &scope)
+                .unwrap();
+            assert_eq!(page.total, 2);
+            assert_eq!(&page.items[0].id, expected);
+            assert_eq!(page.items[0].source_id.as_deref(), Some("system-0.wav"));
+            assert_eq!(page.items[0].start_ms, Some(1000));
+        }
+        scope.pinned_only = true;
+        assert_eq!(
+            index
+                .search_scoped("Prüfbericht", 0, 20, &scope)
+                .unwrap()
+                .total,
+            1
+        );
+        scope.transcript_only = false;
+        assert_eq!(
+            index
+                .search_scoped("Prüfbericht", 0, 20, &scope)
+                .unwrap()
+                .total,
+            2
+        );
+        assert_eq!(
+            index.search_scoped("", 0, 20, &scope).unwrap().items[0].id,
+            first.id
+        );
+        assert_eq!(index.search(" — / ", 0, 20).unwrap().total, 0);
+        scope.from_ms = scope.before_ms;
+        assert!(index.search_scoped("Prüfbericht", 0, 20, &scope).is_err());
     }
     #[test]
     fn renamed_pinned_metadata_is_searchable_without_changing_the_source() {

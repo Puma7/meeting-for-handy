@@ -9,6 +9,7 @@ pub mod macos_memory;
 mod markdown;
 mod models;
 pub mod name_candidates;
+pub mod questions;
 pub mod residency;
 mod service;
 mod templates;

@@ -249,6 +249,7 @@ fn slow_refresh_catches_up_without_overlap_and_audio_keeps_growing() {
         status: "starting".into(),
         update_started: None,
         waiting_for_transcript: false,
+        waiting_for_memory: false,
         error: None,
         pending_chars: 0,
         last_update: Instant::now() - Duration::from_secs(120),

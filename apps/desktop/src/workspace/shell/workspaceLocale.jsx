@@ -256,6 +256,7 @@ const english = {
   offen: "open",
   Abschnitte: "sections",
   bestätigt: "confirmed",
+  Bestätigt: "Confirmed",
   Freigaben: "shared",
   "Belege bis": "Evidence through",
   "Zeichen noch nicht ausgewertet": "characters not yet analysed",

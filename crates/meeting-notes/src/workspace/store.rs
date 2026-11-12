@@ -75,6 +75,8 @@ pub(crate) struct Delta {
     context: WorkspaceContext,
     entities: Vec<Entity>,
     events: Vec<Event>,
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    inherited_confirmations: std::collections::BTreeMap<String, super::InheritedConfirmation>,
     overview_refs: Vec<String>,
     originals: Vec<Source>,
     processed: Vec<LiveSource>,
@@ -113,6 +115,12 @@ impl Delta {
                 .iter()
                 .filter(|event| !old.events.iter().any(|prior| prior.id == event.id))
                 .cloned()
+                .collect(),
+            inherited_confirmations: new
+                .inherited_confirmations
+                .iter()
+                .filter(|(id, binding)| old.inherited_confirmations.get(*id) != Some(*binding))
+                .map(|(id, binding)| (id.clone(), binding.clone()))
                 .collect(),
             overview_refs: new.overview_refs.clone(),
             originals,
@@ -189,6 +197,9 @@ pub(crate) fn read(folder: &Path) -> Result<WorkspaceState> {
         state.context = delta.context;
         state.updated_at = delta.updated_at;
         state.events.extend(delta.events);
+        state
+            .inherited_confirmations
+            .extend(delta.inherited_confirmations);
         state.overview_refs = delta.overview_refs;
         state.originals.extend(delta.originals);
         state.processed.extend(delta.processed);

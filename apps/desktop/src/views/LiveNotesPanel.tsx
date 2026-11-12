@@ -459,12 +459,21 @@ export default function LiveNotesPanel({
       ? Math.max(1, Math.ceil(status.nextUpdateInMs / 60_000))
       : null;
   const stateText = (() => {
+    if (status?.running && status.preparingModel)
+      return de
+        ? "Lokales Modell wird vorbereitet"
+        : "Preparing the local model";
     if (status?.running && status.waitingForTranscript)
       return de
         ? "Wartet auf Spracherkennung · Aufnahme und Transkript haben Vorrang"
         : "Waiting for recognition · recording and transcription take priority";
+    if (status?.running && status.waitingForMemory)
+      return de
+        ? "Wartet auf freien Arbeitsspeicher"
+        : "Waiting for available memory";
     switch (status?.status) {
       case "starting":
+        return de ? "Auswertung startet" : "Starting analysis";
       case "waiting":
         return `${de ? "Läuft" : "Running"} · ${de ? "Stand" : "as of"} ${time(view?.updatedAt ?? null, locale)}${
           status.pendingChars > 0 && nextMinutes

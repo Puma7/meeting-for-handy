@@ -5,6 +5,7 @@ mod cli;
 mod credential_commands;
 mod credential_service;
 mod deletion_commands;
+mod history_questions;
 mod library_commands;
 mod library_service;
 mod live_commands;
@@ -17,14 +18,23 @@ mod notes_commands;
 mod notes_service;
 mod operations;
 mod path_selection;
+#[cfg(any(target_os = "macos", test))]
+mod protected_menu;
+mod protected_profile;
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+mod protected_shutdown;
 mod retention_commands;
+mod sealed_commands;
 mod session_service;
+mod setup_probe;
 mod source_audio;
 mod speaker_check_archive;
 mod speaker_commands;
 mod speaker_jobs;
 mod system_load;
 mod template_commands;
+#[cfg(test)]
+mod test_profile;
 mod update_commands;
 mod updater;
 
@@ -171,6 +181,15 @@ struct Service {
     speaker_jobs: Arc<speaker_jobs::Jobs>,
     maintenance_jobs: Arc<library_service::Jobs>,
     deletion_previews: deletion_commands::Previews,
+    sealed_backups: sealed_commands::Control,
+    protected_profile: bool,
+    protected_profile_copy: Mutex<Option<PathBuf>>,
+    protected_profile_migration: protected_profile::CopyControl,
+    _profile_lease: Mutex<Option<fs::File>>,
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    protected_volume: Mutex<Option<meeting_core::archive::protected_profile::MountedVolume>>,
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    protected_shutdown: Mutex<protected_shutdown::Shutdown>,
 }
 impl Service {
     /// The fast meter poll never waits behind a long application-state operation,
@@ -251,6 +270,15 @@ impl Service {
             speaker_jobs: Arc::new(speaker_jobs::Jobs::default()),
             maintenance_jobs: Arc::new(library_service::Jobs::default()),
             deletion_previews: deletion_commands::Previews::default(),
+            sealed_backups: sealed_commands::Control::default(),
+            protected_profile: false,
+            protected_profile_copy: Mutex::new(None),
+            protected_profile_migration: protected_profile::CopyControl::default(),
+            _profile_lease: Mutex::new(None),
+            #[cfg(any(target_os = "linux", target_os = "macos"))]
+            protected_volume: Mutex::new(None),
+            #[cfg(any(target_os = "linux", target_os = "macos"))]
+            protected_shutdown: Mutex::new(protected_shutdown::Shutdown::default()),
         })
     }
     fn lock(&self) -> AppResult<MutexGuard<'_, Inner>> {
@@ -370,6 +398,54 @@ impl Service {
             )?,
         })
     }
+    fn selected_catalog(
+        &self,
+        explicit: Option<&Path>,
+        cached: Option<&Path>,
+        setup: Option<&meeting_notes::AnalysisControl>,
+    ) -> AppResult<(HandyBridge, ModelCatalog, bool)> {
+        // A chosen path is recorded by the caller, but only a Handy program is started.
+        if explicit
+            .or(cached)
+            .is_some_and(|p| !plausible_handy_path(p))
+        {
+            return Err("Bitte die Handy-Programmdatei auswählen (handy, Handy.exe, Handy.app oder eine Handy-AppImage). / Choose the Handy program itself.".into());
+        }
+        let discovery_path = self.selections.handy_discovery_path(explicit, cached)?;
+        let discovered = discovery_path.is_none();
+        let bridge = HandyBridge::discover(discovery_path.as_deref()).map_err(|e| e.to_string())?;
+        let catalog = match setup {
+            Some(control) => bridge.refresh_cancellable(|| control.is_cancelled()),
+            None => bridge.refresh(),
+        }
+        .map_err(|e| e.to_string())?;
+        Ok((bridge, catalog, discovered))
+    }
+
+    /// Read a fresh catalogue for the optional probe without publishing discovery status.
+    fn refresh_for_setup(
+        &self,
+        control: &meeting_notes::AnalysisControl,
+    ) -> AppResult<(HandyBridge, ModelCatalog)> {
+        let _refresh = loop {
+            setup_probe::check_cancellation(control)?;
+            match self.refresh_gate.try_lock() {
+                Ok(refresh) => break refresh,
+                Err(std::sync::TryLockError::WouldBlock) => {
+                    std::thread::sleep(std::time::Duration::from_millis(20));
+                }
+                Err(std::sync::TryLockError::Poisoned(_)) => {
+                    return Err("Die Handy-Modellabfrage ist gesperrt.".into());
+                }
+            }
+        };
+        let cached = self.lock()?.executable.clone();
+        let catalog = self.selected_catalog(None, cached.as_deref(), Some(control));
+        setup_probe::check_cancellation(control)?;
+        let (bridge, catalog, _) = catalog?;
+        Ok((bridge, catalog))
+    }
+
     /// Serialize model discovery while distinguishing OS discovery from native grants. Failed
     /// explicit choices retain their origin instead of reverting to an earlier program.
     fn refresh(
@@ -384,19 +460,9 @@ impl Service {
         let explicit = explicit.map(PathBuf::from);
         let cached = self.lock()?.executable.clone();
         let path = explicit.clone().or(cached.clone());
-        let mut discovered = false;
         let attempt = (|| {
-            // A chosen path is recorded below either way, but only a Handy program is started.
-            if path.as_deref().is_some_and(|p| !plausible_handy_path(p)) {
-                return Err("Bitte die Handy-Programmdatei auswählen (handy, Handy.exe, Handy.app oder eine Handy-AppImage). / Choose the Handy program itself.".to_string());
-            }
-            let discovery_path = self
-                .selections
-                .handy_discovery_path(explicit.as_deref(), cached.as_deref())?;
-            discovered = discovery_path.is_none();
-            let bridge =
-                HandyBridge::discover(discovery_path.as_deref()).map_err(|e| e.to_string())?;
-            let catalog = bridge.refresh().map_err(|e| e.to_string())?;
+            let (bridge, catalog, discovered) =
+                self.selected_catalog(explicit.as_deref(), cached.as_deref(), None)?;
             let models = catalog
                 .models
                 .iter()
@@ -424,7 +490,7 @@ impl Service {
                 models,
                 error: None,
             };
-            Ok::<_, String>((bridge, catalog, status))
+            Ok::<_, String>((bridge, catalog, status, discovered))
         })();
         let mut inner = self.lock()?;
         if explicitly_selected {
@@ -433,8 +499,8 @@ impl Service {
             inner.executable = path.clone();
         }
         match &attempt {
-            Ok((bridge, _, status)) => {
-                if discovered {
+            Ok((bridge, _, status, discovered)) => {
+                if *discovered {
                     self.selections
                         .remember_discovered_handy(bridge.executable())?;
                 }
@@ -451,7 +517,7 @@ impl Service {
                 });
             }
         }
-        attempt
+        attempt.map(|(bridge, catalog, status, _)| (bridge, catalog, status))
     }
     fn start(&self, request: StartRequest) -> AppResult<MeetingView> {
         self.start_for(request, None)
@@ -565,7 +631,7 @@ impl Service {
         if let Some(owner) = owner.as_deref() {
             self.agent.start_permitted(owner)?;
         }
-        let lease = self.operations.try_acquire(operations::Kind::Recording)?;
+        let lease = self.operations.acquire_recording()?;
         {
             let mut inner = self.lock()?;
             if inner.active.is_some() || inner.transitioning {
@@ -905,7 +971,7 @@ impl Service {
         if unavailable {
             return Err("Bitte zuerst die laufende Sitzung abschließen.".into());
         }
-        let lease = self.operations.try_acquire(operations::Kind::Recording)?;
+        let lease = self.operations.acquire_recording()?;
         if valid_legacy_id(&id) {
             return Err("Originalsitzungen werden in dieser Beta ausschließlich gelesen. Zum Nachholen die bisherige Version verwenden.".into());
         }
@@ -1108,25 +1174,196 @@ async fn blocking<T: Send + 'static>(
         })?
 }
 
+fn desktop_service(args: &[std::ffi::OsString]) -> AppResult<Service> {
+    use meeting_core::archive::protected_profile as storage;
+    let selected = protected_profile::launch_path(args)?;
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    if let Some(path) = &selected {
+        let volume = protected_profile::unlock(path, protected_profile::managed_startup(args))?;
+        let root = volume.root().to_owned();
+        let lease = storage::reserve_runtime(&root).map_err(|error| error.to_string())?;
+        let mut service = Service::new(root)?;
+        service.protected_profile = true;
+        service._profile_lease = Mutex::new(Some(lease));
+        #[cfg(target_os = "linux")]
+        fs::create_dir_all(service.root.join("webview")).map_err(|error| error.to_string())?;
+        volume.verify().map_err(|error| error.to_string())?;
+        service.protected_volume = Mutex::new(Some(volume));
+        return Ok(service);
+    }
+    let root = selected.clone().or_else(|| std::env::var_os("HANDYMEETING_DATA_DIR")
+        .map(PathBuf::from)
+        .or_else(|| dirs::data_local_dir().map(|base| base.join("HandyMeeting/RustBeta"))))
+        .ok_or("Lokaler Anwendungsordner ist nicht verfügbar. / Local application folder is unavailable.")?;
+    let protected = selected.is_some()
+        || storage::needs_verification(&root).map_err(|error| error.to_string())?;
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    if protected {
+        return Err("Verschlüsseltes Profil über die Einstellungen öffnen. / Open the encrypted profile from Settings.".into());
+    }
+    if protected {
+        storage::verify(&root).map_err(|error| error.to_string())?;
+    } else {
+        fs::create_dir_all(&root).map_err(|_| "Lokale Sitzungsablage konnte nicht geöffnet werden. / Local session storage could not open.")?;
+    }
+    let lease = storage::reserve_runtime(&root).map_err(|error| error.to_string())?;
+    let mut service = Service::new(root)?;
+    service.protected_profile = protected;
+    service._profile_lease = Mutex::new(Some(lease));
+    if protected {
+        let webview = service.root.join("webview");
+        fs::create_dir_all(&webview).map_err(|error| error.to_string())?;
+        storage::verify(&service.root).map_err(|error| error.to_string())?;
+        // The Windows loader gives the process setting priority over its policy lookup.
+        // Set it before Tauri creates any WebView. Setting env vars is safe on Windows.
+        #[cfg(windows)]
+        std::env::set_var("WEBVIEW2_USER_DATA_FOLDER", &webview);
+    }
+    Ok(service)
+}
+
 /// Initialize the desktop service, native-choice plugin and narrow IPC handlers. Startup workers
 /// remain separate from capture and window-close guards.
 pub fn run() {
-    let root = std::env::var_os("HANDYMEETING_DATA_DIR")
-        .map(PathBuf::from)
-        .or_else(|| dirs::data_local_dir().map(|base| base.join("HandyMeeting/RustBeta")))
-        .expect("Lokaler Anwendungsordner ist nicht verfügbar.");
-    let service =
-        Arc::new(Service::new(root).expect("Lokale Sitzungsablage konnte nicht geöffnet werden."));
-    tauri::Builder::default().plugin(tauri_plugin_dialog::init()).manage(service).setup(|app| {
-        let service=Arc::clone(app.state::<Arc<Service>>().inner());
+    use tauri_plugin_dialog::DialogExt;
+    let args: Vec<_> = std::env::args_os().skip(1).collect();
+    let prepared = desktop_service(&args).map(Arc::new);
+    #[cfg(any(windows, target_os = "linux", target_os = "macos"))]
+    let managed_startup = protected_profile::managed_startup(&args);
+    #[cfg(any(windows, target_os = "linux", target_os = "macos"))]
+    if managed_startup && prepared.is_err() {
+        protected_profile::report_failure();
+        return;
+    }
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    let protected_service = prepared
+        .as_ref()
+        .ok()
+        .filter(|service| service.protected_profile)
+        .cloned();
+    let mut context = tauri::generate_context!();
+    if !prepared
+        .as_ref()
+        .is_ok_and(|service| !service.protected_profile)
+    {
+        for window in &mut context.config_mut().app.windows {
+            window.create = false;
+        }
+    }
+    let mut builder = tauri::Builder::default().plugin(tauri_plugin_dialog::init());
+    #[cfg(target_os = "macos")]
+    if protected_service.is_some() {
+        builder = builder
+            .menu(protected_menu::build)
+            .on_menu_event(protected_menu::on_event);
+    }
+    if let Ok(service) = &prepared {
+        builder = builder.manage(Arc::clone(service));
+    }
+    let builder = builder.setup(move |app| {
+        let service = match prepared {
+            Ok(service) => service,
+            Err(error) => {
+                let handle = app.handle().clone();
+                app.dialog().message(error).title("Meeting for Handy").show(move |_| handle.exit(1));
+                return Ok(());
+            }
+        };
+        if service.protected_profile {
+            let config = app.config().app.windows.first().ok_or("Desktop window configuration is missing")?;
+            let window = tauri::WebviewWindowBuilder::from_config(app, config).and_then(|builder| {
+                #[cfg(target_os = "macos")]
+                let builder = {
+                    protected_menu::install_native_quit(app.handle())?;
+                    builder.incognito(true)
+                };
+                #[cfg(not(target_os = "macos"))]
+                let builder = builder.data_directory(service.root.join("webview"));
+                builder.build()
+            });
+            if window.is_err() {
+                let handle = app.handle().clone();
+                #[cfg(any(windows, target_os = "linux", target_os = "macos"))]
+                if managed_startup {
+                    protected_profile::report_failure();
+                    handle.exit(1);
+                    return Ok(());
+                }
+                app.dialog().message("Die geschützte Oberfläche konnte nicht gestartet werden. Bitte den Ordner und die Browser-Komponente prüfen. / The protected window could not start. Check the folder and the system webview.")
+                    .title("Meeting for Handy").show(move |_| handle.exit(1));
+                return Ok(());
+            }
+            #[cfg(any(windows, target_os = "linux", target_os = "macos"))]
+            if managed_startup && !protected_profile::acknowledge_window() {
+                // The parent timed out or closed. Exit through normal protected teardown.
+                app.handle().exit(1);
+                return Ok(());
+            }
+        }
         if let Ok(lease)=service.reserve_operation(operations::Kind::Index){let _=service.library_jobs.start_scan(service.root.clone(), false, Some(lease));}
         if std::env::args().skip(1).eq(["--agent", "serve"]) { agent::start_stdio(Arc::clone(&service)).map_err(std::io::Error::other)?; }
         tauri::async_runtime::spawn_blocking(move|| {let _=service.refresh(None);});
         Ok(())
-    }).invoke_handler(tauri::generate_handler![deletion_commands::preview_meeting_erasure,deletion_commands::get_meeting_erasure_preview,deletion_commands::erase_meeting_now,deletion_commands::list_pending_erasures,path_selection::choose_handy_executable,path_selection::choose_ffmpeg_executable,path_selection::choose_legacy_manifest,app_commands::get_app_state,app_commands::get_audio_levels,app_commands::get_system_load,retention_commands::list_audio_copies,retention_commands::transcribe_audio_copy,retention_commands::compact_archive,retention_commands::list_archives,retention_commands::list_unfinished_deletions,retention_commands::resume_permanent_deletion,retention_commands::restore_archive,retention_commands::apply_retention,retention_commands::get_retention_policy,retention_commands::save_retention_policy,retention_commands::preview_retention,retention_commands::get_retention_plan,retention_commands::get_maintenance_progress,retention_commands::cancel_maintenance,library_commands::edit_meeting_metadata,library_commands::search_meetings,library_commands::rebuild_search_index,library_commands::get_library_progress,library_commands::cancel_library_job,speaker_commands::archive_speaker_model_checks,speaker_commands::check_speaker_model,speaker_commands::get_speaker_labels,speaker_commands::save_speaker_labels,speaker_commands::start_speaker_experiment,speaker_commands::get_speaker_progress,speaker_commands::get_speaker_sections,speaker_commands::cancel_speaker_experiment,update_commands::check_for_update,update_commands::download_update,update_commands::get_update_progress,update_commands::cancel_update,update_commands::install_update,update_commands::open_release_page,app_commands::refresh_handy,app_commands::list_devices,app_commands::start_meeting,app_commands::stop_meeting,app_commands::set_capture_paused,app_commands::set_microphone_muted,app_commands::reconnect_microphone,app_commands::agent_decide_recording,app_commands::agent_revoke,app_commands::list_meetings,app_commands::get_meeting,app_commands::resume_meeting,app_commands::import_legacy,app_commands::copy_text,app_commands::open_meeting_folder,app_commands::export_transcript,app_commands::generate_notes,app_commands::list_analyses,notes_commands::list_unfinished_analyses,notes_commands::list_text_models,notes_commands::get_notes_progress,notes_commands::cancel_notes,notes_commands::notes_markdown,live_commands::list_workspace_history,live_commands::read_workspace_history,live_commands::start_live_notes,live_commands::stop_live_notes,live_commands::refresh_live_notes,live_commands::set_live_notes_interval,live_commands::get_live_notes,live_commands::set_workspace_context,source_audio::get_source_audio,live_commands::local_model_setup,live_commands::pull_ollama_model,live_commands::get_model_pull_progress,live_commands::cancel_model_pull,template_commands::list_templates,template_commands::save_templates,template_commands::import_templates,credential_commands::credential_status,credential_commands::save_credential,credential_commands::remove_credential])
-    .on_window_event(|window,event|{if let tauri::WindowEvent::CloseRequested{api,..}=event{let service=window.state::<Arc<Service>>();let blocked=service.lock().is_ok_and(|inner|inner.transitioning||inner.active.as_ref().is_some_and(|a|a.capture.is_some()));if blocked{api.prevent_close();if let Ok(mut inner)=service.lock(){inner.error=Some(if inner.transitioning { "Ein Vorgang läuft noch. Bitte warten, bis Audioabschluss und Verarbeitung beendet sind.".into() } else { "Bitte zuerst „Meeting beenden“ wählen. Audio wird gesichert und offene Abschnitte werden verarbeitet.".into() });}let _=window.emit("recording-close-blocked",());}}})
-    .run(tauri::generate_context!()).expect("HandyMeeting konnte nicht gestartet werden.");
+    }).invoke_handler(tauri::generate_handler![deletion_commands::preview_meeting_erasure,deletion_commands::get_meeting_erasure_preview,deletion_commands::erase_meeting_now,deletion_commands::list_pending_erasures,path_selection::choose_handy_executable,path_selection::choose_ffmpeg_executable,path_selection::choose_legacy_manifest,app_commands::get_app_state,setup_probe::check_meeting_setup,setup_probe::cancel_meeting_setup,protected_profile::protected_profile_status,protected_profile::create_protected_profile,protected_profile::open_protected_profile,protected_profile::cancel_protected_profile_migration,sealed_commands::create_encrypted_backup,sealed_commands::recover_encrypted_backup,sealed_commands::cancel_encrypted_backup,app_commands::get_audio_levels,app_commands::get_system_load,retention_commands::list_audio_copies,retention_commands::transcribe_audio_copy,retention_commands::compact_archive,retention_commands::list_archives,retention_commands::list_unfinished_deletions,retention_commands::resume_permanent_deletion,retention_commands::restore_archive,retention_commands::apply_retention,retention_commands::get_retention_policy,retention_commands::save_retention_policy,retention_commands::preview_retention,retention_commands::get_retention_plan,retention_commands::get_maintenance_progress,retention_commands::cancel_maintenance,library_commands::edit_meeting_metadata,library_commands::search_meetings,history_questions::ask_meeting_history,library_commands::rebuild_search_index,library_commands::get_library_progress,library_commands::cancel_library_job,speaker_commands::archive_speaker_model_checks,speaker_commands::check_speaker_model,speaker_commands::get_speaker_labels,speaker_commands::save_speaker_labels,speaker_commands::start_speaker_experiment,speaker_commands::get_speaker_progress,speaker_commands::get_speaker_sections,speaker_commands::cancel_speaker_experiment,update_commands::check_for_update,update_commands::download_update,update_commands::get_update_progress,update_commands::cancel_update,update_commands::install_update,update_commands::open_release_page,app_commands::refresh_handy,app_commands::list_devices,app_commands::start_meeting,app_commands::stop_meeting,app_commands::set_capture_paused,app_commands::set_microphone_muted,app_commands::reconnect_microphone,app_commands::agent_decide_recording,app_commands::agent_revoke,app_commands::list_meetings,app_commands::get_meeting,app_commands::resume_meeting,app_commands::import_legacy,app_commands::copy_text,app_commands::open_meeting_folder,app_commands::export_transcript,app_commands::generate_notes,app_commands::list_analyses,notes_commands::list_unfinished_analyses,notes_commands::list_text_models,notes_commands::get_notes_progress,notes_commands::cancel_notes,notes_commands::notes_markdown,live_commands::list_workspace_history,live_commands::read_workspace_history,live_commands::export_workspace_results,live_commands::start_live_notes,live_commands::stop_live_notes,live_commands::refresh_live_notes,live_commands::set_live_notes_interval,live_commands::get_live_notes,live_commands::set_workspace_context,source_audio::get_source_audio,source_audio::get_transcript_audio,live_commands::local_model_setup,live_commands::pull_ollama_model,live_commands::get_model_pull_progress,live_commands::cancel_model_pull,template_commands::list_templates,template_commands::save_templates,template_commands::import_templates,credential_commands::credential_status,credential_commands::save_credential,credential_commands::remove_credential])
+    .on_window_event(handle_window_event);
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    if let Some(service) = protected_service {
+        let shutdown_service = Arc::clone(&service);
+        let exit_code = builder
+            .build(context)
+            .expect("HandyMeeting konnte nicht gestartet werden.")
+            .run_return(move |app, event| {
+                protected_shutdown::on_run_event(&shutdown_service, app, event);
+            });
+        #[cfg(target_os = "macos")]
+        protected_menu::clear_native_quit();
+        if protected_shutdown::leaving_mounted(&service) {
+            std::process::exit(exit_code);
+        }
+        drop(service);
+        if exit_code != 0 {
+            std::process::exit(exit_code);
+        }
+        return;
+    }
+    builder
+        .run(context)
+        .expect("HandyMeeting konnte nicht gestartet werden.");
 }
+fn handle_window_event(window: &tauri::Window, event: &tauri::WindowEvent) {
+    let tauri::WindowEvent::CloseRequested { api, .. } = event else {
+        return;
+    };
+    let service = window.state::<Arc<Service>>();
+    let blocked = service.lock().is_ok_and(|inner| {
+        inner.transitioning || inner.active.as_ref().is_some_and(|a| a.capture.is_some())
+    });
+    if blocked {
+        api.prevent_close();
+        if let Ok(mut inner) = service.lock() {
+            inner.error = Some(if inner.transitioning {
+                "Ein Vorgang läuft noch. Bitte warten, bis Audioabschluss und Verarbeitung beendet sind.".into()
+            } else {
+                "Bitte zuerst „Meeting beenden“ wählen. Audio wird gesichert und offene Abschnitte werden verarbeitet.".into()
+            });
+        }
+        let _ = window.emit("recording-close-blocked", ());
+    }
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    if !blocked && service.protected_profile {
+        use tauri_plugin_dialog::DialogExt;
+        let Err(error) = protected_shutdown::prepare(&service) else {
+            return;
+        };
+        api.prevent_close();
+        window
+            .dialog()
+            .message(error)
+            .title("Meeting for Handy")
+            .show(|_| {});
+    }
+}
+
 /// Expose explicit diagnostic modes without creating a GUI when the dispatcher handles the
 /// supplied arguments.
 pub fn run_cli(args: &[String]) -> Option<AppResult<()>> {
