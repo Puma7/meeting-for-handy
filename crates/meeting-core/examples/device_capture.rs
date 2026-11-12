@@ -178,10 +178,11 @@ fn record(root: &Path, device_seconds: Option<u64>) -> meeting_core::Result<()> 
     }
     // Fixed before capture; not adjusted to the observed measurements.
     let allowed_track_difference_ms = 500_u64;
+    let real_hardware = device_seconds.is_some();
     std::fs::create_dir_all(root.join("checkpoints"))?;
     let mut plan = serde_json::json!({
         "version":env!("CARGO_PKG_VERSION"),"allowedTrackDifferenceMs":allowed_track_difference_ms,
-        "realHardware":true,"microphone":true,"speechRecognition":false,"cloud":false,
+        "realHardware":real_hardware,"microphone":true,"speechRecognition":false,"cloud":false,
         "os":std::env::consts::OS,"arch":std::env::consts::ARCH,"ownedProcessId":std::process::id(),
         "checkpointIntervalSeconds":10,"longRecordingExplicit":device_seconds.is_some_and(|seconds| seconds > 60)
     });
@@ -194,7 +195,11 @@ fn record(root: &Path, device_seconds: Option<u64>) -> meeting_core::Result<()> 
     create_json(&root.join("plan.json"), &plan)?;
     let store = SessionStore::create(
         &root.join("sessions"),
-        "Explicit local hardware diagnostic",
+        if real_hardware {
+            "Explicit local hardware diagnostic"
+        } else {
+            "Synthetic virtual-audio probe"
+        },
         "audio-only:no-asr",
         "default system output",
         Some("default microphone"),
@@ -243,11 +248,11 @@ fn record(root: &Path, device_seconds: Option<u64>) -> meeting_core::Result<()> 
     let system_ms = samples("system") * 1000 / 16000;
     let microphone_ms = samples("microphone") * 1000 / 16000;
     let portable_startup = capture.portable_startup_timing()?;
-    let result = serde_json::json!({"version":env!("CARGO_PKG_VERSION"),"realHardware":true,"speechRecognition":false,"sessionId":data.id,"elapsedMs":elapsed_ms,"systemMs":system_ms,"microphoneMs":microphone_ms,"differenceMs":system_ms.abs_diff(microphone_ms),"trackDifferenceWithinLimit":system_ms.abs_diff(microphone_ms)<=allowed_track_difference_ms,"captureIncomplete":data.capture_incomplete,"warnings":data.warnings,"limits":"Audio-only live-device diagnostic of the actual requested duration; no ASR, full-disk or general reliability claim. Recovery is a separate explicit action."});
+    let result = serde_json::json!({"version":env!("CARGO_PKG_VERSION"),"realHardware":real_hardware,"speechRecognition":false,"sessionId":data.id,"elapsedMs":elapsed_ms,"systemMs":system_ms,"microphoneMs":microphone_ms,"differenceMs":system_ms.abs_diff(microphone_ms),"trackDifferenceWithinLimit":system_ms.abs_diff(microphone_ms)<=allowed_track_difference_ms,"captureIncomplete":data.capture_incomplete,"warnings":data.warnings,"limits":"Audio-only live-device diagnostic of the actual requested duration; no ASR, full-disk or general reliability claim. Recovery is a separate explicit action."});
     let mut result = result;
     result["portableStartup"] = serde_json::to_value(portable_startup)?;
     if device_seconds.is_none() {
-        result["limits"] = "Audio-only device probe with a fixed stop target that includes startup. The PCM verifier measures the saved audio separately.".into();
+        result["limits"] = "Synthetic virtual-audio probe with a fixed stop target that includes startup. The PCM verifier measures the saved audio separately.".into();
         result["virtualProbeTiming"] = serde_json::json!({
             "stopTargetFromCaptureStartMs": VIRTUAL_PROBE_DURATION.as_millis(),
             "readyFromCaptureStartMs": recording_started.duration_since(started).as_millis(),

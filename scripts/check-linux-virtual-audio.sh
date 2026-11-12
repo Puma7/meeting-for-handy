@@ -75,4 +75,4 @@ players+=($!)
 # startup prefix; no gap is reclassified as complete and no limit is relaxed.
 sleep 3
 "$example" --virtual-audio-probe "$output/capture"
-python3 "$(dirname "$0")/check-linux-audio-result.py" "$output/capture" "$output/checks.json"
+python3 "$(dirname "$0")/check-linux-audio-result.py" "$output/capture" "$output/checks.json" --require-virtual-label

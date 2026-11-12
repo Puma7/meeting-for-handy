@@ -623,6 +623,40 @@ class ReferenceVerdicts(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "startup"):
             audio.verify(self.root)
 
+    def test_linux_fixed_stop_reports_the_startup_budget_from_saved_pcm(self):
+        """At 9.5 seconds, 1.5 seconds of startup leaves exactly eight seconds of tone."""
+        self.linux_fixture(counts=(152000, 152000), warnings=[audio.TIMING, "system" + audio.START])
+        self.rewrite_linux_signal("system", lambda data: bytes(48000) + data[48000:])
+        receipt = audio.verify(self.root)
+        system = receipt["tracks"]["system"]
+        self.assertEqual(system["qualifiedToneSamples"] + system["phaseZeroAllowanceSamples"], 128000)
+        self.assertFalse(receipt["completeCapture"])
+
+        self.rewrite_linux_signal("system", lambda data: bytes(48004) + data[48004:])
+        with self.assertRaisesRegex(ValueError, "Declared startup silence") as failure:
+            audio.verify(self.root)
+        diagnostic = json.loads(str(failure.exception).split(": ", 1)[1])
+        self.assertEqual(diagnostic, {"source": "system", "startupSamples": 24002,
+                                     "availableToneSamples": 127998, "requiredToneSamples": 128000,
+                                     "trackSamples": 152000, "sampleRate": 16000})
+
+    def test_linux_current_probe_requires_synthetic_plan_and_result_labels(self):
+        """New runs reject misleading labels and legacy evidence stays inspectable."""
+        self.linux_fixture()
+        result_path = self.root / "result.json"
+        result = json.loads(result_path.read_text())
+        plan_path = self.root / "plan.json"
+        plan_path.write_text(json.dumps({"realHardware": False}))
+        with self.assertRaisesRegex(ValueError, "synthetic audio"):
+            audio.verify(self.root, require_virtual_label=True)
+        result["realHardware"] = False
+        result_path.write_text(json.dumps(result))
+        self.assertFalse(audio.verify(self.root, require_virtual_label=True)["physicalHardware"])
+        plan_path.write_text(json.dumps({"realHardware": True}))
+        self.assertFalse(audio.verify(self.root)["physicalHardware"])
+        with self.assertRaisesRegex(ValueError, "synthetic audio"):
+            audio.verify(self.root, require_virtual_label=True)
+
 
 if __name__ == "__main__":
     unittest.main()
