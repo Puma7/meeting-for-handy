@@ -156,24 +156,71 @@ pub(super) enum CalendarTaskMatch {
 }
 
 /// Require one named or pronominal assignment, with the action and its object
-/// together before the deadline. A related title alone is insufficient.
-pub(super) fn calendar_task_match(title: &str, quote: &str) -> CalendarTaskMatch {
-    use super::assertions::{
-        assertion_words, assignment_text, finite_subject_before, present_assignment_quote,
-    };
+/// together before this literal deadline. A later date in the same quote does
+/// not take the place of the date the caller asked us to verify.
+pub(super) fn calendar_task_match(title: &str, quote: &str, due: &str) -> CalendarTaskMatch {
+    let quote = super::assertions::assignment_text(quote);
+    let lower = quote.to_lowercase();
+    let due = due.trim().to_lowercase();
+    if due.is_empty() {
+        return CalendarTaskMatch::Unverified;
+    }
+    let mut result = CalendarTaskMatch::Unverified;
+    for (start, literal) in lower.match_indices(&due) {
+        let end = start + literal.len();
+        let before = &lower[..start];
+        let after = &lower[end..];
+        if before
+            .chars()
+            .next_back()
+            .is_some_and(char::is_alphanumeric)
+            || after.chars().next().is_some_and(char::is_alphanumeric)
+        {
+            continue;
+        }
+        let Some((marker_start, marker)) = [" by ", " bis "]
+            .into_iter()
+            .filter_map(|marker| before.rfind(marker).map(|at| (at, marker)))
+            .max_by_key(|(at, _)| *at)
+        else {
+            continue;
+        };
+        let middle = before[marker_start + marker.len()..].trim();
+        if !matches!(middle, "" | "the" | "zum")
+            // Preserve support for a quoted part of a longer date. Only parse
+            // the local date phrase, independent of other clauses in the quote.
+            && crate::validation::explicit_task_calendar_date(&lower[marker_start..end]).is_none()
+        {
+            continue;
+        }
+        match calendar_assignment_before(
+            title,
+            quote,
+            &before[..marker_start],
+            after,
+            marker == " bis ",
+        ) {
+            CalendarTaskMatch::SameAssignment => return CalendarTaskMatch::SameAssignment,
+            CalendarTaskMatch::CompetingAssignment => {
+                result = CalendarTaskMatch::CompetingAssignment
+            }
+            CalendarTaskMatch::Unverified => {}
+        }
+    }
+    result
+}
+
+fn calendar_assignment_before(
+    title: &str,
+    quote: &str,
+    prefix: &str,
+    after_date: &str,
+    german: bool,
+) -> CalendarTaskMatch {
+    use super::assertions::{assertion_words, finite_subject_before, present_assignment_quote};
     const PARTICLES: &[&str] = &["ab", "an", "auf", "ein", "mit", "vor", "zu", "fertig"];
     const SHORT_STEMS: &[&str] = &["bau", "geb", "heb", "hol", "leg", "seh"];
 
-    let quote = assignment_text(quote);
-    let lower = quote.to_lowercase();
-    let german = lower.contains(" bis ");
-    let marker = if german { " bis " } else { " by " };
-    let Some((prefix, _)) = lower.rsplit_once(marker) else {
-        return CalendarTaskMatch::Unverified;
-    };
-    if prefix.contains([',', '.', '!', '?', ';', ':', '\n', '\r']) {
-        return CalendarTaskMatch::Unverified;
-    }
     let title = title.to_lowercase();
     let title_parts = if german {
         title.rsplit_once(' ')
@@ -190,8 +237,8 @@ pub(super) fn calendar_task_match(title: &str, quote: &str) -> CalendarTaskMatch
     if before.len() > original.len() {
         return CalendarTaskMatch::Unverified;
     }
-    let particle = assertion_words(&lower)
-        .last()
+    let particle = assertion_words(after_date)
+        .first()
         .copied()
         .filter(|word| german && PARTICLES.contains(word));
     let predicate = before.iter().enumerate().position(|(index, word)| {
@@ -257,7 +304,8 @@ pub(super) fn calendar_task_match(title: &str, quote: &str) -> CalendarTaskMatch
                     .is_some_and(|stem| stem.chars().count() >= 3)
                 && (["the", "a", "an", "our", "your", "their", "this", "that"]
                     .contains(&trailing_lower[index + 2])
-                    || english_bare_plural_object(fragment[1], fragment[2]))
+                    || (english_bare_plural_object(fragment[1], fragment[2])
+                        && task_title_matches(object, &trailing[..index].join(" "))))
                 && finite_subject_before(trailing_lower, trailing, index, index + 1))
             || (german
                 && fragment.len() >= 3
@@ -270,35 +318,20 @@ pub(super) fn calendar_task_match(title: &str, quote: &str) -> CalendarTaskMatch
     });
     if another_assignment {
         CalendarTaskMatch::CompetingAssignment
-    } else if task_title_matches(object, &trailing.join(" ")) {
+    } else if !prefix.contains([',', '.', '!', '?', ';', ':', '\n', '\r'])
+        && task_title_matches(object, &trailing.join(" "))
+    {
         CalendarTaskMatch::SameAssignment
     } else {
         CalendarTaskMatch::Unverified
     }
 }
 
-/// For a bare object, require a known finite action. An arbitrary word ending
-/// in `s` would also match noun phrases such as "Customer Success reports".
+/// This morphology is only corroborating evidence. The caller also requires
+/// the first task's object and a fresh finite subject before treating it as a clause.
 fn english_bare_plural_object(verb: &str, object: &str) -> bool {
-    const FINITE: &[&str] = &[
-        "brings",
-        "buys",
-        "checks",
-        "collects",
-        "delivers",
-        "files",
-        "organises",
-        "organizes",
-        "prepares",
-        "reviews",
-        "sends",
-        "submits",
-        "updates",
-        "uploads",
-        "writes",
-    ];
-    FINITE.contains(&verb)
-        && object.starts_with(char::is_lowercase)
+    verb.chars().all(char::is_lowercase)
+        && object.chars().all(char::is_lowercase)
         && object
             .strip_suffix('s')
             .is_some_and(|stem| stem.chars().count() >= 3)
@@ -368,8 +401,9 @@ fn calendar_task_deadline_requires_its_own_action_and_object() {
             true,
         ),
     ] {
+        let due = crate::validation::explicit_task_calendar_date(quote).unwrap();
         assert_eq!(
-            calendar_task_match(title, quote) == CalendarTaskMatch::SameAssignment,
+            calendar_task_match(title, quote, due) == CalendarTaskMatch::SameAssignment,
             expected,
             "{title}: {quote}"
         );

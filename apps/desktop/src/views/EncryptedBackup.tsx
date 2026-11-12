@@ -23,6 +23,7 @@ export default function EncryptedBackup({
   receipt?: {
     result: BackupResult | null;
     error?: string;
+    cancelError?: string;
     setResult: (next: BackupResult) => void;
     busy: boolean;
     cancelling: boolean;
@@ -31,16 +32,20 @@ export default function EncryptedBackup({
   const de = locale === "de";
   const passphrase = useRef<HTMLInputElement>(null);
   const repeated = useRef<HTMLInputElement>(null);
-  const started = useRef(false);
+  const started = useRef<object | null>(null);
   const [localBusy, setBusy] = useState(false);
   const [localCancelling, setCancelling] = useState(false);
   const [kind, setKind] = useState<BackupCredential>("passphrase");
   const [error, setError] = useState("");
+  const [localCancelError, setCancelError] = useState("");
   const [localResult, setLocalResult] = useState<BackupResult | null>(null);
   const result = receipt ? receipt.result : localResult;
-  const displayedError = error || receipt?.error;
   const busy = receipt?.busy ?? localBusy;
   const cancelling = receipt?.cancelling ?? localCancelling;
+  const displayedError =
+    error ||
+    receipt?.error ||
+    (busy ? (receipt?.cancelError ?? localCancelError) : "");
   const setResult = receipt?.setResult ?? setLocalResult;
   const action = restore
     ? de
@@ -83,7 +88,7 @@ export default function EncryptedBackup({
           if (!secret) return;
           passphrase.current.value = "";
           if (repeated.current) repeated.current.value = "";
-          started.current = true;
+          started.current = {};
           setBusy(true);
           try {
             const completed = await run(secret, kind);
@@ -91,9 +96,10 @@ export default function EncryptedBackup({
           } catch (failure) {
             setError(errorMessage(failure));
           } finally {
-            started.current = false;
+            started.current = null;
             setBusy(false);
             setCancelling(false);
+            setCancelError("");
           }
         }}
       >
@@ -173,11 +179,20 @@ export default function EncryptedBackup({
               type="button"
               disabled={cancelling}
               onClick={async () => {
+                const attempt = started.current;
+                if (!receipt) setCancelError("");
                 try {
-                  if ((await cancel()) && !receipt)
-                    setCancelling(started.current);
+                  if (
+                    (await cancel()) &&
+                    !receipt &&
+                    attempt &&
+                    started.current === attempt
+                  )
+                    setCancelling(true);
                 } catch (failure) {
-                  setError(errorMessage(failure));
+                  if (attempt && started.current === attempt) {
+                    setCancelError(errorMessage(failure));
+                  }
                 }
               }}
             >

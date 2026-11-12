@@ -272,8 +272,8 @@ fn apply_response(
                         }
                     } else if let [witness] = c.evidence.as_slice() {
                         c.due = crate::validation::explicit_task_calendar_date(&witness.quote)
-                            .filter(|_| {
-                                calendar_task_match(title, &witness.quote)
+                            .filter(|due| {
+                                calendar_task_match(title, &witness.quote, due)
                                     == CalendarTaskMatch::SameAssignment
                             })
                             .map(str::to_owned);
@@ -797,15 +797,9 @@ pub(super) fn decision_backed_fact(entity: &Entity) -> bool {
 
 /// A model-supplied date cannot bypass a detected assignment boundary.
 fn validate_calendar_due_scope(title: &str, due: &str, evidence: &[crate::Evidence]) -> Result<()> {
-    let due = due.to_lowercase();
     let mut competing_assignment = false;
     for witness in evidence {
-        if !crate::validation::explicit_task_calendar_date(&witness.quote)
-            .is_some_and(|date| date.to_lowercase().contains(&due))
-        {
-            continue;
-        }
-        match calendar_task_match(title, &witness.quote) {
+        match calendar_task_match(title, &witness.quote, due) {
             CalendarTaskMatch::SameAssignment => return Ok(()),
             CalendarTaskMatch::CompetingAssignment => competing_assignment = true,
             CalendarTaskMatch::Unverified => {}

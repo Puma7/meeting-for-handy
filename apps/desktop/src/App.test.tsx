@@ -2121,6 +2121,47 @@ describe("workspace navigation (synthetic IPC)", () => {
     expect(api.createEncryptedBackup).toHaveBeenCalledTimes(2);
   });
 
+  it.each([false, true])(
+    "prioritizes final backup failure when cancellation rejects last: %s",
+    async (cancelLast) => {
+      const api = fakeApi();
+      let failBackup!: (message: string) => void;
+      let failCancellation!: (message: string) => void;
+      api.createEncryptedBackup = vi.fn(
+        () =>
+          new Promise<never>((_, reject) => {
+            failBackup = reject;
+          }),
+      );
+      api.cancelEncryptedBackup = vi.fn(
+        () =>
+          new Promise<never>((_, reject) => {
+            failCancellation = reject;
+          }),
+      );
+      const cancellationError = "Synthetic cancellation IPC failure";
+      const backupError =
+        "The app could not confirm the backup's durability at D:/synthetic/uncertain.hmvault. A recovery key was not delivered.";
+      render(<App api={api} />);
+      await ready();
+      await openMeetingBackup(meeting.title);
+      await submitMeetingBackup();
+      await userEvent.click(screen.getByRole("button", { name: "Abbrechen" }));
+      expect(api.cancelEncryptedBackup).toHaveBeenCalledOnce();
+      if (cancelLast) {
+        await act(async () => failBackup(backupError));
+        expect(await screen.findByText(backupError)).toBeTruthy();
+        await act(async () => failCancellation(cancellationError));
+      } else {
+        await act(async () => failCancellation(cancellationError));
+        expect(await screen.findByText(cancellationError)).toBeTruthy();
+        await act(async () => failBackup(backupError));
+      }
+      expect(screen.getByRole("alert").textContent).toBe(backupError);
+      expect(screen.queryByText(cancellationError)).toBeNull();
+    },
+  );
+
   it("preserves a completed backup receipt only for its meeting after navigating away", async () => {
     const other = {
       ...meeting,

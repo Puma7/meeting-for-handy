@@ -82,6 +82,52 @@ it("requests cancellation of the active recovery without displaying a success re
   expect(screen.queryByText("HANDYMEETING_DATA_DIR")).toBeNull();
 });
 
+it("ignores a stale cancellation rejection during a later restore attempt", async () => {
+  let finishFirst!: () => void;
+  let finishSecond!: () => void;
+  let rejectOldCancel!: (message: string) => void;
+  const first = new Promise<null>((resolve) => {
+    finishFirst = () => resolve(null);
+  });
+  const second = new Promise<{ file: string }>((resolve) => {
+    finishSecond = () => resolve({ file: "isolated/new-profile" });
+  });
+  const cancellation = new Promise<never>((_, reject) => {
+    rejectOldCancel = reject;
+  });
+  const run = vi.fn().mockReturnValueOnce(first).mockReturnValueOnce(second);
+  render(
+    <EncryptedBackup
+      locale="en"
+      restore
+      run={run}
+      cancel={vi.fn(() => cancellation)}
+    />,
+  );
+  fireEvent.click(
+    screen.getByText("Recover an encrypted meeting", { selector: "summary" }),
+  );
+  const submit = screen.getByRole("button", {
+    name: "Recover an encrypted meeting",
+  });
+  function restore() {
+    fireEvent.change(screen.getByLabelText("Passphrase"), {
+      target: { value: "synthetic passphrase" },
+    });
+    fireEvent.click(submit);
+  }
+  restore();
+  fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+  await act(async () => finishFirst());
+  restore();
+  expect(run).toHaveBeenCalledTimes(2);
+  await act(async () => rejectOldCancel("Synthetic stale cancellation error"));
+  expect(screen.queryByRole("alert")).toBeNull();
+  await act(async () => finishSecond());
+  expect(await screen.findByText("isolated/new-profile")).toBeTruthy();
+  expect(screen.queryByRole("alert")).toBeNull();
+});
+
 it("retains the completed key through invalid, cancelled and failed replacement attempts", async () => {
   const firstKey = "aa".repeat(32);
   const secondKey = "bb".repeat(32);

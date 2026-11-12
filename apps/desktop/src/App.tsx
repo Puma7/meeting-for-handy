@@ -235,6 +235,7 @@ export default function App({ api = desktopApi }: { api?: DesktopApi }) {
   const backupOperation = useRef<{
     meetingId: string;
     cancelling: boolean;
+    cancelError: string;
   } | null>(null);
   const [backupActivity, setBackupActivity] =
     useState<typeof backupOperation.current>(null);
@@ -1350,7 +1351,7 @@ export default function App({ api = desktopApi }: { api?: DesktopApi }) {
 
   async function runMeetingBackup(meetingId: string, passphrase: string) {
     if (backupOperation.current) throw new Error(t.busy);
-    const operation = { meetingId, cancelling: false };
+    const operation = { meetingId, cancelling: false, cancelError: "" };
     backupOperation.current = operation;
     clearBackupError(meetingId);
     setBackupActivity({ ...operation });
@@ -1381,11 +1382,17 @@ export default function App({ api = desktopApi }: { api?: DesktopApi }) {
     )
       return false;
     operation.cancelling = true;
+    operation.cancelError = "";
     setBackupActivity({ ...operation });
     let accepted = false;
     try {
       accepted = await api.cancelEncryptedBackup();
       return accepted;
+    } catch (failure) {
+      if (backupOperation.current === operation) {
+        operation.cancelError = errorMessage(failure);
+      }
+      return false;
     } finally {
       if (!accepted && backupOperation.current === operation) {
         operation.cancelling = false;
@@ -2884,6 +2891,10 @@ export default function App({ api = desktopApi }: { api?: DesktopApi }) {
                   receipt={{
                     result: backupReceipts.get(meeting.id) ?? null,
                     error: backupErrors.get(meeting.id),
+                    cancelError:
+                      backupActivity?.meetingId === meeting.id
+                        ? backupActivity.cancelError
+                        : undefined,
                     busy: backupActivity?.meetingId === meeting.id,
                     cancelling:
                       backupActivity?.meetingId === meeting.id &&

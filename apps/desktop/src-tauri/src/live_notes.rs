@@ -1,13 +1,14 @@
 //! Live notes worker: reads only the confirmed transcript that the UI also reads and sends text
 //! to the chosen model. It never holds the recording transition, a capture handle or audio.
 use crate::{valid_legacy_id, validate_id, AppResult, Service};
-use meeting_core::{AudioPart, SessionData};
+use meeting_core::{AudioPart, SessionData, SessionStore};
 use meeting_notes::live::{self, LiveRunner, LiveText, LiveView, Trigger};
 use meeting_notes::workspace::WorkspaceState;
 use meeting_notes::AnalysisControl;
 use serde::{Deserialize, Serialize};
 use std::{
     collections::HashMap,
+    path::Path,
     sync::{
         atomic::{AtomicBool, AtomicU64, Ordering},
         Arc, Mutex,
@@ -477,6 +478,33 @@ impl Service {
         })
     }
 
+    fn held_transcript_store(&self, folder: &Path) -> AppResult<Option<SessionStore>> {
+        let inner = self.lock()?;
+        Ok(inner
+            .active
+            .iter()
+            .map(|active| &active.store)
+            .chain(inner.view.iter())
+            .find(|store| store.folder() == folder)
+            .cloned())
+    }
+
+    /// Polling only needs current text evidence. Reopening a cold session also
+    /// verifies its PCM and can write recovery metadata, which belongs to an
+    /// explicit operation rather than every status request.
+    fn confirmation_preview(&self, id: &str) -> AppResult<SessionData> {
+        let folder = self.root.join("sessions").join(id);
+        if let Some(store) = self.held_transcript_store(&folder)? {
+            return store.snapshot().map_err(|error| error.to_string());
+        }
+        if let Some(data) = meeting_core::archive::read_archived_transcript(&folder)
+            .map_err(|error| error.to_string())?
+        {
+            return Ok(data);
+        }
+        meeting_core::inspect_journals(&folder).map_err(|error| error.to_string())
+    }
+
     /// Read and publish under the native transcript writer lock or against an
     /// immutable archive. The caller holds the source publication lease.
     fn with_confirmation_transcript<T>(
@@ -485,18 +513,9 @@ impl Service {
         read: impl FnOnce(&SessionData) -> anyhow::Result<T>,
     ) -> anyhow::Result<T> {
         let folder = self.root.join("sessions").join(id);
-        let stored = {
-            let inner = self
-                .lock()
-                .map_err(|_| anyhow::anyhow!(CONFIRMATION_NEEDS_SOURCE))?;
-            inner
-                .active
-                .iter()
-                .map(|active| &active.store)
-                .chain(inner.view.iter())
-                .find(|store| store.folder() == folder)
-                .cloned()
-        };
+        let stored = self
+            .held_transcript_store(&folder)
+            .map_err(|_| anyhow::anyhow!(CONFIRMATION_NEEDS_SOURCE))?;
         let check = |data: &SessionData| {
             anyhow::ensure!(data.id == id, CONFIRMATION_NEEDS_SOURCE);
             read(data)
@@ -509,7 +528,7 @@ impl Service {
                 {
                     return check(&data);
                 }
-                meeting_core::SessionStore::open(&folder)
+                SessionStore::open(&folder)
                     .map_err(|_| anyhow::anyhow!(CONFIRMATION_NEEDS_SOURCE))?
             }
         };
@@ -600,9 +619,9 @@ impl LiveNotes {
         {
             if let Ok(_publication) = meeting_core::archive::source_publication_lease(&service.root)
             {
-                if let Ok(snapshot) = service.live_snapshot(meeting_id, None) {
-                    if snapshot.data.id == meeting_id {
-                        let mut current = CurrentWorkspaceEvidence::new(workspace, &snapshot.data);
+                if let Ok(data) = service.confirmation_preview(meeting_id) {
+                    if data.id == meeting_id {
+                        let mut current = CurrentWorkspaceEvidence::new(workspace, &data);
                         entries.extend(
                             workspace
                                 .entities
@@ -1916,6 +1935,14 @@ mod tests {
                 .confirmable_workspace_entries,
             Some(vec!["e_first".into(), "e_second".into()])
         );
+        store.set_status("complete").unwrap();
+        let owned = service.lock().unwrap().active.take().unwrap();
+        let cold_preview = service
+            .live_notes
+            .workspace_status(&service, meeting_id)
+            .unwrap()
+            .confirmable_workspace_entries;
+        service.lock().unwrap().active = Some(owned);
         write_text("We selected the red room.", true);
         assert_eq!(
             service
@@ -1928,6 +1955,11 @@ mod tests {
         let rejected = confirm("e_second");
         let saved = read_state(&folder).unwrap();
         let owned = service.lock().unwrap().active.take().unwrap();
+        let revised_cold_preview = service
+            .live_notes
+            .workspace_status(&service, meeting_id)
+            .unwrap()
+            .confirmable_workspace_entries;
         finish.send(()).unwrap();
         for worker in owned.workers {
             worker.handle.join().unwrap();
@@ -1937,6 +1969,12 @@ mod tests {
             !committed_while_transcript_was_locked,
             "Confirmation committed without waiting for the transcript writer"
         );
+        assert_eq!(
+            cold_preview,
+            Some(vec!["e_first".into(), "e_second".into()]),
+            "Status must read original text without acquiring a PCM recovery lease"
+        );
+        assert_eq!(revised_cold_preview, Some(vec![]));
         assert!(
             rejected.is_err(),
             "The second confirmation used superseded transcript text"

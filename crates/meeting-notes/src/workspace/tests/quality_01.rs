@@ -98,11 +98,30 @@ fn omitted_calendar_due_is_saved_from_the_literal_task_witness() {
 
 #[test]
 fn calendar_due_cannot_cross_a_punctuationless_assignment_with_a_bare_object() {
-    let witness = source(
-        "s_adjacent",
-        0,
+    assert_only_undated_guide_task(
         "I will send the guide Jane sends invoices by September 23rd 2026.",
     );
+}
+
+#[test]
+fn calendar_due_cannot_cross_a_bare_assignment_with_another_verb() {
+    assert_only_undated_guide_task(
+        "I will send the guide Jane emails invoices by September 23rd 2026.",
+    );
+}
+
+#[test]
+fn calendar_due_cannot_cross_an_explicit_conjunction() {
+    for quote in [
+        "I will send the guide and Jane sends invoices by September 23rd 2026.",
+        "I will send the guide, and Jane emails invoices by September 23rd 2026.",
+    ] {
+        assert_only_undated_guide_task(quote);
+    }
+}
+
+fn assert_only_undated_guide_task(quote: &str) {
+    let witness = source("s_adjacent", 0, quote);
     let proposal = |due: Option<&str>| {
         answer(json!([{
             "proposalId":"p_guide","kind":"task","text":"Send the guide",
@@ -110,19 +129,47 @@ fn calendar_due_cannot_cross_a_punctuationless_assignment_with_a_bare_object() {
             "evidence":[{"sourceId":witness.id,"quote":witness.text}]
         }]))
     };
-    let mut state = WorkspaceState::default();
-    let req = request(&state, "tasks", &witness);
-    validate::apply(&mut state, &req, &proposal(None)).unwrap();
-    assert_eq!(state.entities.len(), 1);
-    assert_eq!(state.entities[0].due, None);
-    assert_eq!(state.entities[0].evidence[0].quote, witness.text);
-
     for purpose in ["tasks", "live_update"] {
         let mut state = WorkspaceState::default();
         let req = request(&state, purpose, &witness);
+        validate::apply(&mut state, &req, &proposal(None)).unwrap();
+        assert_eq!(state.entities.len(), 1);
+        assert_eq!(state.entities[0].due, None, "{purpose}: {quote}");
+        assert!(witness.text.contains(&state.entities[0].evidence[0].quote));
+
+        let mut state = WorkspaceState::default();
+        let req = request(&state, purpose, &witness);
         assert!(
-            validate::apply(&mut state, &req, &proposal(Some("September 23rd 2026")),).is_err()
+            validate::apply(&mut state, &req, &proposal(Some("September 23rd 2026")),).is_err(),
+            "{purpose}: {quote}"
         );
+        assert!(state.entities.is_empty());
+    }
+}
+
+#[test]
+fn calendar_due_supplied_for_the_first_assignment_ignores_a_later_deadline() {
+    let witness = source(
+        "s_both_due",
+        0,
+        "I will send the guide by Friday and Jane emails invoices by September 23rd 2026.",
+    );
+    let proposal = |due: &str| {
+        answer(json!([{
+            "proposalId":"p_guide","kind":"task","text":"Send the guide",
+            "due":due,"status":"open","attention":"current",
+            "evidence":[{"sourceId":witness.id,"quote":witness.text}]
+        }]))
+    };
+    for purpose in ["tasks", "live_update"] {
+        let mut state = WorkspaceState::default();
+        let req = request(&state, purpose, &witness);
+        validate::apply(&mut state, &req, &proposal("Friday")).unwrap();
+        assert_eq!(state.entities[0].due.as_deref(), Some("Friday"));
+
+        let mut state = WorkspaceState::default();
+        let req = request(&state, purpose, &witness);
+        assert!(validate::apply(&mut state, &req, &proposal("September 23rd 2026")).is_err());
         assert!(state.entities.is_empty());
     }
 }
