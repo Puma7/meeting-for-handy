@@ -56,6 +56,7 @@ fn terms(text: &str) -> Vec<String> {
         })
         .map(|word| match word.as_str() {
             "bericht" | "berichte" | "reports" => "report".into(),
+            "sammle" => "sammeln".into(),
             _ => word,
         })
         .collect()
@@ -147,9 +148,16 @@ pub(super) fn task_title_matches(title: &str, quote: &str) -> bool {
     task_object_matches(title, "", quote)
 }
 
+#[derive(PartialEq, Eq)]
+pub(super) enum CalendarTaskMatch {
+    SameAssignment,
+    CompetingAssignment,
+    Unverified,
+}
+
 /// Require one named or pronominal assignment, with the action and its object
 /// together before the deadline. A related title alone is insufficient.
-pub(super) fn calendar_task_matches(title: &str, quote: &str) -> bool {
+pub(super) fn calendar_task_match(title: &str, quote: &str) -> CalendarTaskMatch {
     use super::assertions::{
         assertion_words, assignment_text, finite_subject_before, present_assignment_quote,
     };
@@ -161,10 +169,10 @@ pub(super) fn calendar_task_matches(title: &str, quote: &str) -> bool {
     let german = lower.contains(" bis ");
     let marker = if german { " bis " } else { " by " };
     let Some((prefix, _)) = lower.rsplit_once(marker) else {
-        return false;
+        return CalendarTaskMatch::Unverified;
     };
     if prefix.contains([',', '.', '!', '?', ';', ':', '\n', '\r']) {
-        return false;
+        return CalendarTaskMatch::Unverified;
     }
     let title = title.to_lowercase();
     let title_parts = if german {
@@ -175,12 +183,12 @@ pub(super) fn calendar_task_matches(title: &str, quote: &str) -> bool {
             .map(|(action, object)| (object, action))
     };
     let Some((object, action)) = title_parts else {
-        return false;
+        return CalendarTaskMatch::Unverified;
     };
     let before = assertion_words(prefix);
     let original = assertion_words(quote);
     if before.len() > original.len() {
-        return false;
+        return CalendarTaskMatch::Unverified;
     }
     let particle = assertion_words(&lower)
         .last()
@@ -222,7 +230,7 @@ pub(super) fn calendar_task_matches(title: &str, quote: &str) -> bool {
         }
     });
     let Some(predicate) = predicate else {
-        return false;
+        return CalendarTaskMatch::Unverified;
     };
     // The transcript may omit commas. Do not combine the object of a second
     // named/pronominal assignment with the first verb.
@@ -247,8 +255,9 @@ pub(super) fn calendar_task_matches(title: &str, quote: &str) -> bool {
                 && trailing_lower[index + 1]
                     .strip_suffix('s')
                     .is_some_and(|stem| stem.chars().count() >= 3)
-                && ["the", "a", "an", "our", "your", "their", "this", "that"]
+                && (["the", "a", "an", "our", "your", "their", "this", "that"]
                     .contains(&trailing_lower[index + 2])
+                    || english_bare_plural_object(fragment[1], fragment[2]))
                 && finite_subject_before(trailing_lower, trailing, index, index + 1))
             || (german
                 && fragment.len() >= 3
@@ -259,7 +268,40 @@ pub(super) fn calendar_task_matches(title: &str, quote: &str) -> bool {
                     .contains(&trailing_lower[index + 2])
                 && finite_subject_before(trailing_lower, trailing, index, index + 1))
     });
-    !another_assignment && task_title_matches(object, &trailing.join(" "))
+    if another_assignment {
+        CalendarTaskMatch::CompetingAssignment
+    } else if task_title_matches(object, &trailing.join(" ")) {
+        CalendarTaskMatch::SameAssignment
+    } else {
+        CalendarTaskMatch::Unverified
+    }
+}
+
+/// For a bare object, require a known finite action. An arbitrary word ending
+/// in `s` would also match noun phrases such as "Customer Success reports".
+fn english_bare_plural_object(verb: &str, object: &str) -> bool {
+    const FINITE: &[&str] = &[
+        "brings",
+        "buys",
+        "checks",
+        "collects",
+        "delivers",
+        "files",
+        "organises",
+        "organizes",
+        "prepares",
+        "reviews",
+        "sends",
+        "submits",
+        "updates",
+        "uploads",
+        "writes",
+    ];
+    FINITE.contains(&verb)
+        && object.starts_with(char::is_lowercase)
+        && object
+            .strip_suffix('s')
+            .is_some_and(|stem| stem.chars().count() >= 3)
 }
 
 #[test]
@@ -327,7 +369,7 @@ fn calendar_task_deadline_requires_its_own_action_and_object() {
         ),
     ] {
         assert_eq!(
-            calendar_task_matches(title, quote),
+            calendar_task_match(title, quote) == CalendarTaskMatch::SameAssignment,
             expected,
             "{title}: {quote}"
         );

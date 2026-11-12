@@ -1,5 +1,5 @@
 //! Human changes have their own short, durable transaction, independent of slow inference.
-use super::{model::*, store};
+use super::{model::*, store, ContextCommit};
 use anyhow::{ensure, Result};
 use fs2::FileExt;
 use serde::{Deserialize, Serialize};
@@ -217,13 +217,13 @@ pub(crate) fn update(
     folder: &Path,
     incoming: &WorkspaceContext,
 ) -> Result<(WorkspaceContext, WorkspaceState)> {
-    update_checked(folder, incoming, |_, _| Ok(()))
+    update_checked(folder, incoming, |_, _, commit| commit())
 }
 
 pub(crate) fn update_checked(
     folder: &Path,
     incoming: &WorkspaceContext,
-    verify: impl FnOnce(&WorkspaceState, &[Event]) -> Result<()>,
+    verify: impl FnOnce(&WorkspaceState, &[Event], ContextCommit<'_>) -> Result<()>,
 ) -> Result<(WorkspaceContext, WorkspaceState)> {
     incoming.validate_request_budget()?;
     let _guard = lock(folder)?;
@@ -244,7 +244,6 @@ pub(crate) fn update_checked(
         .ok_or_else(|| anyhow::anyhow!("Zu viele Kontextfassungen."))?;
     let prior_events = state.events.len();
     state.apply_context(&next)?;
-    verify(&state, &state.events[prior_events..])?;
     let entries = fs::read_dir(folder)?.collect::<std::io::Result<Vec<_>>>()?;
     let reset = !entries.iter().any(|e| {
         e.file_name()
@@ -269,10 +268,20 @@ pub(crate) fn update_checked(
     let mut file = tempfile::NamedTempFile::new_in(folder)?;
     file.write_all(&bytes)?;
     file.as_file().sync_all()?;
-    file.persist_noclobber(folder.join(format!("context-{:08}.json", next.revision)))
-        .map_err(|e| e.error)?;
-    #[cfg(unix)]
-    File::open(folder)?.sync_all()?;
+    let mut committed = false;
+    verify(
+        &state,
+        &state.events[prior_events..],
+        Box::new(|| {
+            file.persist_noclobber(folder.join(format!("context-{:08}.json", next.revision)))
+                .map_err(|e| e.error)?;
+            #[cfg(unix)]
+            File::open(folder)?.sync_all()?;
+            committed = true;
+            Ok(())
+        }),
+    )?;
+    ensure!(committed, "The verified meeting context was not published.");
     record_activity(
         &mut state,
         &next,

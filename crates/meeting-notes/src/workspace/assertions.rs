@@ -203,6 +203,8 @@ pub(super) fn present_assignment_quote(quote: &str) -> bool {
     ];
     words.iter().enumerate().any(|(index, word)| {
         let action = finite.contains(word)
+            // This spelling also appears in third-person reported speech.
+            || (*word == "sammle" && index > 0 && words[index - 1] == "ich")
             || (*word == "will"
                 && words
                     .get(index + 1)

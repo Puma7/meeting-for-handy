@@ -1747,6 +1747,75 @@ fn workspace_ollama_context_upgrades_an_existing_classic_reservation() {
     workspace_context_requests(true, false);
 }
 
+#[test]
+fn warm_ollama_context_renewal_reports_preparation_until_acknowledged() {
+    use std::sync::mpsc::{sync_channel, RecvTimeoutError};
+
+    let (renewing, entered) = sync_channel(1);
+    let (release, allowed) = sync_channel(1);
+    let server = Server::new(move |path, body| {
+        if path == "/api/ps" {
+            // The runner already has this context, so no machine-specific memory budget is needed.
+            return (
+                200,
+                json!({"models":[{"name":"synthetic","context_length":8192,
+                    "expires_at":(chrono::Utc::now()+chrono::Duration::seconds(300)).to_rfc3339()}]}),
+            );
+        }
+        let workspace_renewal = path == "/api/generate" && body["options"]["num_ctx"] == 8192;
+        if workspace_renewal
+            && (renewing.send(()).is_err() || allowed.recv_timeout(Duration::from_secs(5)).is_err())
+        {
+            return (500, json!({}));
+        }
+        ollama(path, body)
+    });
+    let pool = LocalModelPool::default();
+    let lease = pool
+        .reserve(&server.connection(), LocalProvider::Ollama)
+        .unwrap();
+    lease.prepare(&AnalysisControl::default()).unwrap();
+
+    let control = AnalysisControl::default();
+    let (complete, completed) = sync_channel(1);
+    let observer = control.clone();
+    let working = Arc::clone(&lease);
+    let worker =
+        thread::spawn(move || complete.send(working.prepare_workspace(&observer)).unwrap());
+    entered.recv_timeout(Duration::from_secs(5)).unwrap();
+    let preparing = control.preparing_model();
+    control.cancel();
+    let early = completed.recv_timeout(Duration::from_millis(150));
+    let waiting_for_ack = matches!(early, Err(RecvTimeoutError::Timeout));
+    let preparing_after_cancel = control.preparing_model();
+    release.send(()).unwrap();
+    let result = early.unwrap_or_else(|_| completed.recv_timeout(Duration::from_secs(5)).unwrap());
+    worker.join().unwrap();
+
+    assert!(
+        preparing,
+        "Warm context renewal did not report model preparation"
+    );
+    assert!(waiting_for_ack && preparing_after_cancel);
+    assert!(meeting_notes::is_cancelled(&result.unwrap_err()));
+    assert!(!control.preparing_model());
+
+    lease
+        .prepare_workspace(&AnalysisControl::default())
+        .unwrap();
+    let requests = server.seen();
+    let reservations: Vec<_> = requests
+        .iter()
+        .filter(|(path, _)| path == "/api/generate")
+        .collect();
+    assert_eq!(
+        reservations.len(),
+        2,
+        "The acknowledged renewal must not be repeated"
+    );
+    assert_eq!(reservations[1].1["options"]["num_ctx"], 8192);
+}
+
 /// Both first use of a resident model and a classic-to-workspace renewal must
 /// refuse a context change with unconfirmed allocation size. The same context
 /// remains usable without making available RAM a test-machine prerequisite.

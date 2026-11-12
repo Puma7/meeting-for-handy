@@ -374,6 +374,17 @@ impl SessionStore {
             .clone())
     }
 
+    /// Keep the current transcript stable through a short evidence publication.
+    /// Audio checkpoints use their own writer lock and can proceed independently.
+    pub fn with_transcript_snapshot<T>(&self, read: impl FnOnce(&SessionData) -> T) -> Result<T> {
+        let _transcript = self
+            .writers
+            .transcript
+            .lock()
+            .map_err(|_| "Transcript journal lock was poisoned")?;
+        Ok(read(&self.snapshot()?))
+    }
+
     pub fn model_id(&self) -> Result<String> {
         Ok(self
             .inner

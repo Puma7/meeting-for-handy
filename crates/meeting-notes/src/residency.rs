@@ -270,6 +270,8 @@ impl ModelLease {
                     };
                     if policy_changed || runner_changed || state.refresh_failed {
                         control.check()?;
+                        // A submitted renewal can reload the runner even though the slot was ready.
+                        let _preparation = control.begin_model_preparation();
                         if let Some(Loaded::Ollama {
                             context_length: current,
                             ..

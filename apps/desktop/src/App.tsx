@@ -229,6 +229,9 @@ export default function App({ api = desktopApi }: { api?: DesktopApi }) {
   const [backupReceipts, setBackupReceipts] = useState<
     ReadonlyMap<string, BackupResult>
   >(() => new Map());
+  const [backupErrors, setBackupErrors] = useState<ReadonlyMap<string, string>>(
+    () => new Map(),
+  );
   const backupOperation = useRef<{
     meetingId: string;
     cancelling: boolean;
@@ -1336,10 +1339,20 @@ export default function App({ api = desktopApi }: { api?: DesktopApi }) {
     }
   }
 
+  function clearBackupError(meetingId: string) {
+    setBackupErrors((current) => {
+      if (!current.has(meetingId)) return current;
+      const next = new Map(current);
+      next.delete(meetingId);
+      return next;
+    });
+  }
+
   async function runMeetingBackup(meetingId: string, passphrase: string) {
     if (backupOperation.current) throw new Error(t.busy);
     const operation = { meetingId, cancelling: false };
     backupOperation.current = operation;
+    clearBackupError(meetingId);
     setBackupActivity({ ...operation });
     try {
       const result = await api.createEncryptedBackup!(meetingId, passphrase);
@@ -1347,6 +1360,12 @@ export default function App({ api = desktopApi }: { api?: DesktopApi }) {
       if (result.summary.meetingId !== meetingId)
         throw new Error(t.wrongMeeting);
       return { file: result.file, recoveryKey: result.recoveryKey };
+    } catch (failure) {
+      if (!erasureBlocked.current.has(meetingId)) {
+        const message = errorMessage(failure);
+        setBackupErrors((current) => new Map(current).set(meetingId, message));
+      }
+      return null;
     } finally {
       backupOperation.current = null;
       setBackupActivity(null);
@@ -1453,6 +1472,7 @@ export default function App({ api = desktopApi }: { api?: DesktopApi }) {
     ++erasureEpoch.current;
     ++requestSequence.current;
     erasureBlocked.current.add(id);
+    clearBackupError(id);
     setHistory((current) => current.filter((item) => item.id !== id));
     setErasureTarget(null);
     setErasureRevision((value) => value + 1);
@@ -2863,6 +2883,7 @@ export default function App({ api = desktopApi }: { api?: DesktopApi }) {
                   }
                   receipt={{
                     result: backupReceipts.get(meeting.id) ?? null,
+                    error: backupErrors.get(meeting.id),
                     busy: backupActivity?.meetingId === meeting.id,
                     cancelling:
                       backupActivity?.meetingId === meeting.id &&

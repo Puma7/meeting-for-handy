@@ -22,6 +22,7 @@ export default function EncryptedBackup({
   cancel?: () => Promise<boolean>;
   receipt?: {
     result: BackupResult | null;
+    error?: string;
     setResult: (next: BackupResult) => void;
     busy: boolean;
     cancelling: boolean;
@@ -37,6 +38,7 @@ export default function EncryptedBackup({
   const [error, setError] = useState("");
   const [localResult, setLocalResult] = useState<BackupResult | null>(null);
   const result = receipt ? receipt.result : localResult;
+  const displayedError = error || receipt?.error;
   const busy = receipt?.busy ?? localBusy;
   const cancelling = receipt?.cancelling ?? localCancelling;
   const setResult = receipt?.setResult ?? setLocalResult;
@@ -184,7 +186,7 @@ export default function EncryptedBackup({
           )}
         </div>
       )}
-      {error && <p role="alert">{error}</p>}
+      {displayedError && <p role="alert">{displayedError}</p>}
       {result && (
         <p role="status">
           {restore

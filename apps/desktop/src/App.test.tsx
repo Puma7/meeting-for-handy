@@ -2051,6 +2051,76 @@ describe("template structure", () => {
 });
 
 describe("workspace navigation (synthetic IPC)", () => {
+  async function openMeetingBackup(title: string) {
+    await userEvent.click(screen.getByRole("button", { name: "Historie" }));
+    const row = (await screen.findByText(title)).closest(
+      ".session-row",
+    ) as HTMLElement;
+    await userEvent.click(within(row).getByRole("button", { name: "Öffnen" }));
+    await userEvent.click(
+      await screen.findByText("Verschlüsselte Kopie erstellen", {
+        selector: "summary",
+      }),
+    );
+  }
+
+  async function submitMeetingBackup() {
+    fireEvent.change(screen.getByLabelText("Passphrase"), {
+      target: { value: "synthetic passphrase" },
+    });
+    fireEvent.change(screen.getByLabelText("Passphrase wiederholen"), {
+      target: { value: "synthetic passphrase" },
+    });
+    await userEvent.click(
+      screen.getByRole("button", { name: "Verschlüsselte Kopie erstellen" }),
+    );
+  }
+
+  it("preserves a delayed backup error only for its meeting until a valid retry", async () => {
+    const other = {
+      ...meeting,
+      id: "other-synthetic-session",
+      title: "Another meeting",
+    };
+    const api = fakeApi();
+    api.listMeetings = vi.fn().mockResolvedValue([meeting, other]);
+    api.getMeeting = vi.fn(async (id: string) =>
+      id === meeting.id ? meeting : other,
+    );
+    let rejectBackup!: (message: string) => void;
+    const pending = new Promise<never>((_, reject) => {
+      rejectBackup = reject;
+    });
+    let cancelRetry!: () => void;
+    const retry = new Promise<null>((resolve) => {
+      cancelRetry = () => resolve(null);
+    });
+    api.createEncryptedBackup = vi
+      .fn()
+      .mockReturnValueOnce(pending)
+      .mockReturnValueOnce(retry);
+    const path = "D:/synthetic/uncertain.hmvault";
+    const message = `Could not synchronize the selected folder.\nThe app could not confirm the backup's durability at ${path}. If the file is present, verify it with the passphrase before relying on it. A recovery key was not delivered.`;
+    render(<App api={api} />);
+    await ready();
+    await openMeetingBackup(meeting.title);
+    await submitMeetingBackup();
+    await openMeetingBackup(other.title);
+    await act(async () => rejectBackup(message));
+    expect(screen.queryByText(/uncertain\.hmvault/)).toBeNull();
+    await openMeetingBackup(meeting.title);
+    const alert = await screen.findByText(/uncertain\.hmvault/);
+    expect(alert.getAttribute("role")).toBe("alert");
+    expect(alert.textContent).toBe(message);
+    await submitMeetingBackup();
+    expect(screen.queryByText(/uncertain\.hmvault/)).toBeNull();
+    await act(async () => cancelRetry());
+    await openMeetingBackup(other.title);
+    await openMeetingBackup(meeting.title);
+    expect(screen.queryByText(/uncertain\.hmvault/)).toBeNull();
+    expect(api.createEncryptedBackup).toHaveBeenCalledTimes(2);
+  });
+
   it("preserves a completed backup receipt only for its meeting after navigating away", async () => {
     const other = {
       ...meeting,
@@ -2079,37 +2149,15 @@ describe("workspace navigation (synthetic IPC)", () => {
     const file = "synthetic-a.hmvault";
     render(<App api={api} />);
     await ready();
-    async function openDetail(title: string) {
-      await userEvent.click(screen.getByRole("button", { name: "Historie" }));
-      const row = (await screen.findByText(title)).closest(
-        ".session-row",
-      ) as HTMLElement;
-      await userEvent.click(
-        within(row).getByRole("button", { name: "Öffnen" }),
-      );
-      await userEvent.click(
-        await screen.findByText("Verschlüsselte Kopie erstellen", {
-          selector: "summary",
-        }),
-      );
-    }
-    await openDetail(meeting.title);
-    fireEvent.change(screen.getByLabelText("Passphrase"), {
-      target: { value: "synthetic passphrase" },
-    });
-    fireEvent.change(screen.getByLabelText("Passphrase wiederholen"), {
-      target: { value: "synthetic passphrase" },
-    });
-    await userEvent.click(
-      screen.getByRole("button", { name: "Verschlüsselte Kopie erstellen" }),
-    );
+    await openMeetingBackup(meeting.title);
+    await submitMeetingBackup();
     expect(api.createEncryptedBackup).toHaveBeenCalledExactlyOnceWith(
       meeting.id,
       "synthetic passphrase",
     );
-    await openDetail(other.title);
+    await openMeetingBackup(other.title);
     expect(screen.queryByText("Vorgang läuft …")).toBeNull();
-    await openDetail(meeting.title);
+    await openMeetingBackup(meeting.title);
     expect(screen.getByText("Vorgang läuft …")).toBeTruthy();
     expect(
       screen
@@ -2118,15 +2166,15 @@ describe("workspace navigation (synthetic IPC)", () => {
     ).toBe(true);
     await userEvent.click(screen.getByRole("button", { name: "Abbrechen" }));
     expect(api.cancelEncryptedBackup).toHaveBeenCalledOnce();
-    await openDetail(other.title);
-    await openDetail(meeting.title);
+    await openMeetingBackup(other.title);
+    await openMeetingBackup(meeting.title);
     expect(screen.getByText("Abbruch angefordert …")).toBeTruthy();
     await act(async () => finishCancel(false));
     expect(screen.getByRole("button", { name: "Abbrechen" })).toHaveProperty(
       "disabled",
       false,
     );
-    await openDetail(other.title);
+    await openMeetingBackup(other.title);
     await act(async () =>
       finish({
         file,
@@ -2136,14 +2184,14 @@ describe("workspace navigation (synthetic IPC)", () => {
     );
     expect(screen.queryByDisplayValue(key)).toBeNull();
     expect(screen.queryByText(file)).toBeNull();
-    await openDetail(meeting.title);
+    await openMeetingBackup(meeting.title);
     expect(screen.getByDisplayValue(key)).toBeTruthy();
     expect(screen.getByText(file)).toBeTruthy();
     await userEvent.click(
       screen.getByRole("button", { name: "Schlüssel ausblenden" }),
     );
-    await openDetail(other.title);
-    await openDetail(meeting.title);
+    await openMeetingBackup(other.title);
+    await openMeetingBackup(meeting.title);
     expect(screen.queryByDisplayValue(key)).toBeNull();
     expect(screen.getByText(file)).toBeTruthy();
     expect(Object.values(localStorage).join(" ")).not.toContain(key);

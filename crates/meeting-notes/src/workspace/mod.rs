@@ -1192,14 +1192,17 @@ pub fn update_context(
     folder: &Path,
     context: &WorkspaceContext,
 ) -> Result<(WorkspaceContext, WorkspaceState)> {
-    update_context_checked(folder, context, |_, _| Ok(()))
+    update_context_checked(folder, context, |_, _, commit| commit())
 }
 
-/// Validate newly created human events against current external evidence before publishing the context.
+pub type ContextCommit<'a> = Box<dyn FnOnce() -> Result<()> + 'a>;
+
+/// Verify the new events and call `commit` while their external evidence is stable.
+/// Returning an error without calling `commit` leaves the saved context unchanged.
 pub fn update_context_checked(
     folder: &Path,
     context: &WorkspaceContext,
-    verify: impl FnOnce(&WorkspaceState, &[Event]) -> Result<()>,
+    verify: impl FnOnce(&WorkspaceState, &[Event], ContextCommit<'_>) -> Result<()>,
 ) -> Result<(WorkspaceContext, WorkspaceState)> {
     let state = store::read(folder)?;
     ensure!(state.prompt_version() == PROMPT_VERSION,

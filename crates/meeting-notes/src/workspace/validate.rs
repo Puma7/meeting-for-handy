@@ -2,8 +2,8 @@ pub(super) use super::assertions::{
     completion_quote_allowed, recorded_decision_quote_allowed, withdrawal_quote_allowed,
 };
 use super::matching::{
-    explicit_owned_completion, same_question, shares_topic, task_completion_matches,
-    task_subject_matches,
+    calendar_task_match, explicit_owned_completion, same_question, shares_topic,
+    task_completion_matches, task_subject_matches, CalendarTaskMatch,
 };
 use super::model::*;
 use anyhow::{ensure, Context, Result};
@@ -273,7 +273,8 @@ fn apply_response(
                     } else if let [witness] = c.evidence.as_slice() {
                         c.due = crate::validation::explicit_task_calendar_date(&witness.quote)
                             .filter(|_| {
-                                super::matching::calendar_task_matches(title, &witness.quote)
+                                calendar_task_match(title, &witness.quote)
+                                    == CalendarTaskMatch::SameAssignment
                             })
                             .map(str::to_owned);
                     }
@@ -330,6 +331,9 @@ fn apply_response(
             .clone()
             .or_else(|| old.map(|e| e.text.clone()))
             .unwrap_or_default();
+        if let Some(due) = c.due.as_deref().filter(|_| c.kind == "task") {
+            validate_calendar_due_scope(&text, due, &c.evidence)?;
+        }
         if request.purpose == "facts" && c.kind == "decision" && c.status == "recorded" {
             c.evidence = assertion_witnesses(request, &c.evidence, &text, false)?;
         }
@@ -789,6 +793,29 @@ pub(super) fn decision_backed_fact(entity: &Entity) -> bool {
             shares_topic(&entity.text, sentence) && recorded_decision_quote_allowed(sentence)
         })
     })
+}
+
+/// A model-supplied date cannot bypass a detected assignment boundary.
+fn validate_calendar_due_scope(title: &str, due: &str, evidence: &[crate::Evidence]) -> Result<()> {
+    let due = due.to_lowercase();
+    let mut competing_assignment = false;
+    for witness in evidence {
+        if !crate::validation::explicit_task_calendar_date(&witness.quote)
+            .is_some_and(|date| date.to_lowercase().contains(&due))
+        {
+            continue;
+        }
+        match calendar_task_match(title, &witness.quote) {
+            CalendarTaskMatch::SameAssignment => return Ok(()),
+            CalendarTaskMatch::CompetingAssignment => competing_assignment = true,
+            CalendarTaskMatch::Unverified => {}
+        }
+    }
+    ensure!(
+        !competing_assignment,
+        "Die angegebene Frist benötigt einen Originalbeleg zur selben Aufgabe."
+    );
+    Ok(())
 }
 
 /// A sentence may only witness its own assertion, even when the model cited

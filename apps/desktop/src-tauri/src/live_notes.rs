@@ -30,6 +30,7 @@ const OVERVIEW_RETRY: Duration = Duration::from_secs(60);
 const MAX_OVERVIEW_FAILURES: u32 = 3;
 /// Shown while live notes yield to recognition for more than two minutes.
 const RECOGNITION_WAIT: &str = "Die Live-Auswertung wartet seit mehr als zwei Minuten auf die Erkennung. Aufnahme und gespeicherte Daten bleiben erhalten. Erkennungsfortschritt prüfen; die Live-Auswertung kann beendet und später erneuert werden. / Live notes have waited over two minutes for recognition. Recording and saved data are retained; check recognition progress or stop and retry live notes later.";
+const CONFIRMATION_NEEDS_SOURCE: &str = "Zum Bestätigen wird ein aktueller Originalbeleg benötigt. / Confirmation requires current original evidence.";
 pub(crate) const DEFAULT_INTERVAL_MS: u64 = 3 * 60_000;
 
 #[derive(Deserialize)]
@@ -475,6 +476,47 @@ impl Service {
             batch_recognition: false,
         })
     }
+
+    /// Read and publish under the native transcript writer lock or against an
+    /// immutable archive. The caller holds the source publication lease.
+    fn with_confirmation_transcript<T>(
+        &self,
+        id: &str,
+        read: impl FnOnce(&SessionData) -> anyhow::Result<T>,
+    ) -> anyhow::Result<T> {
+        let folder = self.root.join("sessions").join(id);
+        let stored = {
+            let inner = self
+                .lock()
+                .map_err(|_| anyhow::anyhow!(CONFIRMATION_NEEDS_SOURCE))?;
+            inner
+                .active
+                .iter()
+                .map(|active| &active.store)
+                .chain(inner.view.iter())
+                .find(|store| store.folder() == folder)
+                .cloned()
+        };
+        let check = |data: &SessionData| {
+            anyhow::ensure!(data.id == id, CONFIRMATION_NEEDS_SOURCE);
+            read(data)
+        };
+        let store = match stored {
+            Some(store) => store,
+            None => {
+                if let Some(data) = meeting_core::archive::read_archived_transcript(&folder)
+                    .map_err(|_| anyhow::anyhow!(CONFIRMATION_NEEDS_SOURCE))?
+                {
+                    return check(&data);
+                }
+                meeting_core::SessionStore::open(&folder)
+                    .map_err(|_| anyhow::anyhow!(CONFIRMATION_NEEDS_SOURCE))?
+            }
+        };
+        store
+            .with_transcript_snapshot(check)
+            .map_err(|_| anyhow::anyhow!(CONFIRMATION_NEEDS_SOURCE))?
+    }
 }
 
 impl LiveNotes {
@@ -694,24 +736,22 @@ impl LiveNotes {
         let update = meeting_notes::workspace::update_context_checked(
             &folder,
             &context,
-            |workspace, events| {
+            |workspace, events, commit| {
                 let mut confirmations = events
                     .iter()
                     .filter(|event| event.human && event.status == "confirmed")
                     .peekable();
-                if confirmations.peek().is_some() {
-                    const NEEDS_SOURCE: &str = "Zum Bestätigen wird ein aktueller Originalbeleg benötigt. / Confirmation requires current original evidence.";
-                    let snapshot = service
-                        .live_snapshot(meeting_id, None)
-                        .map_err(|_| anyhow::anyhow!(NEEDS_SOURCE))?;
-                    anyhow::ensure!(snapshot.data.id == meeting_id, NEEDS_SOURCE);
-                    let mut current = CurrentWorkspaceEvidence::new(workspace, &snapshot.data);
+                if confirmations.peek().is_none() {
+                    return commit();
+                }
+                service.with_confirmation_transcript(meeting_id, |data| {
+                    let mut current = CurrentWorkspaceEvidence::new(workspace, data);
                     anyhow::ensure!(
                         confirmations.all(|event| current.supports(&event.evidence)),
-                        NEEDS_SOURCE
+                        CONFIRMATION_NEEDS_SOURCE
                     );
-                }
-                Ok(())
+                    commit()
+                })
             },
         );
         let (next, projected) = match update {
@@ -1848,7 +1888,26 @@ mod tests {
                 .live_notes
                 .set_workspace_context(&service, meeting_id, &run_id, context)
         };
-        assert!(confirm("e_first").unwrap());
+        let (first, committed_while_transcript_was_locked) = thread::scope(|scope| {
+            let (started, starting) = std::sync::mpsc::channel();
+            let (completed, completion) = std::sync::mpsc::channel();
+            let confirm = &confirm;
+            let (worker, early) = store
+                .with_transcript_snapshot(|_| {
+                    let worker = scope.spawn(move || {
+                        started.send(()).unwrap();
+                        let result = confirm("e_first");
+                        let _ = completed.send(());
+                        result
+                    });
+                    starting.recv_timeout(Duration::from_secs(5)).unwrap();
+                    let early = completion.recv_timeout(Duration::from_millis(500)).is_ok();
+                    (worker, early)
+                })
+                .unwrap();
+            (worker.join().unwrap(), early)
+        });
+        assert!(first.unwrap());
         assert_eq!(
             service
                 .live_notes
@@ -1874,6 +1933,10 @@ mod tests {
             worker.handle.join().unwrap();
         }
 
+        assert!(
+            !committed_while_transcript_was_locked,
+            "Confirmation committed without waiting for the transcript writer"
+        );
         assert!(
             rejected.is_err(),
             "The second confirmation used superseded transcript text"
