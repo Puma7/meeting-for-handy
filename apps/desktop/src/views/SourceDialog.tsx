@@ -33,12 +33,11 @@ export default function SourceDialog({
         onClick={(event) => event.stopPropagation()}
       >
         <div className="section-heading">
-          <h2 id="source-title">
-            {t.evidence} [{source.id}]
-          </h2>
+          <h2 id="source-title">{t.evidence}</h2>
           <button
             className="icon-button"
             aria-label={t.close}
+            title={t.close}
             onClick={onClose}
           >
             <X size={19} />
@@ -49,6 +48,7 @@ export default function SourceDialog({
           <button
             className="secondary"
             aria-label={t.previousSource}
+            title={t.previousSource}
             disabled={index === 0}
             onClick={() => setIndex(index - 1)}
           >
@@ -62,7 +62,7 @@ export default function SourceDialog({
             >
               {selection.sources.map((item, position) => (
                 <option key={item.id} value={position}>
-                  [{item.id}] {clock(item.startMs)}–{clock(item.endMs)} ·{" "}
+                  {position + 1}. {clock(item.startMs)}–{clock(item.endMs)} ·{" "}
                   {trackName(item.source, locale)}
                 </option>
               ))}
@@ -71,6 +71,7 @@ export default function SourceDialog({
           <button
             className="secondary"
             aria-label={t.nextSource}
+            title={t.nextSource}
             disabled={index === selection.sources.length - 1}
             onClick={() => setIndex(index + 1)}
           >
@@ -87,7 +88,10 @@ export default function SourceDialog({
               ))
             : source.text}
         </p>
-        <p className="muted">{t.sourceTimes}</p>
+        <details className="source-identifier">
+          <summary>{locale === "de" ? "Quellenkennung" : "Source ID"}</summary>
+          <code>{source.id}</code>
+        </details>
       </section>
     </div>
   );

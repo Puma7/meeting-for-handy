@@ -265,7 +265,8 @@ pub(crate) fn update_checked(
     };
     let bytes = serde_json::to_vec(&entry)?;
     ensure!(bytes.len() <= 2_000_000, "Meetingkontext ist zu groß.");
-    let mut file = tempfile::NamedTempFile::new_in(folder)?;
+    let target = folder.join(format!("context-{:08}.json", next.revision));
+    let (mut file, target) = crate::service::pending_publication(&target, ".tmp")?;
     file.write_all(&bytes)?;
     file.as_file().sync_all()?;
     let mut committed = false;
@@ -273,8 +274,7 @@ pub(crate) fn update_checked(
         &state,
         &state.events[prior_events..],
         Box::new(|| {
-            file.persist_noclobber(folder.join(format!("context-{:08}.json", next.revision)))
-                .map_err(|e| e.error)?;
+            file.persist_noclobber(target).map_err(|e| e.error)?;
             #[cfg(unix)]
             File::open(folder)?.sync_all()?;
             committed = true;

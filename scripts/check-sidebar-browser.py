@@ -59,6 +59,7 @@ def main():
         f'import Sidebar from {json.dumps(source + "/src/views/Sidebar.tsx")};',
         f'import RecordingStatus from {json.dumps(source + "/src/views/RecordingStatus.tsx")};',
         f'import MeetingView from {json.dumps(source + "/src/views/MeetingView.tsx")};',
+        f'import SourceDialog from {json.dumps(source + "/src/views/SourceDialog.tsx")};',
         f'import {{de,en,extraDe,extraEn}} from {json.dumps(source + "/src/i18n.ts")};',
         f'import {json.dumps(source + "/src/styles.css")};',
     ])
@@ -79,7 +80,10 @@ const status = <RecordingStatus locale={locale} paused={false} durationMs={65000
     text:"This is synthetic transcript text for the browser layout check."}]}
   warningCount={1} microphoneSilent={microphone === "silent"} microphoneMuted={microphone === "muted"} backlogMs={35000}
   getSystemLoad={load} onOpen={() => {}} />;
-createRoot(document.getElementById("root")).render(<div className="app-shell">
+const proofSource = {id:"section_"+"3".repeat(64), source:"system", startMs:0, endMs:30000, text:"Synthetic original quote."};
+createRoot(document.getElementById("root")).render(params.has("evidence") ?
+  <SourceDialog selection={{sources:[proofSource], index:0, quote:"original"}} locale={locale}
+    t={locale === "de" ? de : en} onClose={()=>{}} /> : <div className="app-shell">
   <Sidebar app={{version:"synthetic",recording:true}} page="meeting" locale={locale}
     theme={theme} t={locale === "de" ? de : en} navigate={async () => {}}
     setTheme={() => {}} setLocale={() => {}} recordingStatus={status} />
@@ -113,12 +117,12 @@ export default {{root:{json.dumps(fixture.as_posix())},plugins:[react()],
              "apps/desktop/src/views/AudioSources.tsx", "apps/desktop/src/views/RecordingControls.tsx",
              "apps/desktop/src/views/TranscriptBody.tsx", "apps/desktop/src/views/SessionWarnings.tsx",
              "apps/desktop/src/styles.css", "apps/desktop/src/handy-theme.css", "apps/desktop/src/i18n.ts",
-             "scripts/check-sidebar-browser.py"]
+             "apps/desktop/src/views/SourceDialog.tsx", "scripts/check-sidebar-browser.py"]
     report = {"at": datetime.now(timezone.utc).isoformat(), "synthetic": True,
               "actualSidebarAndRecordingStatus": True, "actualClassicMeetingView": True, "nativeIPCOrDeviceTest": False,
               "playwright": installed, "appVersion": json.loads((desktop / "package.json").read_text())["version"],
               "sourceHashes": {name: hashlib.sha256((root / name).read_bytes()).hexdigest() for name in files},
-              "rows": [], "warningTooltips": [], "meetingTitles": [], "pageErrors": [], "consoleErrors": [], "foreignRequests": [], "success": False}
+              "rows": [], "warningTooltips": [], "meetingTitles": [], "sourceDialogs": [], "pageErrors": [], "consoleErrors": [], "foreignRequests": [], "success": False}
     server = worker = None
     try:
         with (output / "build.log").open("w", encoding="utf8") as log:
@@ -212,11 +216,21 @@ export default {{root:{json.dumps(fixture.as_posix())},plugins:[react()],
                                             assert ("1 Hinweis zur Aufnahme" if locale == "de" else "1 recording notice") in title, title
                                             assert ("Erkennung im Rückstand" if locale == "de" else "Transcription behind") in title, title
                                             report["warningTooltips"].append({"width": width, "locale": locale, "theme": theme, "microphone": microphone, "collapsed": True, "actualTitle": title})
+                                page.goto(base + f"?locale={locale}&theme={theme}&evidence=1")
+                                dialog = page.get_by_role("dialog")
+                                expect(dialog.locator("mark")).to_have_text("original")
+                                dialog.locator("summary").click()
+                                expect(dialog.locator("code")).to_have_text("section_" + "3" * 64)
+                                assert dialog.evaluate("e => e.scrollWidth <= e.clientWidth"), "Source dialog overflows"
+                                close = dialog.get_by_role("button", name="Schließen" if locale == "de" else "Close", exact=True)
+                                expect(close).to_be_in_viewport()
+                                report["sourceDialogs"].append({"width":width, "locale":locale, "theme":theme})
                             finally:
                                 context.close()
                 assert len(report["rows"]) == 24
                 assert len(report["warningTooltips"]) == 24
                 assert len(report["meetingTitles"]) == 24
+                assert len(report["sourceDialogs"]) == 12
                 assert not report["pageErrors"] and not report["consoleErrors"] and not report["foreignRequests"], report
                 report["success"] = True
             finally:

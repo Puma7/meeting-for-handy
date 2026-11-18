@@ -6,13 +6,14 @@ export function fitColumn(cards, availableHeight, requestedGap = 12) {
     0,
     Number.isFinite(availableHeight) ? availableHeight : 0,
   );
-  // Keep the expand button reachable when a very short viewport cannot fit all headers.
-  const minimumTotal = cards.length * 72 + requestedGap * (cards.length - 1);
+  // Allow column scrolling before an automatic card loses its first content row.
+  const manual = cards.slice(0, -1).some((card) => card.manualHeight);
+  const minimum = manual ? 72 : 120;
+  const minimumTotal =
+    cards.length * minimum + requestedGap * (cards.length - 1);
   const available = Math.max(viewport, minimumTotal);
   const gap = requestedGap;
   const room = Math.max(0, available - gap * (cards.length - 1));
-  const manual = cards.slice(0, -1).some((card) => card.manualHeight);
-  const minimum = Math.min(manual ? 72 : 120, room / cards.length);
   const upper = cards
     .slice(0, -1)
     .map((card) => Math.max(minimum, card.height));

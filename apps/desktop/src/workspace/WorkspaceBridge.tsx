@@ -165,19 +165,19 @@ export default function WorkspaceBridge({
     }),
     [api, meeting.id, apiKey, useSavedKey, outputLanguage, workspacePrompt],
   );
-  if (
-    !api.startLiveNotes ||
-    !api.getLiveNotes ||
-    !api.setWorkspaceContext ||
-    !api.stopLiveNotes ||
-    !api.refreshLiveNotes ||
-    !api.setLiveNotesInterval ||
-    !api.localModelSetup
-  )
+  if (!available)
     return (
       <div role="status">
-        Die native Kachelanbindung ist in diesem Programmstand nicht verfügbar.
-        <button onClick={onBack}>Zur Aufnahme</button>
+        <p>
+          {presentation.language === "en"
+            ? "The advanced meeting view is unavailable in this version."
+            : "Die erweiterte Meetingansicht ist in dieser Version nicht verfügbar."}
+        </p>
+        <button onClick={onBack}>
+          {presentation.language === "en"
+            ? "Back to recording"
+            : "Zur Aufnahme"}
+        </button>
       </div>
     );
   return (

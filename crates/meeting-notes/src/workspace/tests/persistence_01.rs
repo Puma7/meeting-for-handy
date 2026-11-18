@@ -1,5 +1,32 @@
 use super::*;
 
+#[cfg(windows)]
+#[test]
+fn long_windows_profile_publishes_and_reopens_context_and_analysis_revisions() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut folder = dir.path().to_owned();
+    while folder.as_os_str().len() < 310 {
+        folder.push("nested-synthetic-meeting-profile");
+    }
+    std::fs::create_dir_all(&folder).unwrap();
+    let (writer, old) = store::load(&folder).unwrap();
+    let (mut next, request, answer) = setup();
+    let events = validate::apply(&mut next, &request, &answer.to_string()).unwrap();
+    next.revision = 1;
+    let delta = store::Delta::between(&old, &next, request.transcript_sources.clone(), events);
+    store::append(&folder, &delta).expect("publish analysis revision");
+    let revision = folder.join("revision-00000001.json");
+    let bytes = std::fs::read(&revision).unwrap();
+    assert!(store::append(&folder, &delta).is_err());
+    assert_eq!(std::fs::read(revision).unwrap(), bytes);
+    let (context, _) = context_store::update(&folder, &WorkspaceContext::default())
+        .expect("publish context revision");
+    drop(writer);
+    let restored = read_state(&folder).unwrap();
+    assert_eq!(restored.entities, next.entities);
+    assert_eq!(restored.context, context);
+}
+
 #[test]
 /// The previous prompt stays readable but cannot acquire new answers from changed instructions.
 fn previous_quality_prompt_is_read_only_and_keeps_its_saved_folder() {

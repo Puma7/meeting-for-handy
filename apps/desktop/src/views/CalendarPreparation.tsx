@@ -99,7 +99,9 @@ export function calendarEvents(
         event.title = calendarText(value, 200).replace(/\s+/g, " ");
       if (name === "DESCRIPTION") event.agenda = calendarText(value, 4000);
       if (
-        ["RRULE", "RDATE", "RECURRENCE-ID"].includes(name) ||
+        ["RRULE", "RDATE", "EXDATE", "EXRULE", "RECURRENCE-ID"].includes(
+          name,
+        ) ||
         (name === "STATUS" && marker === "CANCELLED")
       ) {
         unsupported = true;

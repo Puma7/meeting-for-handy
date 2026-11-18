@@ -273,13 +273,13 @@ fn verify_saved_evidence(state: &WorkspaceState) -> Result<()> {
 /// Sync a bounded delta and publish it without replacing any existing revision.
 pub(crate) fn append(folder: &Path, delta: &Delta) -> Result<()> {
     // Same-directory durable temp + no-clobber publication. A partial temp is never replayed.
-    let mut temp = tempfile::NamedTempFile::new_in(folder)?;
+    let target = folder.join(format!("revision-{:08}.json", delta.revision));
+    let (mut temp, target) = crate::service::pending_publication(&target, ".tmp")?;
     let bytes = serde_json::to_vec(delta)?;
     ensure!(bytes.len() <= 2_000_000, "Meetingänderung ist zu groß.");
     temp.write_all(&bytes)?;
     temp.as_file().sync_all()?;
-    temp.persist_noclobber(folder.join(format!("revision-{:08}.json", delta.revision)))
-        .map_err(|e| e.error)?;
+    temp.persist_noclobber(target).map_err(|e| e.error)?;
     #[cfg(unix)]
     File::open(folder)?.sync_all()?;
     Ok(())

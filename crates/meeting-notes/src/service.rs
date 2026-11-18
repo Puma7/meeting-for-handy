@@ -11,7 +11,7 @@ use std::{
     collections::HashSet,
     fs,
     io::{Read, Write},
-    path::Path,
+    path::{Path, PathBuf},
 };
 /// Hashes the ordered serialized source snapshot to bind saved work to its original input text.
 pub fn source_hash(sources: &[Source]) -> Result<String> {
@@ -20,10 +20,29 @@ pub fn source_hash(sources: &[Source]) -> Result<String> {
         Sha256::digest(serde_json::to_vec(sources)?)
     ))
 }
+/// Prepare both names in the same directory. tempfile passes them directly to
+/// Win32 when publishing, so both need the extended path for a deep profile.
+pub(crate) fn pending_publication(
+    path: &Path,
+    prefix: &str,
+) -> Result<(tempfile::NamedTempFile, PathBuf)> {
+    let directory = path.parent().context("Auswertungsordner fehlt.")?;
+    #[cfg(windows)]
+    let directory = fs::canonicalize(if directory.as_os_str().is_empty() {
+        Path::new(".")
+    } else {
+        directory
+    })?;
+    let destination = directory.join(path.file_name().context("Dateiname fehlt.")?);
+    let file = tempfile::Builder::new()
+        .prefix(prefix)
+        .tempfile_in(directory)?;
+    Ok((file, destination))
+}
+
 /// Syncs a new JSON work state and atomically commits it without replacing an existing version.
 pub(crate) fn create_json(path: &Path, data: &impl Serialize) -> Result<()> {
-    let mut file =
-        tempfile::NamedTempFile::new_in(path.parent().context("Auswertungsordner fehlt.")?)?;
+    let (mut file, path) = pending_publication(path, ".tmp")?;
     file.write_all(&serde_json::to_vec_pretty(data)?)?;
     file.as_file().sync_all()?;
     file.persist_noclobber(path).map_err(|_|anyhow::anyhow!("Auswertungsstand konnte nicht atomar gespeichert werden; bestehende Fassungen bleiben erhalten."))?;
@@ -511,8 +530,7 @@ fn create_export(path: &Path, bytes: &[u8]) -> Result<()> {
         ensure!(fs::read(path)?==bytes,"Ein gespeicherter Export weicht vom bestätigten Auswertungsstand ab; vorhandene Daten bleiben erhalten.");
         return Ok(());
     }
-    let mut file =
-        tempfile::NamedTempFile::new_in(path.parent().context("Auswertungsordner fehlt.")?)?;
+    let (mut file, path) = pending_publication(path, ".tmp")?;
     file.write_all(bytes)?;
     file.as_file().sync_all()?;
     file.persist_noclobber(path).map_err(|_| {
