@@ -289,6 +289,61 @@ fn codex_review_translated_task_closes_from_original_language_evidence() {
 }
 
 #[test]
+fn translated_completion_uses_the_promised_object_in_both_directions() {
+    for (locale, title, promise, near_miss, done) in [
+        (
+            "en",
+            "Send the report",
+            "Mara sagt: Ich verschicke den Bericht bis Freitag.",
+            "Mara sagt: Ich habe den Entwurf für den Bericht verschickt.",
+            "Mara sagt: Ich habe den Bericht verschickt.",
+        ),
+        (
+            "en",
+            "Prepare the checklist",
+            "Mara sagt: Ich erstelle die Checkliste bis Dienstag.",
+            "Mara sagt: Ich habe die Vorlage für die Checkliste erstellt.",
+            "Mara sagt: Ich habe die Checkliste erstellt.",
+        ),
+        (
+            "de",
+            "Checkliste erstellen",
+            "Mara says: I will prepare the checklist by Tuesday.",
+            "Mara says: I have prepared a draft for the checklist.",
+            "Mara says: I have prepared the checklist.",
+        ),
+    ] {
+        let mut state = WorkspaceState::default();
+        let original = source("s_original", 0, promise);
+        let mut req = request(&state, "tasks", &original);
+        req.language = locale.into();
+        validate::apply(&mut state, &req, &answer(json!([{
+            "proposalId":"p_task","kind":"task","text":title,"status":"open","attention":"normal","owner":"Mara",
+            "evidence":[{"sourceId":original.id,"quote":promise}]
+        }]))).unwrap();
+        state.originals.push(original);
+        let task = state.entities[0].clone();
+        for (quote, expected) in [(near_miss, "open"), (done, "completed")] {
+            let report = source("s_report", 3000, quote);
+            let mut req = request(&state, "tasks", &report);
+            req.language = locale.into();
+            let change = json!([{"proposalId":"p_done","kind":"task","targetId":task.id,"targetRevision":task.revision,
+                "text":null,"status":"completed","attention":"normal","evidence":[{"sourceId":report.id,"quote":quote}]}]);
+            for changes in [change, json!([])] {
+                let mut updated = state.clone();
+                let result = validate::apply(&mut updated, &req, &answer(changes));
+                if expected == "completed" {
+                    result.unwrap();
+                }
+                assert_eq!(updated.entities[0].status, expected, "{title}: {quote}");
+                assert_eq!(updated.entities[0].id, task.id);
+                assert_eq!(updated.entities[0].due, task.due);
+            }
+        }
+    }
+}
+
+#[test]
 fn codex_review_long_transcript_keeps_bounded_original_assertions() {
     for (phase, kind, assertion, title, status, allowed) in [
         (
