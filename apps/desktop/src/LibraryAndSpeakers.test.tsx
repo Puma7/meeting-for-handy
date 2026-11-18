@@ -28,7 +28,7 @@ it.each([
     "Unpin VIP and remove protection from automatic cleanup.",
   ],
 ] as const)(
-  "explains VIP protection visibly before activation and after pinning (%s)",
+  "explains VIP protection through the tooltip and accessible description (%s)",
   async (locale, explanation, pinAction, unpinAction) => {
     const unpinned = {
       revision: 1,
@@ -65,7 +65,7 @@ it.each([
         />,
       );
       const help = screen.getByText(explanation);
-      expect(help.hidden).toBe(false);
+      expect(help.classList.contains("sr-only")).toBe(true);
       expect(help.closest("[hidden], details:not([open])")).toBeNull();
       const button = screen.getByRole("button", { pressed: pinned });
       expect(button.getAttribute("aria-describedby")).toBe(help.id);

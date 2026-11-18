@@ -63,9 +63,7 @@ export default function SetupProbe({
           }
         }}
       >
-        {de
-          ? "Synthetische Funktionsprobe starten"
-          : "Run synthetic setup check"}
+        {de ? "Mit Testdaten prüfen" : "Check with sample data"}
       </button>
       {running && cancel && (
         <button
@@ -87,8 +85,8 @@ export default function SetupProbe({
       )}
       <p>
         {de
-          ? "Ein Testton prüft Audiospeicherung und Transkriptionssoftware. Testtext prüft das gewählte lokale Textmodell. Die Erkennung von Wörtern und die Aufnahmegeräte brauchen separate Prüfungen."
-          : "A test tone checks audio storage and the transcription software. Sample text checks the selected local text model. Word recognition and recording devices need separate tests."}
+          ? "Prüft die Speicherung und Transkriptionssoftware mit einem Testton, das lokale Textmodell mit Beispieltext. Mikrofon und Worterkennung prüfst du mit einer kurzen Aufnahme."
+          : "Checks storage and transcription software with a test tone, and the local text model with sample text. Use a short recording to check your microphone and word recognition."}
       </p>
       <div role="status">
         {running &&

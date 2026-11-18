@@ -154,7 +154,7 @@ export default function MeetingLabels({
         </button>
       )}
       {!editing && (
-        <p id={pinHelpId} className="muted">
+        <p id={pinHelpId} className="sr-only">
           {de
             ? "VIP hält das Meeting oben in der Historie und schützt vor automatischem Aufräumen. Manuelles Löschen bleibt möglich."
             : "VIP keeps the meeting at the top of history and protects it from automatic cleanup. Manual deletion is still possible."}

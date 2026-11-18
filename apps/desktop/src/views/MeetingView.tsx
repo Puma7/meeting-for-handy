@@ -65,6 +65,7 @@ type Props = {
   setMicId: (v: string) => void;
   setMicEnabled: (v: boolean) => void;
   refreshHandy: () => void;
+  refreshingHandy?: boolean;
   /** Re-reads the audio devices, for example after connecting a headset. */
   refreshDevices?: () => void;
   textModelCheck?: {
@@ -139,6 +140,7 @@ export default function MeetingView({
   setMicId,
   setMicEnabled,
   refreshHandy,
+  refreshingHandy = false,
   refreshDevices,
   textModelCheck,
   start,
@@ -154,6 +156,7 @@ export default function MeetingView({
   onLiveFocus,
 }: Props) {
   const [setupOpen, setSetupOpen] = useState(!meeting && !recording);
+  const [optionsOpen, setOptionsOpen] = useState(false);
   const de = locale === "de";
   const selectedModel = models.find(({ id }) => id === modelId);
   const audioDevicesReady =
@@ -239,10 +242,25 @@ export default function MeetingView({
                       ? "Aufnahme pausiert"
                       : "Recording paused"
                     : t.recording
-                  : connected && modelId && systemId
+                  : recognitionReady && audioDevicesReady
                     ? t.ready
                     : t.choose}
           </span>
+          {!recording && !isStopping && connected && app && (
+            <span className="handy-readiness">
+              {app.handy?.executable || app.handy?.version
+                ? de
+                  ? "Handy gefunden"
+                  : "Handy detected"
+                : refreshingHandy
+                  ? de
+                    ? "Handy wird gesucht …"
+                    : "Looking for Handy …"
+                  : de
+                    ? "Handy nicht gefunden"
+                    : "Handy not detected"}
+            </span>
+          )}
           {recording || isStopping ? (
             <button
               className="danger"
@@ -286,63 +304,6 @@ export default function MeetingView({
               {models.find((model) => model.id === modelId)?.name ?? t.choose}
             </span>
           </summary>
-          {setupOpen && !recording && textModelCheck && (
-            <div
-              className="setup-readiness"
-              aria-label={de ? "Einrichtung prüfen" : "Check setup"}
-            >
-              <ul>
-                <li>
-                  Audio ·{" "}
-                  {audioDevicesReady
-                    ? de
-                      ? "Geräte erkannt"
-                      : "Devices found"
-                    : de
-                      ? "Aufnahmegeräte auswählen oder aktualisieren"
-                      : "Select or refresh recording devices"}
-                </li>
-                <li>
-                  {de ? "Transkription" : "Transcription"} ·{" "}
-                  {recognitionReady
-                    ? de
-                      ? "Handy-Modell verfügbar"
-                      : "Handy model available"
-                    : de
-                      ? "Kompatibles Handy-Modell auswählen"
-                      : "Select a compatible Handy model"}
-                </li>
-                <li role="status">
-                  {de ? "Textauswertung" : "Text analysis"} ·{" "}
-                  {modelStatus[textModelCheck.state]}
-                </li>
-              </ul>
-              {textModelCheck.state !== "cloud" &&
-                textModelCheck.state !== "unconfigured" && (
-                  <button
-                    type="button"
-                    className="secondary"
-                    disabled={
-                      !connected || busy || textModelCheck.state === "checking"
-                    }
-                    onClick={textModelCheck.check}
-                  >
-                    {de
-                      ? "Lokalen Textdienst prüfen"
-                      : "Check local text service"}
-                  </button>
-                )}
-              {textModelCheck.probe && (
-                <SetupProbe
-                  key={textModelCheck.probeKey}
-                  run={textModelCheck.probe}
-                  cancel={textModelCheck.cancelProbe}
-                  disabled={!recognitionReady || busy}
-                  locale={locale}
-                />
-              )}
-            </div>
-          )}
           <div className="setup-grid">
             <label className="full">
               {t.title}
@@ -390,7 +351,6 @@ export default function MeetingView({
             </label>
           </div>
         </details>
-        {!recording && !isStopping && calendarPreparation}
         <AudioSources
           compact={recording && !setupOpen}
           t={t}
@@ -414,6 +374,67 @@ export default function MeetingView({
           canReconnectMicrophone={app?.microphoneReconnectAvailable}
           onReconnectMicrophone={onReconnectMicrophone}
         />
+        {!recording &&
+          !isStopping &&
+          (textModelCheck || calendarPreparation) && (
+            <details
+              className="meeting-options full"
+              onToggle={(event) => {
+                if (event.target === event.currentTarget)
+                  setOptionsOpen(event.currentTarget.open);
+              }}
+            >
+              <summary
+                title={
+                  de
+                    ? "Kalenderdatei öffnen oder die Einrichtung mit Testdaten prüfen."
+                    : "Open a calendar file or check the setup with sample data."
+                }
+              >
+                {de ? "Weitere Optionen" : "More options"}
+              </summary>
+              {calendarPreparation}
+              {textModelCheck && (
+                <div
+                  className="setup-readiness"
+                  aria-label={de ? "Einrichtung prüfen" : "Check setup"}
+                >
+                  <ul>
+                    <li role="status">
+                      {de ? "Textauswertung" : "Text analysis"} ·{" "}
+                      {modelStatus[textModelCheck.state]}
+                    </li>
+                  </ul>
+                  {textModelCheck.state !== "cloud" &&
+                    textModelCheck.state !== "unconfigured" && (
+                      <button
+                        type="button"
+                        className="secondary"
+                        disabled={
+                          !connected ||
+                          busy ||
+                          textModelCheck.state === "checking"
+                        }
+                        onClick={textModelCheck.check}
+                      >
+                        {de
+                          ? "Lokalen Textdienst prüfen"
+                          : "Check local text service"}
+                      </button>
+                    )}
+                  {optionsOpen && textModelCheck.probe && (
+                    <SetupProbe
+                      key={textModelCheck.probeKey}
+                      run={textModelCheck.probe}
+                      cancel={textModelCheck.cancelProbe}
+                      disabled={!recognitionReady || busy}
+                      locale={locale}
+                    />
+                  )}
+                </div>
+              )}
+            </details>
+          )}
         {recording && controlsAvailable && app?.captureControl && (
           <RecordingControls
             control={app.captureControl}
@@ -485,112 +506,116 @@ export default function MeetingView({
             </button>
           </div>
         )}
-      <div
-        className="detail-actions meeting-quick-actions"
-        role="group"
-        aria-label={locale === "de" ? "Meetingaktionen" : "Meeting actions"}
-      >
-        {meeting && (
-          <span
-            className="meeting-current-title"
-            role="group"
-            aria-label={
-              locale === "de" ? "Angezeigtes Meeting" : "Displayed meeting"
-            }
-            title={meeting.title}
-          >
-            {meeting.title}
-          </span>
-        )}
-        {workspaceSwitcher}
-        <button
-          className="secondary"
-          disabled={
-            busy || !meeting?.parts.some((item) => (item.text ?? "").trim())
-          }
-          title={t.copyTooltip}
-          onClick={() => void copyFullTranscript()}
-        >
-          {copied ? <Check size={16} /> : <Copy size={16} />}
-          <span>{copied ? t.copied : t.copy}</span>
-        </button>
-        {meeting?.status === "complete" && (
-          <button
-            className="primary"
-            disabled={busy || !recentParts.length}
-            onClick={onAnalyse}
-            title={t.analyzeMeetingTooltip}
-          >
-            <Sparkles size={16} />
-            {t.analyzeMeeting}
-          </button>
-        )}
-      </div>
-      <div className="meeting-workspace-frame">
-        {liveNotes && onLiveFocus && (
+      {meeting && (
+        <>
           <div
-            className="meeting-view-choice"
+            className="detail-actions meeting-quick-actions"
             role="group"
-            aria-label={locale === "de" ? "Meetingansicht" : "Meeting view"}
+            aria-label={locale === "de" ? "Meetingaktionen" : "Meeting actions"}
           >
-            <button
-              className="secondary"
-              aria-pressed={!liveFocus}
-              title={t.showTranscriptTooltip}
-              onClick={() => onLiveFocus(false)}
-            >
-              {locale === "de" ? "Transkript" : "Transcript"}
-            </button>
-            <button
-              className="secondary"
-              aria-pressed={liveFocus}
-              title={t.showLiveSummaryTooltip}
-              onClick={() => onLiveFocus(true)}
-            >
-              {locale === "de" ? "Zusammenfassung" : "Summary"}
-            </button>
-          </div>
-        )}
-        <div
-          className={`meeting-workspace${liveNotes ? " with-live" : ""}${
-            liveNotes && liveFocus ? " live-focus" : ""
-          }`}
-        >
-          <section className="transcript-panel">
             {meeting && (
-              <div className="meeting-files">
-                <MeetingFiles
-                  t={t}
-                  disabled={busy || !connected}
-                  onOpenFolder={onOpenFolder}
-                  onExport={onExport}
-                  savedFile={savedFile}
-                />
-              </div>
-            )}
-            {meeting?.livePreviewLimited && loadFullTranscript && (
-              <button
-                className="text-button"
-                disabled={transcriptLoading}
-                title={t.loadTranscriptTooltip}
-                onClick={() => void loadFullTranscript()}
+              <span
+                className="meeting-current-title"
+                role="group"
+                aria-label={
+                  locale === "de" ? "Angezeigtes Meeting" : "Displayed meeting"
+                }
+                title={meeting.title}
               >
-                {transcriptLoading
-                  ? locale === "de"
-                    ? "Frühere Abschnitte werden geladen …"
-                    : "Loading earlier sections …"
-                  : locale === "de"
-                    ? "Gesamtes Transkript laden"
-                    : "Load complete transcript"}
+                {meeting.title}
+              </span>
+            )}
+            {workspaceSwitcher}
+            <button
+              className="secondary"
+              disabled={
+                busy || !meeting?.parts.some((item) => (item.text ?? "").trim())
+              }
+              title={t.copyTooltip}
+              onClick={() => void copyFullTranscript()}
+            >
+              {copied ? <Check size={16} /> : <Copy size={16} />}
+              <span>{copied ? t.copied : t.copy}</span>
+            </button>
+            {meeting?.status === "complete" && (
+              <button
+                className="primary"
+                disabled={busy || !recentParts.length}
+                onClick={onAnalyse}
+                title={t.analyzeMeetingTooltip}
+              >
+                <Sparkles size={16} />
+                {t.analyzeMeeting}
               </button>
             )}
-            {workspace ?? (
-              <TranscriptBody parts={recentParts} locale={locale} t={t} />
+          </div>
+          <div className="meeting-workspace-frame">
+            {liveNotes && onLiveFocus && (
+              <div
+                className="meeting-view-choice"
+                role="group"
+                aria-label={locale === "de" ? "Meetingansicht" : "Meeting view"}
+              >
+                <button
+                  className="secondary"
+                  aria-pressed={!liveFocus}
+                  title={t.showTranscriptTooltip}
+                  onClick={() => onLiveFocus(false)}
+                >
+                  {locale === "de" ? "Transkript" : "Transcript"}
+                </button>
+                <button
+                  className="secondary"
+                  aria-pressed={liveFocus}
+                  title={t.showLiveSummaryTooltip}
+                  onClick={() => onLiveFocus(true)}
+                >
+                  {locale === "de" ? "Zusammenfassung" : "Summary"}
+                </button>
+              </div>
             )}
-          </section>
-          {liveNotes}
-        </div>
-      </div>
+            <div
+              className={`meeting-workspace${liveNotes ? " with-live" : ""}${
+                liveNotes && liveFocus ? " live-focus" : ""
+              }`}
+            >
+              <section className="transcript-panel">
+                {meeting && (
+                  <div className="meeting-files">
+                    <MeetingFiles
+                      t={t}
+                      disabled={busy || !connected}
+                      onOpenFolder={onOpenFolder}
+                      onExport={onExport}
+                      savedFile={savedFile}
+                    />
+                  </div>
+                )}
+                {meeting?.livePreviewLimited && loadFullTranscript && (
+                  <button
+                    className="text-button"
+                    disabled={transcriptLoading}
+                    title={t.loadTranscriptTooltip}
+                    onClick={() => void loadFullTranscript()}
+                  >
+                    {transcriptLoading
+                      ? locale === "de"
+                        ? "Frühere Abschnitte werden geladen …"
+                        : "Loading earlier sections …"
+                      : locale === "de"
+                        ? "Gesamtes Transkript laden"
+                        : "Load complete transcript"}
+                  </button>
+                )}
+                {workspace ?? (
+                  <TranscriptBody parts={recentParts} locale={locale} t={t} />
+                )}
+              </section>
+              {liveNotes}
+            </div>
+          </div>
+        </>
+      )}
     </>
   );
 }
