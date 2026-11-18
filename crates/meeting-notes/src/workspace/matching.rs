@@ -566,20 +566,31 @@ fn owned_report<'a>(owner: &str, quote: &'a str) -> Option<&'a str> {
 pub(super) fn literal_completion(lowercase_report: &str) -> Option<(&'static str, &str)> {
     // A draft for the checklist is a different object from the checklist itself.
     let statement = lowercase_report.trim().trim_end_matches(['.', '!']);
-    for (verb, prefix, suffix) in [
-        ("verschicken", "ich habe ", " verschickt"),
-        ("erstellen", "ich habe ", " erstellt"),
-        ("prepare", "i have prepared ", ""),
-        ("prepare", "i prepared ", ""),
-    ] {
-        if let Some(object) = statement
-            .strip_prefix(prefix)
-            .and_then(|s| s.strip_suffix(suffix))
-        {
-            return Some((verb, object));
-        }
+    if let Some(predicate) = statement
+        .strip_prefix("ich habe ")
+        .or_else(|| statement.strip_prefix("wir haben "))
+    {
+        return [("verschicken", " verschickt"), ("erstellen", " erstellt")]
+            .into_iter()
+            .find_map(|(verb, suffix)| {
+                predicate.strip_suffix(suffix).map(|object| (verb, object))
+            });
     }
-    None
+    let predicate = [
+        "i have ", "we have ", "i've ", "we've ", "i’ve ", "we’ve ", "i ", "we ",
+    ]
+    .iter()
+    .find_map(|prefix| statement.strip_prefix(prefix))?;
+    let mut predicate = predicate.trim_start();
+    while let Some((word, rest)) = predicate.split_once(char::is_whitespace) {
+        if !super::assertions::AFFIRMATIVE_PREDICATE_ADVERBS.contains(&word) {
+            break;
+        }
+        predicate = rest.trim_start();
+    }
+    predicate
+        .strip_prefix("prepared ")
+        .map(|object| ("prepare", object))
 }
 
 fn literal_task_matches(task: &Entity, verb: &str, object: &str) -> bool {
@@ -640,7 +651,38 @@ fn same_action_object(title: &str, verb: &str, object: &str) -> bool {
     };
     let spoken: Vec<_> = object.split_whitespace().map(str::to_lowercase).collect();
     let target = without_article(target);
-    !target.is_empty() && target == without_article(&spoken)
+    if target.is_empty() {
+        return false;
+    }
+    if target == without_article(&spoken) {
+        return true;
+    }
+    // Time words at the edges modify the action. Keep every word inside the
+    // object, including "draft for" or "Vorlage für".
+    let timing = |s: &String| {
+        matches!(
+            s.as_str(),
+            "bereits"
+                | "schon"
+                | "gestern"
+                | "heute"
+                | "soeben"
+                | "inzwischen"
+                | "already"
+                | "yesterday"
+                | "today"
+                | "just"
+                | "now"
+        )
+    };
+    let mut words = spoken.as_slice();
+    while words.first().is_some_and(timing) {
+        words = &words[1..];
+    }
+    while words.last().is_some_and(timing) {
+        words = &words[..words.len() - 1];
+    }
+    target == without_article(words)
 }
 
 fn completion_action_matches(action_text: &str, report: &str) -> bool {

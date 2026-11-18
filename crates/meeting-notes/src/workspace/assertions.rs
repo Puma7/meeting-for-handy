@@ -320,7 +320,7 @@ fn subordinate_start(words: &[&str], start: usize, predicate: usize) -> Option<u
         .map(|at| start + at + 1)
 }
 
-const AFFIRMATIVE_PREDICATE_ADVERBS: &[&str] = &[
+pub(super) const AFFIRMATIVE_PREDICATE_ADVERBS: &[&str] = &[
     "already",
     "just",
     "now",

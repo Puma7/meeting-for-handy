@@ -290,13 +290,14 @@ fn codex_review_translated_task_closes_from_original_language_evidence() {
 
 #[test]
 fn translated_completion_uses_the_promised_object_in_both_directions() {
-    for (locale, title, promise, near_miss, done) in [
+    for (locale, title, promise, near_miss, done, timed) in [
         (
             "en",
             "Send the report",
             "Mara sagt: Ich verschicke den Bericht bis Freitag.",
-            "Mara sagt: Ich habe den Entwurf für den Bericht verschickt.",
+            "Mara sagt: Ich habe den Entwurf für den Bericht bereits gestern verschickt.",
             "Mara sagt: Ich habe den Bericht verschickt.",
+            "Mara sagt: Ich habe den Bericht bereits gestern verschickt.",
         ),
         (
             "en",
@@ -304,13 +305,15 @@ fn translated_completion_uses_the_promised_object_in_both_directions() {
             "Mara sagt: Ich erstelle die Checkliste bis Dienstag.",
             "Mara sagt: Ich habe die Vorlage für die Checkliste erstellt.",
             "Mara sagt: Ich habe die Checkliste erstellt.",
+            "Mara sagt: Ich habe gestern die Checkliste erstellt.",
         ),
         (
             "de",
             "Checkliste erstellen",
             "Mara says: I will prepare the checklist by Tuesday.",
-            "Mara says: I have prepared a draft for the checklist.",
+            "Mara says: I have already prepared a draft for the checklist yesterday.",
             "Mara says: I have prepared the checklist.",
+            "Mara says: I have already prepared the checklist yesterday.",
         ),
     ] {
         let mut state = WorkspaceState::default();
@@ -323,7 +326,11 @@ fn translated_completion_uses_the_promised_object_in_both_directions() {
         }]))).unwrap();
         state.originals.push(original);
         let task = state.entities[0].clone();
-        for (quote, expected) in [(near_miss, "open"), (done, "completed")] {
+        for (quote, expected) in [
+            (near_miss, "open"),
+            (done, "completed"),
+            (timed, "completed"),
+        ] {
             let report = source("s_report", 3000, quote);
             let mut req = request(&state, "tasks", &report);
             req.language = locale.into();
