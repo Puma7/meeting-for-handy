@@ -165,6 +165,18 @@ try {
         foreach ($file in $provided) {
             $relative = [IO.Path]::GetRelativePath($folder, $file.FullName).Replace('\', '/')
             $bytes = [IO.File]::ReadAllBytes($file.FullName)
+            # The gtk-rs Git tree links each crate's notices to the repository root.
+            # On Windows these links may check out as short text files.
+            if ($package.source -eq 'git+https://github.com/gtk-rs/gtk-rs-core?rev=ea720152f28e293ef4362ee844ee5cc499f32d2a#ea720152f28e293ef4362ee844ee5cc499f32d2a') {
+                $noticeHashes = @{
+                    LICENSE = '8cf56d10131ce201cf69ab74b111d3ebac1acca3833d7efb39ae357224b70edb'
+                    COPYRIGHT = 'dae402989de65164815b7e2b6bc2b9576285434c3785934c8b6ece0fa055960d'
+                }
+                $gtkRoot = & git -C $folder rev-parse --show-toplevel
+                if ($LASTEXITCODE -ne 0 -or !$noticeHashes.ContainsKey($relative)) { throw 'Unrecognized gtk-rs license source.' }
+                $bytes = [IO.File]::ReadAllBytes((Join-Path $gtkRoot $relative))
+                if ((Hash-Bytes $bytes) -ne $noticeHashes[$relative]) { throw 'The gtk-rs license differs from the pinned notice.' }
+            }
             if ($checksums -and $checksums.files.ContainsKey($relative) -and (Hash-Bytes $bytes) -ne $checksums.files[$relative]) { throw ('Crate license checksum mismatch: ' + $package.name) }
             $entry = Save-License $rustOutput $package.name $package.version $relative $bytes
             $entry.Source = 'provided-crate-file'

@@ -1,6 +1,6 @@
 {
   "Target": "x86_64-unknown-linux-gnu",
-  "CargoLockSHA256": "bc362165f9107e0b4d1beb37080ae1787bd336fcfaf620462a878a5945c1e292",
+  "CargoLockSHA256": "5395d8536357a4a841d5a94a617d4cddd7bf1b9758bf8a4088351984cae6143e",
   "Scope": "Active Cargo resolve nodes, including build dependencies, filtered to this target; excludes workspace packages.",
   "PackageCount": 420,
   "Packages": [
@@ -2827,15 +2827,15 @@
     },
     {
       "Name": "gio-sys",
-      "Version": "0.18.1",
+      "Version": "0.18.5",
       "SPDX": "MIT",
       "Repository": "https://github.com/gtk-rs/gtk-rs-core",
-      "Source": "registry+https://github.com/rust-lang/crates.io-index",
-      "SourceArchive": "https://crates.io/api/v1/crates/gio-sys/0.18.1/download",
+      "Source": "git+https://github.com/gtk-rs/gtk-rs-core?rev=ea720152f28e293ef4362ee844ee5cc499f32d2a#ea720152f28e293ef4362ee844ee5cc499f32d2a",
+      "SourceArchive": "git+https://github.com/gtk-rs/gtk-rs-core?rev=ea720152f28e293ef4362ee844ee5cc499f32d2a#ea720152f28e293ef4362ee844ee5cc499f32d2a",
       "LicenseFiles": [
         {
           "OriginalFilename": "LICENSE",
-          "File": "gio-sys-0.18.1-LICENSE.txt",
+          "File": "gio-sys-0.18.5-LICENSE.txt",
           "SHA256": "8cf56d10131ce201cf69ab74b111d3ebac1acca3833d7efb39ae357224b70edb",
           "Source": "provided-crate-file"
         }
@@ -2846,8 +2846,8 @@
       "Version": "0.18.5",
       "SPDX": "MIT",
       "Repository": "https://github.com/gtk-rs/gtk-rs-core",
-      "Source": "registry+https://github.com/rust-lang/crates.io-index",
-      "SourceArchive": "https://crates.io/api/v1/crates/glib/0.18.5/download",
+      "Source": "git+https://github.com/gtk-rs/gtk-rs-core?rev=ea720152f28e293ef4362ee844ee5cc499f32d2a#ea720152f28e293ef4362ee844ee5cc499f32d2a",
+      "SourceArchive": "git+https://github.com/gtk-rs/gtk-rs-core?rev=ea720152f28e293ef4362ee844ee5cc499f32d2a#ea720152f28e293ef4362ee844ee5cc499f32d2a",
       "LicenseFiles": [
         {
           "OriginalFilename": "COPYRIGHT",
@@ -2868,8 +2868,8 @@
       "Version": "0.18.5",
       "SPDX": "MIT",
       "Repository": "https://github.com/gtk-rs/gtk-rs-core",
-      "Source": "registry+https://github.com/rust-lang/crates.io-index",
-      "SourceArchive": "https://crates.io/api/v1/crates/glib-macros/0.18.5/download",
+      "Source": "git+https://github.com/gtk-rs/gtk-rs-core?rev=ea720152f28e293ef4362ee844ee5cc499f32d2a#ea720152f28e293ef4362ee844ee5cc499f32d2a",
+      "SourceArchive": "git+https://github.com/gtk-rs/gtk-rs-core?rev=ea720152f28e293ef4362ee844ee5cc499f32d2a#ea720152f28e293ef4362ee844ee5cc499f32d2a",
       "LicenseFiles": [
         {
           "OriginalFilename": "COPYRIGHT",
@@ -2887,15 +2887,15 @@
     },
     {
       "Name": "glib-sys",
-      "Version": "0.18.1",
+      "Version": "0.18.5",
       "SPDX": "MIT",
       "Repository": "https://github.com/gtk-rs/gtk-rs-core",
-      "Source": "registry+https://github.com/rust-lang/crates.io-index",
-      "SourceArchive": "https://crates.io/api/v1/crates/glib-sys/0.18.1/download",
+      "Source": "git+https://github.com/gtk-rs/gtk-rs-core?rev=ea720152f28e293ef4362ee844ee5cc499f32d2a#ea720152f28e293ef4362ee844ee5cc499f32d2a",
+      "SourceArchive": "git+https://github.com/gtk-rs/gtk-rs-core?rev=ea720152f28e293ef4362ee844ee5cc499f32d2a#ea720152f28e293ef4362ee844ee5cc499f32d2a",
       "LicenseFiles": [
         {
           "OriginalFilename": "LICENSE",
-          "File": "glib-sys-0.18.1-LICENSE.txt",
+          "File": "glib-sys-0.18.5-LICENSE.txt",
           "SHA256": "8cf56d10131ce201cf69ab74b111d3ebac1acca3833d7efb39ae357224b70edb",
           "Source": "provided-crate-file"
         }
@@ -2925,15 +2925,15 @@
     },
     {
       "Name": "gobject-sys",
-      "Version": "0.18.0",
+      "Version": "0.18.5",
       "SPDX": "MIT",
       "Repository": "https://github.com/gtk-rs/gtk-rs-core",
-      "Source": "registry+https://github.com/rust-lang/crates.io-index",
-      "SourceArchive": "https://crates.io/api/v1/crates/gobject-sys/0.18.0/download",
+      "Source": "git+https://github.com/gtk-rs/gtk-rs-core?rev=ea720152f28e293ef4362ee844ee5cc499f32d2a#ea720152f28e293ef4362ee844ee5cc499f32d2a",
+      "SourceArchive": "git+https://github.com/gtk-rs/gtk-rs-core?rev=ea720152f28e293ef4362ee844ee5cc499f32d2a#ea720152f28e293ef4362ee844ee5cc499f32d2a",
       "LicenseFiles": [
         {
           "OriginalFilename": "LICENSE",
-          "File": "gobject-sys-0.18.0-LICENSE.txt",
+          "File": "gobject-sys-0.18.5-LICENSE.txt",
           "SHA256": "8cf56d10131ce201cf69ab74b111d3ebac1acca3833d7efb39ae357224b70edb",
           "Source": "provided-crate-file"
         }

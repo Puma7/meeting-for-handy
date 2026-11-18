@@ -343,6 +343,23 @@ jobs:
         run: |
           set -euo pipefail
           cargo audit
+      - name: Verify the GTK3 security backport in the Cargo lock
+        # RustSec classifies this issue as an unsoundness warning. A normal audit
+        # can pass even when the vulnerable registry source returns to the graph.
+        run: |
+          python3 - <<'PY'
+          import pathlib
+          import tomllib
+
+          packages = tomllib.loads(pathlib.Path("Cargo.lock").read_text())["package"]
+          revision = "ea720152f28e293ef4362ee844ee5cc499f32d2a"
+          backport = f"git+https://github.com/gtk-rs/gtk-rs-core?rev={revision}#{revision}"
+          for package in packages:
+              if package["name"] == "glib":
+                  series = tuple(map(int, package["version"].split(".")[:2]))
+                  if (0, 15) <= series < (0, 20) and package.get("source") != backport:
+                      raise SystemExit("glib in the affected range must use the reviewed GTK3 backport")
+          PY
 # Source checks use synthetic data. Complete candidates additionally exercise the
 # exact release executable, isolated native store and installer. Neither mode proves
 # real-device/endurance capture or publishes a release.
