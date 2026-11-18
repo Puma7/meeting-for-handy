@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
-import { RefreshCw, Square } from "lucide-react";
+import { RefreshCw } from "lucide-react";
+import CancelJobButton from "./CancelJobButton";
 import { clock } from "../domain";
 import { errorMessage } from "../api";
 import { startAdaptivePoll } from "../jobPolling";
@@ -108,18 +109,16 @@ export default function MaintenanceStatus({
       </p>
       {(job.error || error) && <p role="alert">{error ?? job.error}</p>}
       {running ? (
-        <button
-          className="secondary"
-          disabled={job.cancelRequested}
-          onClick={() =>
-            void api
-              .cancelMaintenance?.(job.jobId)
-              .catch((e) => setError(errorMessage(e)))
-          }
-        >
-          <Square size={14} />
-          {de ? "Aufbewahrungsauftrag abbrechen" : "Cancel retention job"}
-        </button>
+        api.cancelMaintenance && (
+          <CancelJobButton
+            key={job.jobId}
+            requested={job.cancelRequested}
+            label={
+              de ? "Aufbewahrungsauftrag abbrechen" : "Cancel retention job"
+            }
+            cancel={() => api.cancelMaintenance!(job.jobId)}
+          />
+        )
       ) : (
         <button className="text-button" onClick={() => setHidden(job.jobId)}>
           {de ? "Hinweis schließen" : "Dismiss"}

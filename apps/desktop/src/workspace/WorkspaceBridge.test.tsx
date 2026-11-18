@@ -18,6 +18,66 @@ import { workspaceText } from "./shell/workspaceLocale.jsx";
 import MeetingView from "../views/MeetingView";
 import { de, en, extraDe, extraEn } from "../i18n";
 
+it("keeps automatically sized overview cards readable on short windows", () => {
+  const cards = Array.from({ length: 4 }, () => ({ height: 288 }));
+  const { heights, scrollable } = fitColumn(cards, 320);
+  expect(heights.every((height) => height >= 120)).toBe(true);
+  expect(scrollable).toBe(true);
+});
+
+it("moves focus and selection together across the meeting tabs from the keyboard", async () => {
+  const f = fixture();
+  render(
+    <LiveWorkspace adapter={f.adapter} meeting={f.meeting} onBack={() => {}} />,
+  );
+  const overview = await screen.findByRole("tab", { name: "Überblick" });
+  overview.focus();
+  for (const [key, name] of [
+    ["ArrowRight", "Details"],
+    ["End", "Verlauf"],
+    ["ArrowRight", "Vorbereitung"],
+    ["ArrowLeft", "Verlauf"],
+    ["Home", "Vorbereitung"],
+  ]) {
+    fireEvent.keyDown(document.activeElement!, { key });
+    const tab = screen.getByRole("tab", { name, selected: true });
+    expect(document.activeElement).toBe(tab);
+    expect(screen.getByRole("tabpanel", { name }).id).toBe(
+      tab.getAttribute("aria-controls"),
+    );
+    expect(
+      screen.getAllByRole("tab").filter((item) => item.tabIndex === 0),
+    ).toEqual([tab]);
+  }
+});
+
+it("offers an English return action when the native workspace is unavailable", async () => {
+  const back = vi.fn();
+  const meeting: Meeting = {
+    id: "synthetic",
+    title: "Test",
+    parts: [],
+    warnings: [],
+    startedAt: "2026-11-18T08:00:00Z",
+    durationMs: 0,
+    status: "complete",
+    modelId: "synthetic",
+  };
+  render(
+    <WorkspaceBridge
+      api={{} as DesktopApi}
+      meeting={meeting}
+      language="en"
+      endpoint=""
+      model=""
+      onBack={back}
+    />,
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Back to recording" }));
+  expect(back).toHaveBeenCalledOnce();
+  expect(screen.getByRole("status").textContent).toContain("unavailable");
+});
+
 it("can open an earlier unlocked workspace and its history without changing the live run", async () => {
   const f = fixture();
   const saved = {

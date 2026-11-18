@@ -141,9 +141,7 @@ impl<'a> TemplateStore<'a> {
         let path = self
             .0
             .join(format!("revision-{:016}.json", library.revision));
-        let mut file = tempfile::Builder::new()
-            .prefix("pending-template-")
-            .tempfile_in(self.0)?;
+        let (mut file, path) = crate::service::pending_publication(&path, "pending-template-")?;
         file.write_all(&bytes)?;
         file.as_file().sync_all()?;
         file.persist_noclobber(path).map_err(|_| {

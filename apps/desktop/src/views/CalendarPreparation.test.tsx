@@ -11,6 +11,24 @@ function eventStamp(time: number) {
 }
 
 describe("local calendar preparation", () => {
+  it("skips an excluded appointment while retaining a valid neighbouring event", () => {
+    const contents = [
+      "BEGIN:VCALENDAR",
+      "BEGIN:VEVENT",
+      "DTSTART:20261121T080000Z",
+      "SUMMARY:Excluded",
+      "EXDATE:20261121T080000Z",
+      "END:VEVENT",
+      "BEGIN:VEVENT",
+      "DTSTART:20261121T100000Z",
+      "SUMMARY:Confirmed",
+      "END:VEVENT",
+      "END:VCALENDAR",
+    ].join("\n");
+    expect(calendarEvents(contents).map((event) => event.title)).toEqual([
+      "Confirmed",
+    ]);
+  });
   it("reads one-off events, folded literal text and UTC without accepting cancelled or invalid dates", () => {
     const makeEvent = (start: string, fields: string) =>
       `BEGIN:VEVENT\r\nDTSTART:${start}\r\n${fields}\r\nEND:VEVENT\r\n`;

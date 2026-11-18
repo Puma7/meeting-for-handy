@@ -1194,11 +1194,29 @@ function WorkspaceContents({
                 role="tablist"
                 aria-label={t("Meetingbereiche")}
               >
-                {tabs.map(([id, name]) => (
+                {tabs.map(([id, name], index) => (
                   <button
                     role="tab"
                     key={id}
+                    id={`meeting-tab-${id}`}
+                    aria-controls="meeting-tab-content"
                     aria-selected={tab === id}
+                    tabIndex={tab === id ? 0 : -1}
+                    onKeyDown={(event) => {
+                      const targets = {
+                        ArrowRight: (index + 1) % tabs.length,
+                        ArrowLeft: (index + tabs.length - 1) % tabs.length,
+                        Home: 0,
+                        End: tabs.length - 1,
+                      };
+                      const target = targets[event.key];
+                      if (!Number.isInteger(target)) return;
+                      event.preventDefault();
+                      setTab(tabs[target][0]);
+                      event.currentTarget.parentElement
+                        .querySelectorAll('[role="tab"]')
+                        [target].focus();
+                    }}
                     onClick={() => setTab(id)}
                   >
                     {t(name)}
@@ -1206,8 +1224,10 @@ function WorkspaceContents({
                 ))}
               </nav>
               <main
+                id="meeting-tab-content"
                 role="tabpanel"
-                aria-label={t(tabs.find(([id]) => id === tab)?.[1])}
+                aria-labelledby={`meeting-tab-${tab}`}
+                tabIndex={0}
                 className={`workspace-content tab-${tab}`}
               >
                 {tab === "overview" ? (

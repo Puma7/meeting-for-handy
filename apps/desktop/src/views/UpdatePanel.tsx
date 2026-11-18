@@ -31,9 +31,7 @@ export default function UpdatePanel({
   const de = locale === "de";
   const [job, setJob] = useState<UpdateProgress | null>(null),
     [error, setError] = useState<string | null>(null),
-    [shortcutCommandError, setShortcutCommandError] = useState<string | null>(
-      null,
-    ),
+    [commandError, setCommandError] = useState<string | null>(null),
     [request, setRequest] = useState(false),
     [jobsRunning, setJobsRunning] = useState(false),
     [dismissed, setDismissed] = useState<string | null>(null);
@@ -64,10 +62,9 @@ export default function UpdatePanel({
           setJobsRunning(othersRunning);
           setError(null);
           // Once native status owns the same failure, the full panel remains authoritative.
-          if (shortcut)
-            setShortcutCommandError((previous) =>
-              previous === value.error ? null : previous,
-            );
+          setCommandError((previous) =>
+            previous === value.error ? null : previous,
+          );
         }
       } catch (e) {
         if (active) setError(errorMessage(e));
@@ -96,15 +93,14 @@ export default function UpdatePanel({
     requesting.current = true;
     setRequest(true);
     setError(null);
-    setShortcutCommandError(null);
+    setCommandError(null);
     try {
       const pending = run();
       requestJobStatusRefresh();
       await pending;
       if (api.getUpdateProgress) setJob(await api.getUpdateProgress());
     } catch (e) {
-      if (shortcut) setShortcutCommandError(errorMessage(e));
-      else setError(errorMessage(e));
+      setCommandError(errorMessage(e));
     } finally {
       requesting.current = false;
       setRequest(false);
@@ -115,13 +111,13 @@ export default function UpdatePanel({
    * in a browser-only preview without granting WebView opener permissions.
    */
   async function openReleasePage() {
-    setError(null);
+    setCommandError(null);
     try {
       // The WebView has no opener permission; the app opens only its official release page.
       if (api.openReleasePage) await api.openReleasePage();
       else window.open(releasePage, "_blank", "noopener,noreferrer");
     } catch (e) {
-      setError(errorMessage(e));
+      setCommandError(errorMessage(e));
     }
   }
   const externalPackage = job?.status === "available" && !canDownload;
@@ -163,7 +159,7 @@ export default function UpdatePanel({
         : "Check for updates";
   // A cancelled download was the user's own choice; a failure stays until dismissed.
   const failureKey = `${job?.attempt ?? ""}:${job?.version ?? ""}:${job?.error ?? ""}`;
-  const shortcutError = shortcutCommandError ?? error;
+  const shortcutError = commandError ?? error;
   if (shortcut)
     return (
       <div className="sidebar-update">
@@ -263,7 +259,9 @@ export default function UpdatePanel({
           {Math.floor((job.receivedBytes / Math.max(1, job.totalBytes)) * 100)}%
         </p>
       )}
-      {(error || job?.error) && <p role="alert">{error ?? job?.error}</p>}
+      {(commandError || error || job?.error) && (
+        <p role="alert">{commandError ?? error ?? job?.error}</p>
+      )}
       {!footer && (
         <>
           <p>
@@ -377,11 +375,14 @@ export default function UpdatePanel({
               ? "Den laufenden Installer-Download abbrechen."
               : "Cancel the installer download."
           }
-          onClick={() =>
-            void Promise.resolve(api.cancelUpdate!()).catch((e) =>
-              setError(errorMessage(e)),
-            )
-          }
+          onClick={async () => {
+            setCommandError(null);
+            try {
+              await api.cancelUpdate!();
+            } catch (e) {
+              setCommandError(errorMessage(e));
+            }
+          }}
         >
           {de ? "Download abbrechen" : "Cancel download"}
         </button>

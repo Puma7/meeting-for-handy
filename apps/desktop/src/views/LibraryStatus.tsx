@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
-import { RefreshCw, X, Square } from "lucide-react";
+import { RefreshCw, X } from "lucide-react";
+import CancelJobButton from "./CancelJobButton";
 import { errorMessage } from "../api";
 import { clock } from "../domain";
 import { startAdaptivePoll } from "../jobPolling";
@@ -74,18 +75,14 @@ export default function LibraryStatus({
         </div>
         <strong>{clock(job.elapsedMs)}</strong>
         {running ? (
-          <button
-            className="secondary"
-            disabled={job.cancelRequested}
-            onClick={() =>
-              void api
-                .cancelLibraryJob?.(job.jobId)
-                .catch((e) => setError(errorMessage(e)))
-            }
-          >
-            <Square size={14} />
-            {de ? "Indexierung abbrechen" : "Cancel indexing"}
-          </button>
+          api.cancelLibraryJob && (
+            <CancelJobButton
+              key={job.jobId}
+              requested={job.cancelRequested}
+              label={de ? "Indexierung abbrechen" : "Cancel indexing"}
+              cancel={() => api.cancelLibraryJob!(job.jobId)}
+            />
+          )
         ) : (
           <button
             className="icon-button"

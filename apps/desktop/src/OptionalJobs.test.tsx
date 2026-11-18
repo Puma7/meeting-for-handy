@@ -19,6 +19,52 @@ import type {
   UpdateProgress,
 } from "./types";
 
+it.each(["index", "maintenance"] as const)(
+  "keeps a rejected %s cancellation visible while its job still runs",
+  async (kind) => {
+    const progress = {
+      jobId: "job1",
+      kind: "cleanup-preview",
+      status: "running",
+      elapsedMs: 25,
+      confirmedTasks: 0,
+      totalTasks: 3,
+      skipped: 0,
+      cancelRequested: false,
+    };
+    const get = vi.fn(async () => ({ ...progress }));
+    const cancel = vi
+      .fn()
+      .mockRejectedValueOnce("Cancellation rejected")
+      .mockResolvedValue(true);
+    const api = {
+      getMaintenanceProgress: get,
+      getLibraryProgress: get,
+      cancelMaintenance: cancel,
+      cancelLibraryJob: cancel,
+    } as unknown as DesktopApi;
+    render(
+      kind === "index" ? (
+        <LibraryStatus api={api} connected locale="en" />
+      ) : (
+        <MaintenanceStatus api={api} locale="en" />
+      ),
+    );
+    const button = await screen.findByRole("button", { name: /Cancel/ });
+    await userEvent.click(button);
+    expect((await screen.findByRole("alert")).textContent).toBe(
+      "Cancellation rejected",
+    );
+    await act(async () => requestJobStatusRefresh());
+    expect(screen.getByRole("alert").textContent).toBe("Cancellation rejected");
+    progress.jobId = "job2";
+    await act(async () => requestJobStatusRefresh());
+    expect(screen.queryByRole("alert")).toBeNull();
+    await userEvent.click(screen.getByRole("button", { name: /Cancel/ }));
+    expect(cancel).toHaveBeenLastCalledWith("job2");
+  },
+);
+
 it.each([
   ["de", "Update prüfen", "Update wird geprüft…"],
   ["en", "Check for updates", "Checking for updates…"],
@@ -1074,6 +1120,13 @@ it("explains a missing platform package and still offers the release page", asyn
   expect((await screen.findByRole("alert")).textContent).toBe(
     "Browser unavailable",
   );
+  await act(async () => requestJobStatusRefresh());
+  expect(screen.getByRole("alert").textContent).toBe("Browser unavailable");
+  vi.mocked(api.openReleasePage!).mockResolvedValue(undefined);
+  await userEvent.click(
+    screen.getByRole("button", { name: "Offizielle Release-Seite öffnen" }),
+  );
+  expect(screen.queryByRole("alert")).toBeNull();
 });
 it("hides a finished search-index update but keeps running and failed ones visible", async () => {
   // 1.0.5 kept "Local search index · updated 0 of 0" in the footer permanently.
