@@ -289,6 +289,68 @@ fn codex_review_translated_task_closes_from_original_language_evidence() {
 }
 
 #[test]
+fn translated_completion_uses_the_promised_object_in_both_directions() {
+    for (locale, title, promise, near_miss, done, timed) in [
+        (
+            "en",
+            "Send the report",
+            "Mara sagt: Ich verschicke den Bericht bis Freitag.",
+            "Mara sagt: Ich habe den Entwurf für den Bericht bereits gestern verschickt.",
+            "Mara sagt: Ich habe den Bericht verschickt.",
+            "Mara sagt: Ich habe den Bericht bereits gestern verschickt.",
+        ),
+        (
+            "en",
+            "Prepare the checklist",
+            "Mara sagt: Ich erstelle die Checkliste bis Dienstag.",
+            "Mara sagt: Ich habe die Vorlage für die Checkliste erstellt.",
+            "Mara sagt: Ich habe die Checkliste erstellt.",
+            "Mara sagt: Ich habe gestern die Checkliste erstellt.",
+        ),
+        (
+            "de",
+            "Checkliste erstellen",
+            "Mara says: I will prepare the checklist by Tuesday.",
+            "Mara says: I have already prepared a draft for the checklist yesterday.",
+            "Mara says: I have prepared the checklist.",
+            "Mara says: I have already prepared the checklist yesterday.",
+        ),
+    ] {
+        let mut state = WorkspaceState::default();
+        let original = source("s_original", 0, promise);
+        let mut req = request(&state, "tasks", &original);
+        req.language = locale.into();
+        validate::apply(&mut state, &req, &answer(json!([{
+            "proposalId":"p_task","kind":"task","text":title,"status":"open","attention":"normal","owner":"Mara",
+            "evidence":[{"sourceId":original.id,"quote":promise}]
+        }]))).unwrap();
+        state.originals.push(original);
+        let task = state.entities[0].clone();
+        for (quote, expected) in [
+            (near_miss, "open"),
+            (done, "completed"),
+            (timed, "completed"),
+        ] {
+            let report = source("s_report", 3000, quote);
+            let mut req = request(&state, "tasks", &report);
+            req.language = locale.into();
+            let change = json!([{"proposalId":"p_done","kind":"task","targetId":task.id,"targetRevision":task.revision,
+                "text":null,"status":"completed","attention":"normal","evidence":[{"sourceId":report.id,"quote":quote}]}]);
+            for changes in [change, json!([])] {
+                let mut updated = state.clone();
+                let result = validate::apply(&mut updated, &req, &answer(changes));
+                if expected == "completed" {
+                    result.unwrap();
+                }
+                assert_eq!(updated.entities[0].status, expected, "{title}: {quote}");
+                assert_eq!(updated.entities[0].id, task.id);
+                assert_eq!(updated.entities[0].due, task.due);
+            }
+        }
+    }
+}
+
+#[test]
 fn codex_review_long_transcript_keeps_bounded_original_assertions() {
     for (phase, kind, assertion, title, status, allowed) in [
         (
@@ -618,6 +680,137 @@ fn seeded_task() -> WorkspaceState {
     }]))).unwrap();
     state.originals.push(promise);
     state
+}
+
+#[test]
+fn successive_updates_keep_the_decision_deadline_and_completed_task() {
+    for (lang, owner, due, title, pledge, decision, pending, unrelated, finished) in [
+        (
+            "de",
+            "Robin",
+            "Freitag",
+            "Einladung verschicken",
+            "Robin sagt: Ich verschicke die Einladung bis Freitag.",
+            "Wir entscheiden uns für Raum B.",
+            "Robin sagt: Ich habe die Einladung noch nicht verschickt.",
+            "Robin sagt: Ich habe den Entwurf für die Einladung verschickt.",
+            "Robin sagt: Ich habe die Einladung verschickt.",
+        ),
+        (
+            "en",
+            "Robin",
+            "Friday",
+            "Send the invitation",
+            "Robin says: I will send the invitation by Friday.",
+            "We decide to use Room B.",
+            "Robin says: I have not sent the invitation yet.",
+            "Sam says: I have sent the invitation.",
+            "Robin says: I have sent the invitation.",
+        ),
+        (
+            "de",
+            "Mara",
+            "Dienstag",
+            "Checkliste erstellen",
+            "Mara sagt: Ich erstelle die Checkliste bis Dienstag.",
+            "Wir beschließen den Start mit zwei Geräten.",
+            "Mara sagt: Ich habe die Checkliste noch nicht erstellt.",
+            "Mara sagt: Ich habe die Vorlage für die Checkliste erstellt.",
+            "Mara sagt: Ich habe die Checkliste erstellt.",
+        ),
+        (
+            "en",
+            "Mara",
+            "Tuesday",
+            "Prepare the checklist",
+            "Mara says: I will prepare the checklist by Tuesday.",
+            "We decide to start with two devices.",
+            "Mara says: I have not prepared the checklist yet.",
+            "Mara says: I have prepared a draft for the checklist.",
+            "Mara says: I have prepared the checklist.",
+        ),
+    ] {
+        let mut state = WorkspaceState::default();
+        let promise = source("s_pledge", 0, pledge);
+        let mut req = request(&state, "tasks", &promise);
+        req.language = lang.into();
+        validate::apply(&mut state, &req, &answer(json!([{
+            "proposalId":"p_task","kind":"task","text":title,"status":"open","attention":"normal","owner":owner,"due":due,
+            "evidence":[{"sourceId":promise.id,"quote":pledge}]
+        }]))).unwrap();
+        state.originals.push(promise);
+        let task_id = state.entities[0].id.clone();
+        let room = source("s_decision", 3000, decision);
+        let mut req = request(&state, "facts", &room);
+        req.language = lang.into();
+        validate::apply(&mut state, &req, &answer(json!([{
+            "proposalId":"p_decision","kind":"decision","text":decision,"status":"recorded","attention":"current",
+            "evidence":[{"sourceId":room.id,"quote":decision}]
+        }]))).unwrap();
+        state.originals.push(room);
+        let saved = state
+            .entities
+            .iter()
+            .find(|e| e.kind == "decision")
+            .unwrap()
+            .clone();
+        for (id, time, text, expected) in [
+            ("s_pending", 6000, pending, "open"),
+            ("s_other", 9000, unrelated, "open"),
+            ("s_done", 12000, finished, "completed"),
+        ] {
+            let next = source(id, time, text);
+            let mut req = request(&state, "tasks", &next);
+            req.language = lang.into();
+
+            let revision = state
+                .entities
+                .iter()
+                .find(|task| task.id == task_id)
+                .unwrap()
+                .revision;
+            let completion = answer(json!([{
+                "proposalId":"p_done","kind":"task","targetId":task_id,"targetRevision":revision,
+                "text":null,"status":"completed","attention":"normal","owner":null,"due":null,
+                "evidence":[{"sourceId":id,"quote":text}],"relatedEntityIds":[]
+            }]));
+            // The legacy combined update may also propose terminal states.
+            for phase in ["tasks", "live_update"] {
+                let mut proposed = state.clone();
+                req.purpose = phase.into();
+                let result = validate::apply(&mut proposed, &req, &completion);
+                if expected == "completed" {
+                    result.unwrap();
+                    let task = proposed.entities.iter().find(|e| e.id == task_id).unwrap();
+                    assert_eq!(task.status, expected);
+                    assert_eq!(task.owner.as_deref(), Some(owner));
+                    assert_eq!(task.due.as_deref(), Some(due));
+                    assert!(task
+                        .evidence
+                        .iter()
+                        .any(|e| e.source_id == id && e.quote == text));
+                    assert!(proposed.entities.contains(&saved));
+                } else {
+                    assert_eq!(proposed.entities, state.entities, "{phase}: {text}");
+                }
+            }
+            req.purpose = "tasks".into();
+            validate::apply(&mut state, &req, &answer(json!([]))).unwrap();
+            state.originals.push(next);
+            assert_eq!(state.entities.len(), 2);
+            assert!(state.entities.contains(&saved));
+            let task = state.entities.iter().find(|e| e.id == task_id).unwrap();
+            assert_eq!(task.status, expected, "{text}");
+            assert_eq!(task.due.as_deref(), Some(due));
+            assert_eq!(task.owner.as_deref(), Some(owner));
+            if expected == "completed" {
+                assert!(task
+                    .evidence
+                    .iter()
+                    .any(|e| e.source_id == "s_done" && e.quote == finished));
+            }
+        }
+    }
 }
 
 #[test]

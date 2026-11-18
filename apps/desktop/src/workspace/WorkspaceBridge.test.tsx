@@ -1764,6 +1764,9 @@ describe("Native workspace boundary", () => {
   });
   it("renders English workspace controls and the original audio preview", async () => {
     const f = fixture();
+    const quote = f.status.view.workspace.entities[0].evidence[0].quote;
+    const paragraph = `Vorher. ${quote} Danach.`;
+    f.status.view.workspace.originals[0].text = paragraph;
     localStorage.setItem(
       `handymeeting.workspace.v1.${f.meeting.id}.notes-height.v1`,
       "unreadable synthetic height",
@@ -1823,9 +1826,9 @@ describe("Native workspace boundary", () => {
     fireEvent.click(
       screen.getByRole("button", { name: /Die Freigabe bleibt noch offen/ }),
     );
-    expect(
-      screen.getByRole("dialog", { name: "Original evidence" }),
-    ).toBeTruthy();
+    const original = screen.getByRole("dialog", { name: "Original evidence" });
+    expect(original.querySelector("blockquote")?.textContent).toBe(paragraph);
+    expect(original.querySelector("mark")?.textContent).toBe(quote);
     expect(
       screen.getByRole("button", { name: "Load audio preview" }),
     ).toBeTruthy();

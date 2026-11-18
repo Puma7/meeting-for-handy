@@ -106,6 +106,18 @@ pub(super) fn task_subject_matches(task: &Entity, quote: &str) -> bool {
 /// A translated title need not share words with the source. In that case
 /// require the original commitment's action and object in the completion.
 pub(super) fn task_completion_matches(task: &Entity, quote: &str) -> bool {
+    let report = super::assertions::assignment_text(quote);
+    if report != quote
+        && task
+            .owner
+            .as_deref()
+            .is_some_and(|owner| owned_report(owner, quote).is_none())
+    {
+        return false;
+    }
+    if let Some((verb, object)) = literal_completion(&report.to_lowercase()) {
+        return literal_task_matches(task, verb, object);
+    }
     if task_subject_matches(task, quote) || explicit_owned_completion(task, quote) {
         return true;
     }
@@ -129,11 +141,15 @@ pub(super) fn task_completion_matches(task: &Entity, quote: &str) -> bool {
 /// A model may echo the verified deadline in the title. It is metadata,
 /// so a completion of the same action need not repeat it.
 fn task_action_text(task: &Entity) -> &str {
-    let Some(due) = &task.due else {
-        return &task.text;
+    without_task_due(&task.text, task.due.as_deref())
+}
+
+fn without_task_due<'a>(text: &'a str, due: Option<&str>) -> &'a str {
+    let Some(due) = due else {
+        return text;
     };
     for marker in [" bis ", " by "] {
-        if let Some((action, suffix)) = task.text.rsplit_once(marker) {
+        if let Some((action, suffix)) = text.rsplit_once(marker) {
             if !action.is_empty()
                 && suffix.trim_end_matches(['.', '!']).to_lowercase() == due.to_lowercase()
             {
@@ -141,7 +157,7 @@ fn task_action_text(task: &Entity) -> &str {
             }
         }
     }
-    &task.text
+    text
 }
 
 pub(super) fn task_title_matches(title: &str, quote: &str) -> bool {
@@ -529,7 +545,12 @@ pub(super) fn explicit_owned_completion(task: &Entity, quote: &str) -> bool {
     task.owner
         .as_deref()
         .and_then(|owner| owned_report(owner, quote))
-        .is_some_and(|report| completion_action_matches(task_action_text(task), report))
+        .is_some_and(|report| {
+            if let Some((verb, object)) = literal_completion(&report.to_lowercase()) {
+                return literal_task_matches(task, verb, object);
+            }
+            completion_action_matches(task_action_text(task), report)
+        })
 }
 
 fn owned_report<'a>(owner: &str, quote: &'a str) -> Option<&'a str> {
@@ -542,9 +563,134 @@ fn owned_report<'a>(owner: &str, quote: &'a str) -> Option<&'a str> {
     speaker.eq_ignore_ascii_case(owner).then_some(report)
 }
 
+pub(super) fn literal_completion(lowercase_report: &str) -> Option<(&'static str, &str)> {
+    // A draft for the checklist is a different object from the checklist itself.
+    let statement = lowercase_report.trim().trim_end_matches(['.', '!']);
+    if let Some(predicate) = statement
+        .strip_prefix("ich habe ")
+        .or_else(|| statement.strip_prefix("wir haben "))
+    {
+        return [("verschicken", " verschickt"), ("erstellen", " erstellt")]
+            .into_iter()
+            .find_map(|(verb, suffix)| {
+                predicate.strip_suffix(suffix).map(|object| (verb, object))
+            });
+    }
+    let predicate = [
+        "i have ", "we have ", "i've ", "we've ", "i’ve ", "we’ve ", "i ", "we ",
+    ]
+    .iter()
+    .find_map(|prefix| statement.strip_prefix(prefix))?;
+    let mut predicate = predicate.trim_start();
+    while let Some((word, rest)) = predicate.split_once(char::is_whitespace) {
+        if !super::assertions::AFFIRMATIVE_PREDICATE_ADVERBS.contains(&word) {
+            break;
+        }
+        predicate = rest.trim_start();
+    }
+    predicate
+        .strip_prefix("prepared ")
+        .map(|object| ("prepare", object))
+}
+
+fn literal_task_matches(task: &Entity, verb: &str, object: &str) -> bool {
+    same_action_object(task_action_text(task), verb, object)
+        || task.evidence.iter().any(|ev| {
+            let pledge = super::assertions::assignment_text(&ev.quote);
+            super::validate::task_quote_allowed(&ev.quote)
+                && (pledge == ev.quote
+                    || task
+                        .owner
+                        .as_deref()
+                        .is_none_or(|owner| owned_report(owner, &ev.quote).is_some()))
+                && same_action_object(without_task_due(pledge, task.due.as_deref()), verb, object)
+        })
+}
+
+fn same_action_object(title: &str, verb: &str, object: &str) -> bool {
+    fn without_article(words: &[String]) -> &[String] {
+        match words {
+            [first, rest @ ..] if ["die", "das", "den", "the"].contains(&first.as_str()) => rest,
+            _ => words,
+        }
+    }
+    let action: Vec<_> = title
+        .trim_end_matches(['.', '!'])
+        .split_whitespace()
+        .map(str::to_lowercase)
+        .collect();
+    let bare_action = match action.as_slice() {
+        [i, will, rest @ ..] if (i == "i" || i == "we") && will == "will" => rest,
+        [i, will, rest @ ..]
+            if (i == "ich" && will == "werde") || (i == "wir" && will == "werden") =>
+        {
+            rest
+        }
+        [i, rest @ ..]
+            if ["i'll", "we'll", "i’ll", "we’ll", "ich", "wir"].contains(&i.as_str()) =>
+        {
+            rest
+        }
+        rest => rest,
+    };
+    let target = match bare_action {
+        [first, rest @ ..] if first == verb => rest,
+        [first, rest @ ..]
+            if matches!(
+                (verb, first.as_str()),
+                (
+                    "verschicken",
+                    "verschicke" | "schicke" | "schicken" | "sende" | "senden"
+                ) | ("erstellen", "erstelle")
+            ) =>
+        {
+            rest
+        }
+        [rest @ .., last] if last == verb => rest,
+        _ => return false,
+    };
+    let spoken: Vec<_> = object.split_whitespace().map(str::to_lowercase).collect();
+    let target = without_article(target);
+    if target.is_empty() {
+        return false;
+    }
+    if target == without_article(&spoken) {
+        return true;
+    }
+    // Time words at the edges modify the action. Keep every word inside the
+    // object, including "draft for" or "Vorlage für".
+    let timing = |s: &String| {
+        matches!(
+            s.as_str(),
+            "bereits"
+                | "schon"
+                | "gestern"
+                | "heute"
+                | "soeben"
+                | "inzwischen"
+                | "already"
+                | "yesterday"
+                | "today"
+                | "just"
+                | "now"
+        )
+    };
+    let mut words = spoken.as_slice();
+    while words.first().is_some_and(timing) {
+        words = &words[1..];
+    }
+    while words.last().is_some_and(timing) {
+        words = &words[..words.len() - 1];
+    }
+    target == without_article(words)
+}
+
 fn completion_action_matches(action_text: &str, report: &str) -> bool {
     let title = action_text.to_lowercase();
     let report = report.trim().to_lowercase();
+    if let Some((verb, object)) = literal_completion(&report) {
+        return same_action_object(action_text, verb, object);
+    }
     let same_object = |actions: &[&str]| {
         let spoken = terms(&report);
         let object = terms(&title)

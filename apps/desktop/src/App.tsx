@@ -2790,6 +2790,7 @@ export default function App({ api = desktopApi }: { api?: DesktopApi }) {
             systemId={systemId}
             micId={micId}
             micEnabled={micEnabled}
+            microphoneRequested={microphonePreference !== false}
             models={models}
             devices={devices}
             copied={copied === "transcript"}

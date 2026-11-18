@@ -50,6 +50,7 @@ type Props = {
   systemId: string;
   micId: string;
   micEnabled: boolean;
+  microphoneRequested?: boolean;
   models: HandyModel[];
   devices: AudioDevice[];
   copied: boolean;
@@ -123,6 +124,7 @@ export default function MeetingView({
   systemId,
   micId,
   micEnabled,
+  microphoneRequested = micEnabled,
   models,
   devices,
   copied,
@@ -202,7 +204,9 @@ export default function MeetingView({
         </div>
       )}
       {connected &&
-        micEnabled &&
+        !recording &&
+        microphoneRequested &&
+        devices.some((item) => item.source === "system") &&
         !devices.some((item) => item.source === "microphone") && (
           <div className="notice warning" role="status">
             {t.noMicrophoneHelp}

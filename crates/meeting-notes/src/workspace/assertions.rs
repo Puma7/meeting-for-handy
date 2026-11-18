@@ -320,7 +320,7 @@ fn subordinate_start(words: &[&str], start: usize, predicate: usize) -> Option<u
         .map(|at| start + at + 1)
 }
 
-const AFFIRMATIVE_PREDICATE_ADVERBS: &[&str] = &[
+pub(super) const AFFIRMATIVE_PREDICATE_ADVERBS: &[&str] = &[
     "already",
     "just",
     "now",
@@ -1527,6 +1527,7 @@ pub(super) fn completion_quote_allowed(quote: &str) -> bool {
     }) {
         return true;
     }
+    let literal = super::matching::literal_completion(assignment_text(&lower));
     let english = [
         "sent",
         "emailed",
@@ -1557,7 +1558,8 @@ pub(super) fn completion_quote_allowed(quote: &str) -> bool {
             }
         }
         predicate < clause.end
-            && english.contains(&words[predicate])
+            && (english.contains(&words[predicate])
+                || (words[predicate] == "prepared" && matches!(literal, Some(("prepare", _)))))
             && !unasserted_embedding(&words, &original_words, &sentences, predicate)
     }) {
         return true;
@@ -1575,7 +1577,9 @@ pub(super) fn completion_quote_allowed(quote: &str) -> bool {
         "veröffentlicht",
     ];
     words.iter().enumerate().any(|(index, word)| {
-        if !german.contains(word) {
+        if !(german.contains(word)
+            || (*word == "erstellt" && matches!(literal, Some(("erstellen", _)))))
+        {
             return false;
         }
         let Some(clause) = clauses.iter().find(|range| range.contains(&index)) else {

@@ -170,7 +170,10 @@ it("keeps completed tasks out of the open list and refuses altered or superseded
   fireEvent.click(
     screen.getByRole("button", { name: /Die Anleitung ist fertig/ }),
   );
-  expect(openSource).toHaveBeenCalledExactlyOnceWith("s_current");
+  expect(openSource).toHaveBeenCalledExactlyOnceWith(
+    "s_current",
+    "Die Anleitung ist fertig.",
+  );
   expect(meetingAnswers(current, "sources", "alte Anleitung").total).toBe(0);
   expect(meetingAnswers(current, "sources", "Anleitung").total).toBe(1);
 });
