@@ -424,10 +424,24 @@ fn apply_response(
         // guards complement the semantic model judgement; uncertainty never closes an item.
         if c.status == "completed" {
             ensure!(
-                c.evidence.iter().any(|e| completion_quote_allowed(&e.quote)
-                    && (request.purpose != "tasks"
+                c.evidence.iter().any(|e| {
+                    if !completion_quote_allowed(&e.quote) {
+                        return false;
+                    }
+                    let report = super::assertions::assignment_text(&e.quote);
+                    let attributed =
+                        report != e.quote && old.is_some_and(|task| task.owner.is_some());
+                    let targeted = request.purpose == "tasks"
+                        || (c.kind == "task"
+                            && (attributed
+                                || matches!(
+                                    super::matching::literal_completion(&report.to_lowercase()),
+                                    Some(("prepare" | "erstellen", _))
+                                )));
+                    !targeted
                         || (fresh(e)
-                            && old.is_some_and(|task| task_completion_matches(task, &e.quote))))),
+                            && old.is_some_and(|task| task_completion_matches(task, &e.quote)))
+                }),
                 "Eine Zusage ist keine Erledigung."
             );
         }

@@ -239,7 +239,7 @@ export default function MeetingView({
                       ? "Aufnahme pausiert"
                       : "Recording paused"
                     : t.recording
-                  : recognitionReady && audioDevicesReady
+                  : connected && modelId && systemId
                     ? t.ready
                     : t.choose}
           </span>
@@ -260,7 +260,13 @@ export default function MeetingView({
           ) : (
             <button
               className="primary"
-              disabled={!recognitionReady || !audioDevicesReady || busy}
+              disabled={
+                !connected ||
+                busy ||
+                !modelId ||
+                !systemId ||
+                (micEnabled && !micId)
+              }
               title={t.startTooltip}
               onClick={() => void start()}
             >

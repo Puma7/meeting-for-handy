@@ -700,6 +700,39 @@ fn successive_updates_keep_the_decision_deadline_and_completed_task() {
             let next = source(id, time, text);
             let mut req = request(&state, "tasks", &next);
             req.language = lang.into();
+
+            let revision = state
+                .entities
+                .iter()
+                .find(|task| task.id == task_id)
+                .unwrap()
+                .revision;
+            let completion = answer(json!([{
+                "proposalId":"p_done","kind":"task","targetId":task_id,"targetRevision":revision,
+                "text":null,"status":"completed","attention":"normal","owner":null,"due":null,
+                "evidence":[{"sourceId":id,"quote":text}],"relatedEntityIds":[]
+            }]));
+            // The legacy combined update may also propose terminal states.
+            for phase in ["tasks", "live_update"] {
+                let mut proposed = state.clone();
+                req.purpose = phase.into();
+                let result = validate::apply(&mut proposed, &req, &completion);
+                if expected == "completed" {
+                    result.unwrap();
+                    let task = proposed.entities.iter().find(|e| e.id == task_id).unwrap();
+                    assert_eq!(task.status, expected);
+                    assert_eq!(task.owner.as_deref(), Some(owner));
+                    assert_eq!(task.due.as_deref(), Some(due));
+                    assert!(task
+                        .evidence
+                        .iter()
+                        .any(|e| e.source_id == id && e.quote == text));
+                    assert!(proposed.entities.contains(&saved));
+                } else {
+                    assert_eq!(proposed.entities, state.entities, "{phase}: {text}");
+                }
+            }
+            req.purpose = "tasks".into();
             validate::apply(&mut state, &req, &answer(json!([]))).unwrap();
             state.originals.push(next);
             assert_eq!(state.entities.len(), 2);

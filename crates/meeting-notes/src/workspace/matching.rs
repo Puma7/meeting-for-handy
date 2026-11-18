@@ -106,6 +106,18 @@ pub(super) fn task_subject_matches(task: &Entity, quote: &str) -> bool {
 /// A translated title need not share words with the source. In that case
 /// require the original commitment's action and object in the completion.
 pub(super) fn task_completion_matches(task: &Entity, quote: &str) -> bool {
+    let report = super::assertions::assignment_text(quote);
+    if report != quote
+        && task
+            .owner
+            .as_deref()
+            .is_some_and(|owner| owned_report(owner, quote).is_none())
+    {
+        return false;
+    }
+    if let Some((verb, object)) = literal_completion(&report.to_lowercase()) {
+        return same_action_object(task_action_text(task), verb, object);
+    }
     if task_subject_matches(task, quote) || explicit_owned_completion(task, quote) {
         return true;
     }
@@ -542,11 +554,9 @@ fn owned_report<'a>(owner: &str, quote: &'a str) -> Option<&'a str> {
     speaker.eq_ignore_ascii_case(owner).then_some(report)
 }
 
-fn completion_action_matches(action_text: &str, report: &str) -> bool {
-    let title = action_text.to_lowercase();
-    let report = report.trim().to_lowercase();
+pub(super) fn literal_completion(lowercase_report: &str) -> Option<(&'static str, &str)> {
     // A draft for the checklist is a different object from the checklist itself.
-    let statement = report.trim_end_matches(['.', '!']);
+    let statement = lowercase_report.trim().trim_end_matches(['.', '!']);
     for (verb, prefix, suffix) in [
         ("verschicken", "ich habe ", " verschickt"),
         ("erstellen", "ich habe ", " erstellt"),
@@ -557,24 +567,39 @@ fn completion_action_matches(action_text: &str, report: &str) -> bool {
             .strip_prefix(prefix)
             .and_then(|s| s.strip_suffix(suffix))
         {
-            let mut action: Vec<_> = title.split_whitespace().collect();
-            if action.first() == Some(&verb) {
-                action.remove(0);
-            } else if action.last() == Some(&verb) {
-                action.pop();
-            } else {
-                continue;
-            }
-            let mut spoken: Vec<_> = object.split_whitespace().collect();
-            for words in [&mut action, &mut spoken] {
-                if matches!(words.first(), Some(&("die" | "das" | "den" | "the"))) {
-                    words.remove(0);
-                }
-            }
-            if !action.is_empty() && action == spoken {
-                return true;
-            }
+            return Some((verb, object));
         }
+    }
+    None
+}
+
+fn same_action_object(title: &str, verb: &str, object: &str) -> bool {
+    fn without_article(words: &[String]) -> &[String] {
+        match words {
+            [first, rest @ ..] if ["die", "das", "den", "the"].contains(&first.as_str()) => rest,
+            _ => words,
+        }
+    }
+    let action: Vec<_> = title
+        .trim_end_matches(['.', '!'])
+        .split_whitespace()
+        .map(str::to_lowercase)
+        .collect();
+    let target = match action.as_slice() {
+        [first, rest @ ..] if first == verb => rest,
+        [rest @ .., last] if last == verb => rest,
+        _ => return false,
+    };
+    let spoken: Vec<_> = object.split_whitespace().map(str::to_lowercase).collect();
+    let target = without_article(target);
+    !target.is_empty() && target == without_article(&spoken)
+}
+
+fn completion_action_matches(action_text: &str, report: &str) -> bool {
+    let title = action_text.to_lowercase();
+    let report = report.trim().to_lowercase();
+    if let Some((verb, object)) = literal_completion(&report) {
+        return same_action_object(action_text, verb, object);
     }
     let same_object = |actions: &[&str]| {
         let spoken = terms(&report);
