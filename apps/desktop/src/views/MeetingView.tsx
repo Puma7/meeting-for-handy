@@ -158,6 +158,14 @@ export default function MeetingView({
   const [setupOpen, setSetupOpen] = useState(!meeting && !recording);
   const [optionsOpen, setOptionsOpen] = useState(false);
   const de = locale === "de";
+  function handyDetectionLabel() {
+    if (refreshingHandy || !app?.handy)
+      return de ? "Handy wird gesucht …" : "Looking for Handy …";
+    if (app.handy.error) return de ? "Handy prüfen" : "Check Handy";
+    if (app.handy.executable || app.handy.version)
+      return de ? "Handy gefunden" : "Handy detected";
+    return de ? "Handy nicht gefunden" : "Handy not detected";
+  }
   const selectedModel = models.find(({ id }) => id === modelId);
   const audioDevicesReady =
     connected &&
@@ -247,19 +255,7 @@ export default function MeetingView({
                     : t.choose}
           </span>
           {!recording && !isStopping && connected && app && (
-            <span className="handy-readiness">
-              {app.handy?.executable || app.handy?.version
-                ? de
-                  ? "Handy gefunden"
-                  : "Handy detected"
-                : refreshingHandy
-                  ? de
-                    ? "Handy wird gesucht …"
-                    : "Looking for Handy …"
-                  : de
-                    ? "Handy nicht gefunden"
-                    : "Handy not detected"}
-            </span>
+            <span className="handy-readiness">{handyDetectionLabel()}</span>
           )}
           {recording || isStopping ? (
             <button

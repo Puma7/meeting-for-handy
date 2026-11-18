@@ -159,6 +159,31 @@ it("opens on recording readiness and runs the optional sample check only on requ
   await waitFor(() => expect(api.checkMeetingSetup).toHaveBeenCalledOnce());
 });
 
+it.each([
+  [null, "Handy wird gesucht …"],
+  [
+    {
+      executable: "previously-selected-handy",
+      version: null,
+      models: [],
+      error: "The selected program could not be opened.",
+    },
+    "Handy prüfen",
+  ],
+] as const)(
+  "reports the actual discovery state before recording (%s)",
+  async (handy, expected) => {
+    const api = fakeApi();
+    vi.mocked(api.getAppState).mockResolvedValue({
+      ...state(),
+      handy: handy ? { ...handy, models: [] } : null,
+    });
+    render(<App api={api} />);
+    expect(await screen.findByText(expected)).toBeTruthy();
+    expect(screen.queryByText("Handy gefunden")).toBeNull();
+  },
+);
+
 it.each([false, true])(
   "opens and focuses the exact update panel, including already-open Settings (%s)",
   async (alreadyOpen) => {
