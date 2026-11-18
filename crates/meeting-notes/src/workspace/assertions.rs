@@ -1529,6 +1529,7 @@ pub(super) fn completion_quote_allowed(quote: &str) -> bool {
     }
     let english = [
         "sent",
+        "prepared",
         "emailed",
         "completed",
         "finished",
@@ -1564,6 +1565,7 @@ pub(super) fn completion_quote_allowed(quote: &str) -> bool {
     }
     let german = [
         "abgeholt",
+        "erstellt",
         "erledigt",
         "freigegeben",
         "abgeschlossen",

@@ -621,6 +621,104 @@ fn seeded_task() -> WorkspaceState {
 }
 
 #[test]
+fn successive_updates_keep_the_decision_deadline_and_completed_task() {
+    for (lang, owner, due, title, pledge, decision, pending, unrelated, finished) in [
+        (
+            "de",
+            "Robin",
+            "Freitag",
+            "Einladung verschicken",
+            "Robin sagt: Ich verschicke die Einladung bis Freitag.",
+            "Wir entscheiden uns für Raum B.",
+            "Robin sagt: Ich habe die Einladung noch nicht verschickt.",
+            "Robin sagt: Ich habe den Entwurf für die Einladung verschickt.",
+            "Robin sagt: Ich habe die Einladung verschickt.",
+        ),
+        (
+            "en",
+            "Robin",
+            "Friday",
+            "Send the invitation",
+            "Robin says: I will send the invitation by Friday.",
+            "We decide to use Room B.",
+            "Robin says: I have not sent the invitation yet.",
+            "Sam says: I have sent the invitation.",
+            "Robin says: I have sent the invitation.",
+        ),
+        (
+            "de",
+            "Mara",
+            "Dienstag",
+            "Checkliste erstellen",
+            "Mara sagt: Ich erstelle die Checkliste bis Dienstag.",
+            "Wir beschließen den Start mit zwei Geräten.",
+            "Mara sagt: Ich habe die Checkliste noch nicht erstellt.",
+            "Mara sagt: Ich habe die Vorlage für die Checkliste erstellt.",
+            "Mara sagt: Ich habe die Checkliste erstellt.",
+        ),
+        (
+            "en",
+            "Mara",
+            "Tuesday",
+            "Prepare the checklist",
+            "Mara says: I will prepare the checklist by Tuesday.",
+            "We decide to start with two devices.",
+            "Mara says: I have not prepared the checklist yet.",
+            "Mara says: I have prepared a draft for the checklist.",
+            "Mara says: I have prepared the checklist.",
+        ),
+    ] {
+        let mut state = WorkspaceState::default();
+        let promise = source("s_pledge", 0, pledge);
+        let mut req = request(&state, "tasks", &promise);
+        req.language = lang.into();
+        validate::apply(&mut state, &req, &answer(json!([{
+            "proposalId":"p_task","kind":"task","text":title,"status":"open","attention":"normal","owner":owner,"due":due,
+            "evidence":[{"sourceId":promise.id,"quote":pledge}]
+        }]))).unwrap();
+        state.originals.push(promise);
+        let task_id = state.entities[0].id.clone();
+        let room = source("s_decision", 3000, decision);
+        let mut req = request(&state, "facts", &room);
+        req.language = lang.into();
+        validate::apply(&mut state, &req, &answer(json!([{
+            "proposalId":"p_decision","kind":"decision","text":decision,"status":"recorded","attention":"current",
+            "evidence":[{"sourceId":room.id,"quote":decision}]
+        }]))).unwrap();
+        state.originals.push(room);
+        let saved = state
+            .entities
+            .iter()
+            .find(|e| e.kind == "decision")
+            .unwrap()
+            .clone();
+        for (id, time, text, expected) in [
+            ("s_pending", 6000, pending, "open"),
+            ("s_other", 9000, unrelated, "open"),
+            ("s_done", 12000, finished, "completed"),
+        ] {
+            let next = source(id, time, text);
+            let mut req = request(&state, "tasks", &next);
+            req.language = lang.into();
+            validate::apply(&mut state, &req, &answer(json!([]))).unwrap();
+            state.originals.push(next);
+            assert_eq!(state.entities.len(), 2);
+            assert!(state.entities.contains(&saved));
+            let task = state.entities.iter().find(|e| e.id == task_id).unwrap();
+            assert_eq!(task.status, expected, "{text}");
+            assert_eq!(task.due.as_deref(), Some(due));
+            assert_eq!(task.owner.as_deref(), Some(owner));
+            if expected == "completed" {
+                assert!(task
+                    .evidence
+                    .iter()
+                    .any(|e| e.source_id == "s_done" && e.quote == finished));
+            }
+        }
+    }
+}
+
+#[test]
 fn a_fresh_unassigned_topic_cannot_overwrite_an_existing_commitment() {
     let mut state = seeded_task();
     let old = state.entities[0].clone();

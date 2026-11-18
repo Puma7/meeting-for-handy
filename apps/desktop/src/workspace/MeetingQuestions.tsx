@@ -66,7 +66,7 @@ export default function MeetingQuestions({
 }: {
   workspace?: WorkspaceState;
   locale: Locale;
-  openSource: (id: string) => void;
+  openSource: (id: string, quote: string) => void;
   lookup: Lookup;
   onLookupChange: (lookup: Lookup) => void;
 }) {
@@ -138,7 +138,7 @@ export default function MeetingQuestions({
                     type="button"
                     className="text-button"
                     key={`${sourceId}-${index}`}
-                    onClick={() => openSource(sourceId)}
+                    onClick={() => openSource(sourceId, quote)}
                   >
                     „{quote}“ ↗
                   </button>

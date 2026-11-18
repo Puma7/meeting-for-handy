@@ -454,6 +454,73 @@ async function ready() {
 }
 beforeEach(() => localStorage.clear());
 
+it.each(["de", "en"] as const)(
+  "records both sources and reopens the transcript without a text model (%s)",
+  async (locale) => {
+    const t = locale === "de" ? de : en;
+    localStorage.setItem(
+      "handymeeting.rust.beta.preferences.v1",
+      JSON.stringify({ locale }),
+    );
+    const user = userEvent.setup();
+    const api = fakeApi();
+    const saved = {
+      ...meeting,
+      parts: [
+        ...meeting.parts,
+        {
+          ...meeting.parts[0],
+          source: "microphone" as const,
+          file: "mic.wav",
+          text: "Second track.",
+        },
+      ],
+    };
+    let recording = false;
+    vi.mocked(api.getAppState).mockImplementation(async () => ({
+      ...state(recording ? { ...saved, status: "recording" } : null),
+      recording,
+    }));
+    vi.mocked(api.startMeeting).mockImplementation(async () => {
+      recording = true;
+      return { ...saved, status: "recording" };
+    });
+    vi.mocked(api.stopMeeting).mockImplementation(async () => {
+      recording = false;
+      return saved;
+    });
+    vi.mocked(api.listMeetings).mockResolvedValue([saved]);
+    vi.mocked(api.getMeeting).mockResolvedValue(saved);
+    vi.mocked(api.listTextModels).mockResolvedValue([]);
+    const mounted = render(<App api={api} />);
+    const start = await screen.findByRole("button", { name: t.start });
+    await waitFor(() => expect(start).toHaveProperty("disabled", false));
+    await user.click(start);
+    expect(api.startMeeting).toHaveBeenCalledWith(
+      expect.objectContaining({
+        systemDeviceId: "out",
+        microphoneDeviceId: "mic",
+        modelId: "installed-stream",
+      }),
+    );
+    await user.click(await screen.findByRole("button", { name: t.stop }));
+    await waitFor(() => expect(api.stopMeeting).toHaveBeenCalledOnce());
+    mounted.unmount();
+    render(<App api={api} />);
+    await user.click(await screen.findByRole("button", { name: t.history }));
+    await user.click(
+      await screen.findByRole("button", {
+        name: locale === "de" ? "Öffnen" : "Open",
+      }),
+    );
+    await user.click(await screen.findByRole("button", { name: t.copy }));
+    await waitFor(() => expect(api.copyText).toHaveBeenCalled());
+    const copied = vi.mocked(api.copyText).mock.lastCall![0];
+    for (const part of saved.parts) expect(copied).toContain(part.text);
+    expect(api.generateNotes).not.toHaveBeenCalled();
+  },
+);
+
 it.each(["session", "saved"] as const)(
   "changes the setup probe identity for the %s credential choice without exposing the key",
   async (choice) => {
@@ -786,7 +853,7 @@ describe("migration frontend boundaries (synthetic IPC)", () => {
       }),
     );
   });
-  it.each([{}, { microphone: true }])(
+  it.each([{}, { microphone: true }, { microphone: false }])(
     "starts with computer audio alone when no microphone is available (%j)",
     async (preferences) => {
       const preferencesKey = "handymeeting.rust.beta.preferences.v1";
@@ -798,6 +865,12 @@ describe("migration frontend boundaries (synthetic IPC)", () => {
       render(<App api={api} />);
       await ready();
       const microphone = screen.getByLabelText("Mikrofon zusätzlich aufnehmen");
+      const microphoneRequested = !(
+        "microphone" in preferences && preferences.microphone === false
+      );
+      expect(Boolean(screen.queryByText(de.noMicrophoneHelp))).toBe(
+        microphoneRequested,
+      );
       expect(microphone).toHaveProperty("checked", false);
       expect(microphone).toHaveProperty("disabled", true);
       await userEvent.click(
@@ -823,7 +896,7 @@ describe("migration frontend boundaries (synthetic IPC)", () => {
       ]);
       fireEvent.focus(window);
       await waitFor(() => {
-        expect(microphone).toHaveProperty("checked", true);
+        expect(microphone).toHaveProperty("checked", microphoneRequested);
         expect(microphone).toHaveProperty("disabled", false);
       });
     },

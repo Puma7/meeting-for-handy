@@ -723,6 +723,8 @@ pub(crate) const GERMAN_TASK_PLEDGES: &[&str] = &[
     "wir liefern",
     "ich schicke",
     "wir schicken",
+    "ich verschicke",
+    "wir verschicken",
     "ich sende",
     "wir senden",
     "ich aktualisiere",
@@ -736,7 +738,7 @@ pub(crate) const GERMAN_TASK_PLEDGES: &[&str] = &[
 
 /// Auxiliaries that can make "erstellt" a completed-state participle.
 const COMPLETED_CREATION_AUXILIARIES: &[&str] = &[
-    "wurde", "wurden", "ist", "sind", "war", "waren", "hat", "haben", "hatte", "hatten",
+    "wurde", "wurden", "ist", "sind", "war", "waren", "habe", "hat", "haben", "hatte", "hatten",
 ];
 
 /// Read completion within the current clause, including intervening modifiers.

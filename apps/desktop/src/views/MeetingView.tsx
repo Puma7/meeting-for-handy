@@ -50,6 +50,7 @@ type Props = {
   systemId: string;
   micId: string;
   micEnabled: boolean;
+  microphoneRequested?: boolean;
   models: HandyModel[];
   devices: AudioDevice[];
   copied: boolean;
@@ -123,6 +124,7 @@ export default function MeetingView({
   systemId,
   micId,
   micEnabled,
+  microphoneRequested = micEnabled,
   models,
   devices,
   copied,
@@ -202,7 +204,9 @@ export default function MeetingView({
         </div>
       )}
       {connected &&
-        micEnabled &&
+        !recording &&
+        microphoneRequested &&
+        devices.some((item) => item.source === "system") &&
         !devices.some((item) => item.source === "microphone") && (
           <div className="notice warning" role="status">
             {t.noMicrophoneHelp}
@@ -235,7 +239,7 @@ export default function MeetingView({
                       ? "Aufnahme pausiert"
                       : "Recording paused"
                     : t.recording
-                  : connected && modelId && systemId
+                  : recognitionReady && audioDevicesReady
                     ? t.ready
                     : t.choose}
           </span>
@@ -256,13 +260,7 @@ export default function MeetingView({
           ) : (
             <button
               className="primary"
-              disabled={
-                !connected ||
-                busy ||
-                !modelId ||
-                !systemId ||
-                (micEnabled && !micId)
-              }
+              disabled={!recognitionReady || !audioDevicesReady || busy}
               title={t.startTooltip}
               onClick={() => void start()}
             >

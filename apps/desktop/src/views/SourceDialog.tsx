@@ -1,6 +1,7 @@
 import { ChevronLeft, ChevronRight, X } from "lucide-react";
 import { useState } from "react";
 import { clock, trackName } from "../domain";
+import { LiteralQuote } from "./LiteralQuote";
 import type { TranscriptSource, Locale } from "../types";
 import type { MessageKey } from "../i18n";
 export type SourceSelection = {
@@ -79,14 +80,7 @@ export default function SourceDialog({
           </button>
         </div>
         <p className="source-text">
-          {quote
-            ? source.text.split(quote).map((part, position, pieces) => (
-                <span key={position}>
-                  {part}
-                  {position < pieces.length - 1 && <mark>{quote}</mark>}
-                </span>
-              ))
-            : source.text}
+          <LiteralQuote text={source.text} quote={quote} />
         </p>
         <details className="source-identifier">
           <summary>{locale === "de" ? "Quellenkennung" : "Source ID"}</summary>

@@ -545,6 +545,37 @@ fn owned_report<'a>(owner: &str, quote: &'a str) -> Option<&'a str> {
 fn completion_action_matches(action_text: &str, report: &str) -> bool {
     let title = action_text.to_lowercase();
     let report = report.trim().to_lowercase();
+    // A draft for the checklist is a different object from the checklist itself.
+    let statement = report.trim_end_matches(['.', '!']);
+    for (verb, prefix, suffix) in [
+        ("verschicken", "ich habe ", " verschickt"),
+        ("erstellen", "ich habe ", " erstellt"),
+        ("prepare", "i have prepared ", ""),
+        ("prepare", "i prepared ", ""),
+    ] {
+        if let Some(object) = statement
+            .strip_prefix(prefix)
+            .and_then(|s| s.strip_suffix(suffix))
+        {
+            let mut action: Vec<_> = title.split_whitespace().collect();
+            if action.first() == Some(&verb) {
+                action.remove(0);
+            } else if action.last() == Some(&verb) {
+                action.pop();
+            } else {
+                continue;
+            }
+            let mut spoken: Vec<_> = object.split_whitespace().collect();
+            for words in [&mut action, &mut spoken] {
+                if matches!(words.first(), Some(&("die" | "das" | "den" | "the"))) {
+                    words.remove(0);
+                }
+            }
+            if !action.is_empty() && action == spoken {
+                return true;
+            }
+        }
+    }
     let same_object = |actions: &[&str]| {
         let spoken = terms(&report);
         let object = terms(&title)

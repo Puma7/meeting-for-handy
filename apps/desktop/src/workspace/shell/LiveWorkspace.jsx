@@ -1,3 +1,4 @@
+import { LiteralQuote } from "../../views/LiteralQuote";
 import { useWorkspaceText, WorkspaceLanguage } from "./workspaceLocale.jsx";
 import { workspaceStorageKey } from "../workspaceStorage";
 import { useTranscriptOrder } from "../../useTranscriptOrder";
@@ -622,10 +623,11 @@ function WorkspaceContents({
     setPanelView: (id, patch) =>
       setPanelViews((v) => ({ ...v, [id]: { ...v[id], ...patch } })),
     openModal: setModal,
-    onSource: (id) =>
+    onSource: (id, quote) =>
       setModal((previous) => ({
         type: "source",
         id,
+        quote,
         runId: status?.view?.runId,
         back: previous,
       })),
@@ -704,7 +706,7 @@ function WorkspaceContents({
             <button
               type="button"
               className="quote text-button"
-              onClick={() => ctx.onSource(ev.sourceId)}
+              onClick={() => ctx.onSource(ev.sourceId, ev.quote)}
             >
               „{ev.quote}“ <span aria-hidden="true">↗</span>
             </button>
@@ -721,6 +723,7 @@ function WorkspaceContents({
                     setModal((back) => ({
                       type: "source",
                       id: ev.sourceId,
+                      quote: ev.quote,
                       runId: status?.view?.runId,
                       audio: true,
                       back,
@@ -1406,7 +1409,9 @@ function WorkspaceContents({
                 {formatTime(source.startMs / 1000)}–
                 {formatTime(source.endMs / 1000)} {t("· Abschnittszeiten")}
               </div>
-              <blockquote className="source-quote">{source.text}</blockquote>
+              <blockquote className="source-quote">
+                <LiteralQuote text={source.text} quote={modal.quote} />
+              </blockquote>
               <div className="source-actions">
                 {sourceParts.length === 1 && (
                   <button onClick={() => openTranscript(sourceParts[0].file)}>
