@@ -2,6 +2,8 @@
 
 This records the user's complete 28 October 2026 feature input and the public-source comparison. It is a development backlog, not a claim that these features already exist. Recording, exact source evidence and preservation take priority. Additional processing/views start disabled and remain independent of capture.
 
+The notepad and chat ideas, with ratings and proposed waves, are collected in the German [notepad and chat plan](NOTEPAD_CHAT_PLAN.md).
+
 | Requested workflow | Current baseline | Next acceptance boundary |
 | --- | --- | --- |
 | Import audio/video from disk or USB, including MP3/MP4/WAV | Native legacy session.json import exists; general media import does not | Use an existing decoder with a bounded local work copy, source hash and track selection; never modify the external original. Check malformed files, multiple tracks, storage exhaustion, cancellation and restart. |
