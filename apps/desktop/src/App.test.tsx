@@ -135,6 +135,55 @@ it("checks for updates from the sidebar without leaving the current page", async
   ).toBeTruthy();
 });
 
+it("opens on recording readiness and runs the optional sample check only on request", async () => {
+  const api = fakeApi();
+  api.checkMeetingSetup = vi.fn().mockResolvedValue({
+    audioRoundtrip: true,
+    transcriptionWorker: true,
+    textAnswer: null,
+  });
+  render(<App api={api} />);
+  await ready();
+  expect(screen.getByText("Handy gefunden")).toBeTruthy();
+  expect(
+    screen.queryByRole("button", { name: "Transkript kopieren" }),
+  ).toBeNull();
+  const options = screen.getByText("Weitere Optionen", { selector: "summary" });
+  expect(options.closest("details")?.open).toBe(false);
+  await userEvent.click(options);
+  const check = await screen.findByRole("button", {
+    name: "Mit Testdaten prüfen",
+  });
+  expect(api.checkMeetingSetup).not.toHaveBeenCalled();
+  await userEvent.click(check);
+  await waitFor(() => expect(api.checkMeetingSetup).toHaveBeenCalledOnce());
+});
+
+it.each([
+  [null, "Handy wird gesucht …"],
+  [
+    {
+      executable: "previously-selected-handy",
+      version: null,
+      models: [],
+      error: "The selected program could not be opened.",
+    },
+    "Handy prüfen",
+  ],
+] as const)(
+  "reports the actual discovery state before recording (%s)",
+  async (handy, expected) => {
+    const api = fakeApi();
+    vi.mocked(api.getAppState).mockResolvedValue({
+      ...state(),
+      handy: handy ? { ...handy, models: [] } : null,
+    });
+    render(<App api={api} />);
+    expect(await screen.findByText(expected)).toBeTruthy();
+    expect(screen.queryByText("Handy gefunden")).toBeNull();
+  },
+);
+
 it.each([false, true])(
   "opens and focuses the exact update panel, including already-open Settings (%s)",
   async (alreadyOpen) => {
@@ -2446,11 +2495,17 @@ describe("workspace navigation (synthetic IPC)", () => {
     )!;
     if (setup.open) await userEvent.click(setup.querySelector("summary")!);
     expect(setup.open).toBe(false);
+    const options = screen
+      .getByText("Weitere Optionen", { selector: "summary" })
+      .closest("details")!;
+    expect(options.open).toBe(false);
+    await userEvent.click(options.querySelector("summary")!);
     const calendar = await screen.findByText(
       "Meeting aus Kalenderdatei vorbereiten",
       { selector: "summary" },
     );
     expect(calendar.closest(".setup-details")).toBeNull();
+    expect(calendar.closest(".meeting-options")).toBe(options);
     await userEvent.click(calendar);
     expect(screen.getByLabelText("Kalenderdatei (.ics)")).toBeTruthy();
     expect(setup.open).toBe(false);

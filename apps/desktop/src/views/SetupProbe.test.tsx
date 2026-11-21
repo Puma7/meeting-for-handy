@@ -12,10 +12,10 @@ it("reports the three synthetic setup stages only after explicit start", async (
   render(<SetupProbe run={run} disabled={false} locale="de" />);
   expect(run).not.toHaveBeenCalled();
   expect(
-    screen.getByText(/Die Erkennung von Wörtern.*separate Prüfungen/),
+    screen.getByText(/Mikrofon und Worterkennung.*kurzen Aufnahme/),
   ).toBeTruthy();
   await userEvent.click(
-    screen.getByRole("button", { name: "Synthetische Funktionsprobe starten" }),
+    screen.getByRole("button", { name: "Mit Testdaten prüfen" }),
   );
   const status = screen.getByRole("status");
   expect(run).toHaveBeenCalledTimes(1);
@@ -37,7 +37,7 @@ it("requests cancellation and waits for native cleanup before allowing a new che
   const cancel = vi.fn().mockResolvedValue(true);
   render(<SetupProbe run={run} cancel={cancel} disabled={false} locale="en" />);
   const start = screen.getByRole("button", {
-    name: "Run synthetic setup check",
+    name: "Check with sample data",
   });
   await userEvent.click(start);
   await userEvent.click(
@@ -64,7 +64,7 @@ it("cancels a still-running check when its view closes", async () => {
     <SetupProbe run={run} cancel={cancel} disabled={false} locale="en" />,
   );
   await userEvent.click(
-    screen.getByRole("button", { name: "Run synthetic setup check" }),
+    screen.getByRole("button", { name: "Check with sample data" }),
   );
   unmount();
   expect(cancel).toHaveBeenCalledTimes(1);

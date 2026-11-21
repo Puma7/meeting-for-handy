@@ -2467,7 +2467,13 @@ export default function App({ api = desktopApi }: { api?: DesktopApi }) {
             onResume={openMeetingErasure}
           />
         )}
-        <header className="page-header">
+        <header
+          className={
+            page === "meeting" || page === "detail"
+              ? "page-header meeting-page-heading"
+              : "page-header"
+          }
+        >
           <div>
             <h1 tabIndex={-1}>
               {page === "detail" ? t.meetingDetail : t[page]}
@@ -2482,6 +2488,52 @@ export default function App({ api = desktopApi }: { api?: DesktopApi }) {
               </p>
             )}
           </div>
+          {(page === "meeting"
+            ? liveMeeting
+            : page === "detail"
+              ? meeting
+              : null) && (
+            <MeetingLabels
+              api={api}
+              meeting={(page === "meeting" ? liveMeeting : meeting)!}
+              locale={locale}
+              onChanged={(meta) => {
+                const target = (page === "meeting" ? liveMeeting : meeting)!;
+                if (!meta.pinned)
+                  invalidateVipQuestion((id) => id === target.id);
+                setMeeting((old) =>
+                  old?.id === target.id
+                    ? {
+                        ...old,
+                        title: meta.title ?? old.title,
+                        userMetadata: meta,
+                      }
+                    : old,
+                );
+                setLiveMeeting((old) =>
+                  old?.id === target.id
+                    ? {
+                        ...old,
+                        title: meta.title ?? old.title,
+                        userMetadata: meta,
+                      }
+                    : old,
+                );
+                setHistory((items) =>
+                  items.map((item) =>
+                    item.id === target.id
+                      ? {
+                          ...item,
+                          title: meta.title ?? item.title,
+                          userMetadata: meta,
+                        }
+                      : item,
+                  ),
+                );
+                void refreshHistory().catch((e) => setError(errorMessage(e)));
+              }}
+            />
+          )}
         </header>
         <p
           role="status"
@@ -2494,126 +2546,6 @@ export default function App({ api = desktopApi }: { api?: DesktopApi }) {
               : "Opening meeting…"
             : ""}
         </p>
-        {(page === "meeting"
-          ? liveMeeting
-          : page === "detail"
-            ? meeting
-            : null) && (
-          <MeetingLabels
-            api={api}
-            meeting={(page === "meeting" ? liveMeeting : meeting)!}
-            locale={locale}
-            onChanged={(meta) => {
-              const target = (page === "meeting" ? liveMeeting : meeting)!;
-              if (!meta.pinned) invalidateVipQuestion((id) => id === target.id);
-              setMeeting((old) =>
-                old?.id === target.id
-                  ? {
-                      ...old,
-                      title: meta.title ?? old.title,
-                      userMetadata: meta,
-                    }
-                  : old,
-              );
-              setLiveMeeting((old) =>
-                old?.id === target.id
-                  ? {
-                      ...old,
-                      title: meta.title ?? old.title,
-                      userMetadata: meta,
-                    }
-                  : old,
-              );
-              setHistory((items) =>
-                items.map((item) =>
-                  item.id === target.id
-                    ? {
-                        ...item,
-                        title: meta.title ?? item.title,
-                        userMetadata: meta,
-                      }
-                    : item,
-                ),
-              );
-              void refreshHistory().catch((e) => setError(errorMessage(e)));
-            }}
-          />
-        )}
-        {((page === "detail" && meeting) ||
-          (page === "meeting" && liveMeeting)) && (
-          <details
-            className="speaker-tools"
-            open={speakerOptionsOpen}
-            onToggle={(event) => {
-              if (event.target === event.currentTarget)
-                setSpeakerOptionsOpen(event.currentTarget.open);
-            }}
-          >
-            <summary>
-              {locale === "de"
-                ? "Sprecher zuordnen · optional"
-                : "Speaker tools · optional"}
-            </summary>
-            {page === "detail" && meeting && (
-              <SpeakerLabels
-                embedded
-                key={"speaker-labels-" + meeting.id}
-                api={api}
-                meeting={meeting}
-                locale={locale}
-                proposeDisabled={notesBusy}
-                onLabels={onSpeakerLabels}
-                onPropose={() => {
-                  if (notesBusy) return;
-                  void action(async () => {
-                    // Name suggestions run locally only; local settings stay as they are.
-                    if (mode === "cloud") {
-                      setMode("local");
-                      setApiKey("");
-                      setSavedKeyScope(null);
-                    }
-                    await openNotesFor(meeting.id);
-                    if (notesSelectionRef.current === meeting.id) {
-                      setTemplateId(SPEAKER_NAME_TEMPLATE.id);
-                      setResultId("");
-                    }
-                  });
-                }}
-              />
-            )}
-            {speakerOptionsOpen &&
-              (page === "detail"
-                ? meeting
-                : page === "meeting"
-                  ? liveMeeting
-                  : null) && (
-                <SpeakerExperiments
-                  embedded
-                  checkedModels={speakerChecks}
-                  selectedModelId={speakerModelId}
-                  onSelectedModelChange={setSpeakerModelId}
-                  checkingBlocked={
-                    speakerChecking || notesBusy || busy || refreshingHandy
-                  }
-                  onModelChecked={onSpeakerModelChecked}
-                  onCheckingChange={onSpeakerCheckingChange}
-                  key={
-                    "speaker-experiments-" +
-                    (page === "detail" ? meeting : liveMeeting)!.id
-                  }
-                  api={api}
-                  locale={locale}
-                  meeting={page === "detail" ? meeting : liveMeeting}
-                  models={app?.handy?.models ?? []}
-                  recording={Boolean(
-                    app?.recording &&
-                      (page === "detail" ? meeting : liveMeeting)?.id ===
-                        liveMeeting?.id,
-                  )}
-                />
-              )}
-          </details>
-        )}
         {error && (
           <div role="alert" className="notice error">
             <span>{error}</span>
@@ -2699,6 +2631,7 @@ export default function App({ api = desktopApi }: { api?: DesktopApi }) {
         />
         {page === "meeting" && (
           <MeetingView
+            refreshingHandy={refreshingHandy}
             calendarPreparation={
               <CalendarPreparation
                 locale={locale}
@@ -2870,6 +2803,81 @@ export default function App({ api = desktopApi }: { api?: DesktopApi }) {
           />
         )}
         {page !== "meeting" && livePreferences.auto && livePanel(true)}
+        {((page === "detail" && meeting) ||
+          (page === "meeting" && liveMeeting)) && (
+          <details
+            className="speaker-tools"
+            open={speakerOptionsOpen}
+            onToggle={(event) => {
+              if (event.target === event.currentTarget)
+                setSpeakerOptionsOpen(event.currentTarget.open);
+            }}
+          >
+            <summary>
+              {locale === "de"
+                ? "Sprecher zuordnen · optional"
+                : "Speaker tools · optional"}
+            </summary>
+            {page === "detail" && meeting && (
+              <SpeakerLabels
+                embedded
+                key={"speaker-labels-" + meeting.id}
+                api={api}
+                meeting={meeting}
+                locale={locale}
+                proposeDisabled={notesBusy}
+                onLabels={onSpeakerLabels}
+                onPropose={() => {
+                  if (notesBusy) return;
+                  void action(async () => {
+                    // Name suggestions run locally only; local settings stay as they are.
+                    if (mode === "cloud") {
+                      setMode("local");
+                      setApiKey("");
+                      setSavedKeyScope(null);
+                    }
+                    await openNotesFor(meeting.id);
+                    if (notesSelectionRef.current === meeting.id) {
+                      setTemplateId(SPEAKER_NAME_TEMPLATE.id);
+                      setResultId("");
+                    }
+                  });
+                }}
+              />
+            )}
+            {speakerOptionsOpen &&
+              (page === "detail"
+                ? meeting
+                : page === "meeting"
+                  ? liveMeeting
+                  : null) && (
+                <SpeakerExperiments
+                  embedded
+                  checkedModels={speakerChecks}
+                  selectedModelId={speakerModelId}
+                  onSelectedModelChange={setSpeakerModelId}
+                  checkingBlocked={
+                    speakerChecking || notesBusy || busy || refreshingHandy
+                  }
+                  onModelChecked={onSpeakerModelChecked}
+                  onCheckingChange={onSpeakerCheckingChange}
+                  key={
+                    "speaker-experiments-" +
+                    (page === "detail" ? meeting : liveMeeting)!.id
+                  }
+                  api={api}
+                  locale={locale}
+                  meeting={page === "detail" ? meeting : liveMeeting}
+                  models={app?.handy?.models ?? []}
+                  recording={Boolean(
+                    app?.recording &&
+                      (page === "detail" ? meeting : liveMeeting)?.id ===
+                        liveMeeting?.id,
+                  )}
+                />
+              )}
+          </details>
+        )}
         {page === "detail" && meeting && (
           <MeetingDetail
             meeting={meeting}
